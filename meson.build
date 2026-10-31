@@ -115,10 +115,16 @@ configure_file(
 )
 
 # Keeps old autostart entries and scripts working after the rename from MyGestures
-configure_file(
+# It's generated under another name: in a build folder that once built the old binary,
+# a file called mygestures would be deleted as a stale build output.
+mygestures_wrapper = configure_file(
   input: 'build-aux/mygestures-compat.sh.in',
-  output: 'mygestures',
-  configuration: conf_data,
+  output: 'mygestures-compat.sh',
+  configuration: conf_data
+)
+install_data(
+  mygestures_wrapper,
+  rename: 'mygestures',
   install_dir: bindir,
   install_mode: 'rwxr-xr-x'
 )
