@@ -1,0 +1,3 @@
+#!/bin/sh
+# MyGestures was renamed to Gestos. This keeps old autostart entries and scripts working.
+exec @bindir@/gestosd "$@"

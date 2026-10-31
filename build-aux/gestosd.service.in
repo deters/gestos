@@ -1,10 +1,10 @@
 [Unit]
-Description=MyGestures Daemon
+Description=Gestos Daemon
 After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=@bindir@/mygestures
+ExecStart=@bindir@/gestosd
 Restart=on-failure
 
 [Install]

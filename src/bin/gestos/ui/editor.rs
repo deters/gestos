@@ -1,18 +1,18 @@
 use gtk::prelude::*;
 use gtk::{gio, glib};
-use mygestures::protractor::match_gesture;
+use gestos::protractor::match_gesture;
 use gtk4 as gtk;
 use std::rc::Rc;
 use std::cell::RefCell;
-use mygestures::config::{ActionType, Gesture};
-use mygestures::config::generate_unique_id;
+use gestos::config::{ActionType, Gesture};
+use gestos::config::generate_unique_id;
 use crate::state::{AppState, EditorActionOption, CATEGORY_NAMES};
 use crate::actions::{fetch_gnome_action_options, fetch_kde_action_options, get_static_action_options, action_matches};
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
 use crate::ui::components::{draw_gesture_path, get_action_category_icon};
 use crate::daemon::reload_daemon;
 use crate::ui::main_window::refresh_gesture_list;
-use mygestures::protractor::Point2D;
+use gestos::protractor::Point2D;
 
 pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> String {
     match &opt.action_type {

@@ -3,8 +3,8 @@ use gtk::{cairo, gdk, glib};
 use gtk4 as gtk;
 use std::rc::Rc;
 use std::cell::RefCell;
-use mygestures::config::{ActionType, Gesture};
-use mygestures::protractor::Point2D;
+use gestos::config::{ActionType, Gesture};
+use gestos::protractor::Point2D;
 use crate::state::AppState;
 use crate::ui::main_window::refresh_gesture_list;
 
@@ -47,7 +47,7 @@ pub fn show_error_dialog<W: IsA<gtk::Window>>(parent: &W, message: &str) {
     text_box.set_hexpand(true);
 
     let title_label = gtk::Label::new(None);
-    title_label.set_markup("<b>Failed to start MyGestures daemon</b>");
+    title_label.set_markup("<b>Failed to start Gestos daemon</b>");
     title_label.set_halign(gtk::Align::Start);
     text_box.append(&title_label);
 

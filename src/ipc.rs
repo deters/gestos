@@ -25,7 +25,7 @@ fn shm_name(device_name: &str) -> String {
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_else(|_| device_name.to_string());
     format!(
-        "/mygestures_uid_{}_dev_{}",
+        "/gestos_uid_{}_dev_{}",
         unsafe { libc::getuid() },
         canonical.replace('/', "%")
     )
@@ -77,7 +77,7 @@ impl DaemonIpc {
 
         if !try_lock(&file)? {
             if let Some(pid) = lock_holder(&file)? {
-                println!("Asking mygestures running on pid {} to exit..", pid);
+                println!("Asking gestosd running on pid {} to exit..", pid);
                 unsafe {
                     libc::kill(pid, libc::SIGTERM);
                 }
@@ -88,7 +88,7 @@ impl DaemonIpc {
                 if Instant::now() >= deadline {
                     return Err(Error::new(
                         ErrorKind::TimedOut,
-                        "the running mygestures instance did not exit",
+                        "the running gestosd instance did not exit",
                     ));
                 }
                 std::thread::sleep(REPLACE_POLL_INTERVAL);
@@ -106,7 +106,7 @@ mod tests {
     use std::os::unix::process::ExitStatusExt;
     use std::process::{Command, Stdio};
 
-    const HOLDER_DEVICE_ENV: &str = "MYGESTURES_TEST_LOCK_DEVICE";
+    const HOLDER_DEVICE_ENV: &str = "GESTOS_TEST_LOCK_DEVICE";
 
     // Runs as the competing instance when re-executed by the test below.
     #[test]
@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn acquire_replaces_a_live_holder_and_reclaims_a_dead_ones_lock() {
-        let device = format!("/nonexistent/mygestures-test-{}", std::process::id());
+        let device = format!("/nonexistent/gestosd-test-{}", std::process::id());
 
         let mut live = spawn_holder(&device);
         let ipc = DaemonIpc::acquire(&device).unwrap();

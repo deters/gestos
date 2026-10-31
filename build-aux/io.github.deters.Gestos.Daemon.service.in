@@ -1,0 +1,3 @@
+[D-Bus Service]
+Name=io.github.deters.Gestos.Daemon
+Exec=@bindir@/gestosd

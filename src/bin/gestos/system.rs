@@ -1,12 +1,7 @@
 use std::process::Command;
 
 pub fn get_autostart_file_path() -> Option<std::path::PathBuf> {
-    std::env::var("HOME").ok().map(|home| {
-        std::path::PathBuf::from(home)
-            .join(".config")
-            .join("autostart")
-            .join("mygestures.desktop")
-    })
+    gestos::config::autostart_dir().map(|dir| dir.join("gestosd.desktop"))
 }
 
 pub fn get_overlay_autostart_file_path() -> Option<std::path::PathBuf> {
@@ -24,14 +19,7 @@ pub fn set_autostart_enabled(enabled: bool) {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            let content = "[Desktop Entry]\n\
-                           Type=Application\n\
-                           Name=MyGestures Daemon\n\
-                           Comment=Gesture recognition daemon\n\
-                           Exec=mygestures\n\
-                           Icon=mygestures\n\
-                           Terminal=false\n\
-                           X-GNOME-Autostart-enabled=true\n";
+            let content = gestos::config::daemon_autostart_entry();
             let _ = std::fs::write(&path, content);
         } else if path.exists() {
             let _ = std::fs::remove_file(&path);
@@ -75,7 +63,7 @@ pub fn get_osd_enabled_file_path() -> std::path::PathBuf {
     } else {
         std::path::PathBuf::from(".")
     };
-    base.join("mygestures").join("osd_enabled")
+    base.join("gestos").join("osd_enabled")
 }
 
 pub fn is_osd_enabled() -> bool {

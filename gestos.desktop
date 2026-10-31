@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Gestos
-Comment=Configure MyGestures Mouse Gestures
+Comment=Configure Gestos Mouse Gestures
 Exec=gestos
 Icon=gestos
 Terminal=false

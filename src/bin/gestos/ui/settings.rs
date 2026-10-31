@@ -1,6 +1,6 @@
 use gtk::prelude::*;
 use gtk::{gio, glib};
-use mygestures::config::Configuration;
+use gestos::config::Configuration;
 use crate::ui::main_window::refresh_gesture_list;
 use crate::ui::components::{show_error_dialog, show_confirm_dialog};
 use gtk4 as gtk;
@@ -231,7 +231,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
             let file = gio::File::for_path(home);
             let _ = chooser.set_current_folder(Some(&file));
         }
-        chooser.set_current_name("mygestures.yaml");
+        chooser.set_current_name("gestos.yaml");
         
         let filter = gtk::FileFilter::new();
         filter.set_name(Some("YAML Files"));
@@ -244,7 +244,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
             if response == gtk::ResponseType::Accept {
                 if let Some(file) = c.file() {
                     if let Some(path) = file.path() {
-                        let config_path = mygestures::config::get_default_config_path();
+                        let config_path = gestos::config::get_default_config_path();
                         if config_path.exists() {
                             if let Err(e) = std::fs::copy(&config_path, &path) {
                                 show_error_dialog(&parent_err_clone, &format!("Failed to export config: {}", e));
@@ -336,7 +336,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
                                 "Import",
                                 false,
                                 move || {
-                                    let default_path = mygestures::config::get_default_config_path();
+                                    let default_path = gestos::config::get_default_config_path();
                                     if let Err(e) = std::fs::copy(&path, &default_path) {
                                         show_error_dialog(&parent_confirm, &format!("Failed to copy config file: {}", e));
                                     } else {
@@ -351,7 +351,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
                                 }
                             );
                         } else {
-                            show_error_dialog(&parent_err_clone, "Invalid configuration file. Please select a valid YAML mygestures configuration.");
+                            show_error_dialog(&parent_err_clone, "Invalid configuration file. Please select a valid YAML gestos configuration.");
                         }
                     }
                 }
@@ -405,11 +405,11 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
             "Reset",
             true,
             move || {
-                let default_path = mygestures::config::get_default_config_path();
+                let default_path = gestos::config::get_default_config_path();
                 if default_path.exists() {
                     let _ = std::fs::remove_file(&default_path);
                 }
-                if let Err(e) = mygestures::config::initialize_user_config_if_missing() {
+                if let Err(e) = gestos::config::initialize_user_config_if_missing() {
                     show_error_dialog(&parent_confirm, &format!("Failed to reset config: {}", e));
                     return;
                 }

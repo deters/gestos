@@ -4,7 +4,7 @@ use crate::ui::components::{get_action_human_readable, show_error_dialog};
 use gtk4 as gtk;
 use std::rc::Rc;
 use std::cell::RefCell;
-use mygestures::config::{Configuration, Gesture};
+use gestos::config::{Configuration, Gesture};
 use crate::state::AppState;
 use crate::ui::editor::open_gesture_editor;
 use crate::ui::settings::open_settings_window;
@@ -195,7 +195,7 @@ pub fn build_ui(app: &gtk::Application) {
     list_container.append(&empty_state_box);
     scrolled.set_child(Some(&list_container));
 
-    if let Err(e) = mygestures::config::initialize_user_config_if_missing() {
+    if let Err(e) = gestos::config::initialize_user_config_if_missing() {
         eprintln!("Warning: Failed to initialize configuration: {}", e);
     }
     let config = Configuration::load_from_defaults();

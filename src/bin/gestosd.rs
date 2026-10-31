@@ -1,6 +1,6 @@
-use mygestures::config::{ActionType, Configuration};
-use mygestures::ipc::DaemonIpc;
-use mygestures::wayland::WaylandContext;
+use gestos::config::{ActionType, Configuration};
+use gestos::ipc::DaemonIpc;
+use gestos::wayland::WaylandContext;
 use std::fs;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
@@ -26,8 +26,9 @@ static RELOAD_WAKE: OnceLock<UnixStream> = OnceLock::new();
 // Exit status for errors that restarting can't fix, such as a device without the trigger button.
 const EXIT_PERMANENT_ERROR: i32 = 2;
 
-const DBUS_PATH: &str = "/org/mygestures/Daemon";
-const DBUS_INTERFACE: &str = "org.mygestures.Daemon";
+const DBUS_PATH: &str = "/io/github/deters/Gestos/Daemon";
+const LEGACY_DBUS_NAME: &str = "org.mygestures.Daemon";
+const LEGACY_DBUS_PATH: &str = "/org/mygestures/Daemon";
 const LEGACY_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const GRAB_ATTEMPTS: u32 = 5;
 const GRAB_RETRY_INTERVAL: Duration = Duration::from_millis(100);
@@ -58,7 +59,7 @@ fn kill_children() {
 
 struct DaemonDbus;
 
-#[interface(name = "org.mygestures.Daemon")]
+#[interface(name = "io.github.deters.Gestos.Daemon")]
 impl DaemonDbus {
     fn reload(&self) -> Result<(), zbus::fdo::Error> {
         if !config_is_valid() {
@@ -78,7 +79,6 @@ impl DaemonDbus {
         Ok(())
     }
 
-    // Older releases lack this property, which is how a new instance recognizes them.
     #[zbus(property)]
     fn version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
@@ -143,7 +143,7 @@ fn check_permissions(device: &str) -> bool {
 
     if !uinput_ok || !dev_ok {
         eprintln!("\n=========================================================================");
-        eprintln!("ERROR: Missing permissions or kernel module to run mygestures.");
+        eprintln!("ERROR: Missing permissions or kernel module to run gestosd.");
         if !dev_ok {
             eprintln!(" - Cannot read mouse input device '{}'.", device);
         }
@@ -167,22 +167,22 @@ fn check_permissions(device: &str) -> bool {
         }
 
         eprintln!("\nTo resolve permissions, choose one of the following setups:\n");
-        eprintln!("OPTION A: SECURE SETUP (Recommended - Only mygestures has access)");
+        eprintln!("OPTION A: SECURE SETUP (Recommended - Only gestosd has access)");
         eprintln!(
-            "  1. Install the mygestures udev rules (restricts access to the 'input' group):"
+            "  1. Install the gestosd udev rules (restricts access to the 'input' group):"
         );
-        eprintln!("     sudo cp 99-mygestures.rules /etc/udev/rules.d/");
+        eprintln!("     sudo cp 99-gestos.rules /etc/udev/rules.d/");
         eprintln!("     sudo udevadm control --reload-rules && sudo udevadm trigger");
-        eprintln!("  2. Configure the mygestures binary to run as Set-Group-ID (SGID) to 'input':");
-        eprintln!("     sudo chown root:input /usr/local/bin/mygestures");
-        eprintln!("     sudo chmod 2755 /usr/local/bin/mygestures");
+        eprintln!("  2. Configure the gestosd binary to run as Set-Group-ID (SGID) to 'input':");
+        eprintln!("     sudo chown root:input /usr/local/bin/gestosd");
+        eprintln!("     sudo chmod 2755 /usr/local/bin/gestosd");
         eprintln!("     (Note: This allows only this binary to capture inputs/inject actions)");
 
         eprintln!("\nOPTION B: STANDARD SETUP (Allows all user applications to capture inputs)");
         eprintln!("  1. Add your user to the 'input' group:");
         eprintln!("     sudo usermod -aG input $USER");
         eprintln!("  2. Install the udev rules:");
-        eprintln!("     sudo cp 99-mygestures.rules /etc/udev/rules.d/");
+        eprintln!("     sudo cp 99-gestos.rules /etc/udev/rules.d/");
         eprintln!("     sudo udevadm control --reload-rules && sudo udevadm trigger");
         eprintln!("=========================================================================\n");
         return false;
@@ -207,8 +207,8 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
         let Ok(conn) = zbus::blocking::Connection::session() else {
             return;
         };
-        let path = "/org/mygestures/Daemon";
-        let iface = "org.mygestures.Daemon";
+        let path = "/io/github/deters/Gestos/Daemon";
+        let iface = "io.github.deters.Gestos.Daemon";
         let dest = None::<zbus::names::BusName>;
         for signal in receiver {
             let _ = match signal {
@@ -236,7 +236,7 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
 fn spawn_gesture_actions(
     actions: Vec<ActionType>,
     wayland_ctx: WaylandContext,
-    uinput: Option<mygestures::uinput::UinputDevice>,
+    uinput: Option<gestos::uinput::UinputDevice>,
 ) {
     std::thread::spawn(move || {
         for action in &actions {
@@ -271,7 +271,7 @@ fn grab_device(dev: &mut evdev::Device) -> std::io::Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn gesture_templates(config: &Configuration) -> Vec<(String, Vec<mygestures::protractor::Point2D>)> {
+fn gesture_templates(config: &Configuration) -> Vec<(String, Vec<gestos::protractor::Point2D>)> {
     config
         .gestures
         .iter()
@@ -282,14 +282,14 @@ fn gesture_templates(config: &Configuration) -> Vec<(String, Vec<mygestures::pro
 
 #[cfg(target_os = "linux")]
 fn dispatch_gesture(
-    points: &[mygestures::protractor::Point2D],
+    points: &[gestos::protractor::Point2D],
     config: &Configuration,
-    templates: &[(String, Vec<mygestures::protractor::Point2D>)],
+    templates: &[(String, Vec<gestos::protractor::Point2D>)],
     signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
     wayland_ctx: &WaylandContext,
-    uinput: &Option<mygestures::uinput::UinputDevice>,
+    uinput: &Option<gestos::uinput::UinputDevice>,
 ) {
-    let Some(matched_name) = mygestures::protractor::match_gesture(points, templates) else {
+    let Some(matched_name) = gestos::protractor::match_gesture(points, templates) else {
         println!("Gesture failed: did not match any known template.");
         return;
     };
@@ -323,19 +323,19 @@ fn run_grabber(
     device_path: &str,
     trigger_button: i32,
     sensitivity: i32,
-    mut config: mygestures::config::Configuration,
-    wayland_ctx: mygestures::wayland::WaylandContext,
+    mut config: gestos::config::Configuration,
+    wayland_ctx: gestos::wayland::WaylandContext,
 ) -> Result<(), std::io::Error> {
     use evdev::{Device, EventType, KeyCode};
-    use mygestures::gesture::GestureRecognizer;
-    use mygestures::uinput::UinputDevice;
+    use gestos::gesture::GestureRecognizer;
+    use gestos::uinput::UinputDevice;
 
     let signals = spawn_signal_thread();
 
     println!("Attempting to open device: {}", device_path);
     let mut dev = Device::open(device_path)?;
 
-    let target_button = mygestures::uinput::trigger_button_code(trigger_button)
+    let target_button = gestos::uinput::trigger_button_code(trigger_button)
         .map(KeyCode)
         .ok_or_else(|| {
             std::io::Error::new(
@@ -387,7 +387,7 @@ fn run_grabber(
     let uinput = match UinputDevice::init_from_device(&dev) {
         Ok(u) => Some(u),
         Err(e) => {
-            eprintln!("mygestures: Failed to initialize uinput: {}", e);
+            eprintln!("gestosd: Failed to initialize uinput: {}", e);
             None
         }
     };
@@ -396,11 +396,11 @@ fn run_grabber(
     let mut grabbed = false;
     if trigger_button == 3 {
         if uinput.is_none() {
-            eprintln!("mygestures: Not grabbing the device because uinput is unavailable.");
+            eprintln!("gestosd: Not grabbing the device because uinput is unavailable.");
         } else if let Err(e) = grab_device(&mut dev) {
-            eprintln!("mygestures: Failed to grab device exclusively: {}", e);
+            eprintln!("gestosd: Failed to grab device exclusively: {}", e);
         } else {
-            println!("mygestures: Grabbed device exclusively.");
+            println!("gestosd: Grabbed device exclusively.");
             grabbed = true;
         }
     }
@@ -412,7 +412,7 @@ fn run_grabber(
         nix::unistd::setresgid(rgid, rgid, rgid)
             .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
         println!(
-            "mygestures: Successfully dropped elevated GID from {} to {}",
+            "gestosd: Successfully dropped elevated GID from {} to {}",
             egid, rgid
         );
     }
@@ -434,14 +434,14 @@ fn run_grabber(
     // Event loop
     loop {
         if RELOAD_REQUESTED.swap(false, Ordering::Relaxed) {
-            println!("mygestures: Reloading configuration dynamically...");
+            println!("gestosd: Reloading configuration dynamically...");
             if let Some(new_config) = Configuration::load_from_file(&config.user_config_path) {
                 config = new_config;
                 templates = gesture_templates(&config);
-                println!("mygestures: Configuration reloaded successfully.");
+                println!("gestosd: Configuration reloaded successfully.");
             } else {
                 eprintln!(
-                    "mygestures: Failed to reload configuration from {}",
+                    "gestosd: Failed to reload configuration from {}",
                     config.user_config_path.display()
                 );
             }
@@ -551,8 +551,8 @@ fn run_grabber(
     _device_path: &str,
     _trigger_button: i32,
     _sensitivity: i32,
-    _config: mygestures::config::Configuration,
-    _wayland_ctx: mygestures::wayland::WaylandContext,
+    _config: gestos::config::Configuration,
+    _wayland_ctx: gestos::wayland::WaylandContext,
 ) -> Result<(), std::io::Error> {
     println!("evdev grabbing is only supported on Linux. Mock daemon sleeping...");
     loop {
@@ -591,60 +591,39 @@ fn name_has_owner(conn: &zbus::blocking::Connection, name: &str) -> zbus::Result
     Ok(bus.name_has_owner(zbus::names::BusName::try_from(name.to_string())?)?)
 }
 
-fn is_missing_property_error(err: &zbus::Error) -> bool {
-    const MISSING: [&str; 2] = [
-        "org.freedesktop.DBus.Error.UnknownProperty",
-        "org.freedesktop.DBus.Error.InvalidArgs",
-    ];
-    match err {
-        zbus::Error::MethodError(name, _, _) => MISSING.contains(&name.as_str()),
-        zbus::Error::FDO(fdo_err) => matches!(
-            **fdo_err,
-            zbus::fdo::Error::UnknownProperty(_) | zbus::fdo::Error::InvalidArgs(_)
-        ),
-        _ => false,
-    }
-}
-
-/// Asks `name`'s owner to stop if it is a release without the instance lock, returning whether
-/// it did. Such a release can't be replaced through the lock, and it would keep its device
-/// grabbed. Any failure other than the missing property leaves the owner running.
+/// Asks a MyGestures daemon owning `name` to stop, returning whether there was one. It knows
+/// nothing of this release's lock and would keep its device grabbed.
 fn request_legacy_stop(conn: &zbus::blocking::Connection, name: &str) -> zbus::Result<bool> {
-    // The name is D-Bus activatable, so calling it without an owner would start a daemon.
+    // The old name may still be D-Bus activatable, so calling it without an owner could start
+    // the old daemon.
     if !name_has_owner(conn, name)? {
         return Ok(false);
     }
-    match conn.call_method(
-        Some(name),
-        DBUS_PATH,
-        Some("org.freedesktop.DBus.Properties"),
-        "Get",
-        &(DBUS_INTERFACE, "Version"),
-    ) {
-        Ok(_) => return Ok(false),
-        Err(e) if !is_missing_property_error(&e) => return Err(e),
-        Err(_) => {}
-    }
     // The owner exits without replying, so an error here is the expected result.
-    let _ = conn.call_method(Some(name), DBUS_PATH, Some(DBUS_INTERFACE), "Stop", &());
+    let _ = conn.call_method(
+        Some(name),
+        LEGACY_DBUS_PATH,
+        Some(LEGACY_DBUS_NAME),
+        "Stop",
+        &(),
+    );
     Ok(true)
 }
 
-/// Stops an older release left running in this session, typically across a package upgrade.
+/// Stops a MyGestures daemon left running in this session, typically across a package upgrade.
 /// Bounded by a timeout, so a hung bus or daemon can't prevent startup.
 fn stop_legacy_instance() {
-    if std::env::var("MYGESTURES_CHILD").is_ok() {
+    if std::env::var("GESTOS_CHILD").is_ok() {
         return;
     }
     let (done, finished) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let stopped = (|| -> zbus::Result<bool> {
             let conn = zbus::blocking::Connection::session()?;
-            let name = mygestures::config::get_dbus_name();
-            if !request_legacy_stop(&conn, &name)? {
+            if !request_legacy_stop(&conn, LEGACY_DBUS_NAME)? {
                 return Ok(false);
             }
-            while name_has_owner(&conn, &name)? {
+            while name_has_owner(&conn, LEGACY_DBUS_NAME)? {
                 std::thread::sleep(Duration::from_millis(20));
             }
             Ok(true)
@@ -652,15 +631,15 @@ fn stop_legacy_instance() {
         let _ = done.send(stopped);
     });
     match finished.recv_timeout(LEGACY_STOP_TIMEOUT) {
-        Ok(Ok(true)) => println!("mygestures: Stopped an older running version."),
+        Ok(Ok(true)) => println!("gestosd: Stopped a running MyGestures daemon."),
         Ok(Ok(false)) => {}
-        Ok(Err(e)) => eprintln!("mygestures: Could not check for an older version: {}", e),
-        Err(_) => eprintln!("mygestures: Timed out stopping an older running version."),
+        Ok(Err(e)) => eprintln!("gestosd: Could not check for a MyGestures daemon: {}", e),
+        Err(_) => eprintln!("gestosd: Timed out stopping a running MyGestures daemon."),
     }
 }
 
 fn start_dbus_service() {
-    if std::env::var("MYGESTURES_CHILD").is_ok() {
+    if std::env::var("GESTOS_CHILD").is_ok() {
         return;
     }
     std::thread::spawn(|| {
@@ -672,7 +651,7 @@ fn start_dbus_service() {
                 std::thread::sleep(DBUS_NAME_RETRY_INTERVAL);
             }
             let built = zbus::blocking::connection::Builder::session()
-                .and_then(|b| b.name(mygestures::config::get_dbus_name()))
+                .and_then(|b| b.name(gestos::config::get_dbus_name()))
                 .and_then(|b| b.serve_at(DBUS_PATH, DaemonDbus))
                 .and_then(|b| b.build());
             let done = built.is_ok();
@@ -683,12 +662,12 @@ fn start_dbus_service() {
         }
         match result {
             Some(Ok(_conn)) => {
-                println!("mygestures: Registered D-Bus service.");
+                println!("gestosd: Registered D-Bus service.");
                 loop {
                     std::thread::sleep(Duration::from_secs(3600));
                 }
             }
-            Some(Err(e)) => eprintln!("mygestures: D-Bus initialization error: {}", e),
+            Some(Err(e)) => eprintln!("gestosd: D-Bus initialization error: {}", e),
             None => {}
         }
     });
@@ -702,7 +681,7 @@ fn spawn_device_process(
     custom_config: Option<&str>,
 ) -> Option<Child> {
     let mut cmd = Command::new(exe);
-    cmd.env("MYGESTURES_CHILD", "1");
+    cmd.env("GESTOS_CHILD", "1");
     cmd.arg("-d").arg(device);
     cmd.arg("-b").arg(button.to_string());
     cmd.arg("-s").arg(sensitivity.to_string());
@@ -744,7 +723,7 @@ fn run_manager(devices: &[String], button: i32, sensitivity: i32, custom_config:
                         let (wait, next_delay) =
                             restart_backoff(child.restart_delay, now - child.started_at);
                         eprintln!(
-                            "mygestures: Listener for {} exited ({}). Restarting in {}s.",
+                            "gestosd: Listener for {} exited ({}). Restarting in {}s.",
                             child.device,
                             status,
                             wait.as_secs()
@@ -758,7 +737,7 @@ fn run_manager(devices: &[String], button: i32, sensitivity: i32, custom_config:
 
         let any_running = children.iter().any(|c| c.process.is_some());
         if !any_running && RELOAD_MANAGER.swap(false, Ordering::Relaxed) {
-            println!("mygestures parent: Config reload triggered. Restarting child processes...");
+            println!("gestosd parent: Config reload triggered. Restarting child processes...");
             for child in &mut children {
                 child.restart_at = Some(now);
                 child.restart_delay = CHILD_RESTART_MIN_DELAY;
@@ -787,6 +766,28 @@ fn run_manager(devices: &[String], button: i32, sensitivity: i32, custom_config:
             return;
         }
         std::thread::sleep(CHILD_POLL_INTERVAL);
+    }
+}
+
+/// Runs the MyGestures migration with the user's own group, so that this binary's elevated
+/// `input` group doesn't end up owning files in their home.
+fn migrate_legacy_files_as_user() {
+    if std::env::var("GESTOS_CHILD").is_ok() {
+        return;
+    }
+    let rgid = nix::unistd::getgid();
+    let egid = nix::unistd::getegid();
+    if egid != rgid && nix::unistd::setegid(rgid).is_err() {
+        eprintln!("gestosd: Skipping the MyGestures migration: could not lower group rights.");
+        return;
+    }
+    gestos::config::migrate_legacy_user_files(
+        &gestos::config::config_home(),
+        gestos::config::autostart_dir().as_deref(),
+    );
+    if egid != rgid && nix::unistd::setegid(egid).is_err() {
+        eprintln!("gestosd: Could not restore group rights after the MyGestures migration.");
+        std::process::exit(1);
     }
 }
 
@@ -833,12 +834,12 @@ fn main() {
     }
 
     if help {
-        println!("Usage: mygestures [OPTIONS] [CONFIG_FILE]");
+        println!("Usage: gestosd [OPTIONS] [CONFIG_FILE]");
         println!();
         println!("CONFIG_FILE:");
         println!(
             "  Default: {}",
-            mygestures::config::get_default_config_path().display()
+            gestos::config::get_default_config_path().display()
         );
         println!();
         println!("OPTIONS:");
@@ -851,15 +852,17 @@ fn main() {
         return;
     }
 
-    if mygestures::uinput::trigger_button_code(button).is_none() {
+    if gestos::uinput::trigger_button_code(button).is_none() {
         eprintln!("Error: trigger {} is not a mouse button.", button);
         std::process::exit(EXIT_PERMANENT_ERROR);
     }
 
+    migrate_legacy_files_as_user();
+
     let config_path = custom_config
         .as_ref()
         .map(PathBuf::from)
-        .unwrap_or_else(mygestures::config::get_default_config_path);
+        .unwrap_or_else(gestos::config::get_default_config_path);
     let _ = CONFIG_PATH.set(config_path.clone());
 
     // Resolve target device list
@@ -911,7 +914,7 @@ fn main() {
     let _instance_lock = match DaemonIpc::acquire(device_path) {
         Ok(lock) => lock,
         Err(e) => {
-            eprintln!("Failed to acquire the mygestures instance lock: {}", e);
+            eprintln!("Failed to acquire the gestosd instance lock: {}", e);
             std::process::exit(1);
         }
     };
@@ -926,7 +929,7 @@ fn main() {
     println!("Starting grabber...");
 
     if let Err(e) = run_grabber(device_path, button, sensitivity, config, wayland_ctx) {
-        eprintln!("mygestures: Daemon error: {}", e);
+        eprintln!("gestosd: Daemon error: {}", e);
         let permanent = e.kind() == std::io::ErrorKind::InvalidInput;
         std::process::exit(if permanent { EXIT_PERMANENT_ERROR } else { 1 });
     }
@@ -944,28 +947,12 @@ mod tests {
         ExitStatus::from_raw(signal)
     }
 
-    struct FakeDaemon {
+    struct FakeLegacyDaemon {
         stop_calls: std::sync::Arc<std::sync::atomic::AtomicU32>,
     }
 
     #[interface(name = "org.mygestures.Daemon")]
-    impl FakeDaemon {
-        fn stop(&self) {
-            self.stop_calls.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
-    struct FakeCurrentDaemon {
-        stop_calls: std::sync::Arc<std::sync::atomic::AtomicU32>,
-    }
-
-    #[interface(name = "org.mygestures.Daemon")]
-    impl FakeCurrentDaemon {
-        #[zbus(property)]
-        fn version(&self) -> String {
-            "9.9.9".to_string()
-        }
-
+    impl FakeLegacyDaemon {
         fn stop(&self) {
             self.stop_calls.fetch_add(1, Ordering::SeqCst);
         }
@@ -981,43 +968,25 @@ mod tests {
 
     // Names are unique per test and process, so this can't reach a real daemon on the bus.
     fn test_name(suffix: &str) -> String {
-        format!("org.mygestures.Test{}.P{}", suffix, std::process::id())
+        format!("io.github.deters.GestosTest{}.P{}", suffix, std::process::id())
     }
 
     #[test]
-    fn a_release_without_the_version_property_is_stopped() {
+    fn a_legacy_daemon_is_stopped() {
         let Some(client) = session_bus() else { return };
         let name = test_name("Legacy");
         let stop_calls = std::sync::Arc::default();
-        let daemon = FakeDaemon {
+        let daemon = FakeLegacyDaemon {
             stop_calls: std::sync::Arc::clone(&stop_calls),
         };
         let _service = zbus::blocking::connection::Builder::session()
             .and_then(|b| b.name(name.clone()))
-            .and_then(|b| b.serve_at(DBUS_PATH, daemon))
+            .and_then(|b| b.serve_at(LEGACY_DBUS_PATH, daemon))
             .and_then(|b| b.build())
             .unwrap();
 
         assert!(request_legacy_stop(&client, &name).unwrap());
         assert_eq!(stop_calls.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn a_release_with_the_version_property_is_left_running() {
-        let Some(client) = session_bus() else { return };
-        let name = test_name("Current");
-        let stop_calls = std::sync::Arc::default();
-        let daemon = FakeCurrentDaemon {
-            stop_calls: std::sync::Arc::clone(&stop_calls),
-        };
-        let _service = zbus::blocking::connection::Builder::session()
-            .and_then(|b| b.name(name.clone()))
-            .and_then(|b| b.serve_at(DBUS_PATH, daemon))
-            .and_then(|b| b.build())
-            .unwrap();
-
-        assert!(!request_legacy_stop(&client, &name).unwrap());
-        assert_eq!(stop_calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]
@@ -1037,7 +1006,18 @@ mod tests {
             .and_then(|b| b.build())
             .unwrap();
 
-        assert!(!request_legacy_stop(&client, &name).unwrap());
+        let reply = client
+            .call_method(
+                Some(name.as_str()),
+                DBUS_PATH,
+                Some("org.freedesktop.DBus.Properties"),
+                "Get",
+                &("io.github.deters.Gestos.Daemon", "Version"),
+            )
+            .unwrap();
+        let body = reply.body();
+        let version: zbus::zvariant::Value = body.deserialize().unwrap();
+        assert_eq!(version, zbus::zvariant::Value::from(env!("CARGO_PKG_VERSION")));
     }
 
     #[test]

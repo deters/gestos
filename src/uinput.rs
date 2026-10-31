@@ -164,7 +164,7 @@ impl UinputDevice {
         }
 
         let mut builder = VirtualDevice::builder()?
-            .name(source_dev.name().unwrap_or("Virtual MyGestures Forwarder"));
+            .name(source_dev.name().unwrap_or("Virtual Gestos Forwarder"));
 
         // Add keyboard keys
         builder = builder.with_keys(&keys)?;
@@ -225,7 +225,7 @@ impl UinputDevice {
         let codes = match parse_key_combo(keys) {
             Ok(codes) => codes,
             Err(unknown) => {
-                eprintln!("mygestures: Ignoring shortcut '{}': unknown key '{}'", keys, unknown);
+                eprintln!("gestos: Ignoring shortcut '{}': unknown key '{}'", keys, unknown);
                 return;
             }
         };
@@ -289,10 +289,10 @@ mod tests {
     #[test]
     fn every_keypress_in_the_shipped_config_resolves() {
         let path = std::env::temp_dir().join(format!(
-            "mygestures-keys-{}.yaml",
+            "gestos-keys-{}.yaml",
             std::process::id()
         ));
-        std::fs::write(&path, include_str!("../mygestures.yaml")).unwrap();
+        std::fs::write(&path, include_str!("../gestos.yaml")).unwrap();
         let config = crate::config::Configuration::load_from_file(&path).unwrap();
         std::fs::remove_file(&path).unwrap();
 

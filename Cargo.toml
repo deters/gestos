@@ -1,16 +1,16 @@
 [package]
-name = "mygestures"
+name = "gestos"
 version = "4.2.2"
 edition = "2021"
 authors = ["Lucas Augusto Deters <lucasdeters@gmail.com>"]
 
 [lib]
-name = "mygestures"
+name = "gestos"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mygestures"
-path = "src/bin/mygestures.rs"
+name = "gestosd"
+path = "src/bin/gestosd.rs"
 
 [[bin]]
 name = "gestos"

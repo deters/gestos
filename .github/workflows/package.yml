@@ -33,9 +33,9 @@ jobs:
           export CARGO_HOME=$GITHUB_WORKSPACE/.cargo
           export OVERRIDE_CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target-fedora
           rpmdev-setuptree
-          VERSION=$(grep '^Version:' packaging/mygestures.spec | awk '{print $2}')
-          tar --exclude-vcs --exclude='.cargo' --exclude='target-fedora' --transform "s,^\.,mygestures-$VERSION," -czf ~/rpmbuild/SOURCES/mygestures-$VERSION.tar.gz .
-          rpmbuild -ba packaging/mygestures.spec
+          VERSION=$(grep '^Version:' packaging/gestos.spec | awk '{print $2}')
+          tar --exclude-vcs --exclude='.cargo' --exclude='target-fedora' --transform "s,^\.,gestos-$VERSION," -czf ~/rpmbuild/SOURCES/gestos-$VERSION.tar.gz .
+          rpmbuild -ba packaging/gestos.spec
 
       - name: Upload RPM Artifacts
         uses: actions/upload-artifact@v4

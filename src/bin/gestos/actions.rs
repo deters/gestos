@@ -1,5 +1,5 @@
 use crate::state::*;
-use mygestures::config::ActionType;
+use gestos::config::ActionType;
 use gtk::prelude::*;
 use gtk4 as gtk;
 use gtk::gio;

@@ -1,4 +1,4 @@
-project('mygestures',
+project('gestos',
   version: '4.2.2',
   meson_version: '>= 0.56.0'
 )
@@ -31,7 +31,7 @@ cargo_sources = files(
   'src/protractor.rs',
   'src/uinput.rs',
   'src/wayland.rs',
-  'src/bin/mygestures.rs',
+  'src/bin/gestosd.rs',
   'src/bin/gestos/actions.rs',
   'src/bin/gestos/ui/shortcut_recorder.rs',
   'src/bin/gestos/ui/overlay.rs',
@@ -51,7 +51,7 @@ cargo_build = custom_target(
   'cargo-build',
   build_by_default: true,
   input: cargo_sources,
-  output: ['mygestures', 'gestos'],
+  output: ['gestosd', 'gestos'],
   console: true,
   install: true,
   install_dir: bindir,
@@ -61,7 +61,7 @@ cargo_build = custom_target(
     cargo_manifest,
     build_type,
     meson.project_build_root(),
-    'mygestures',
+    'gestosd',
     'gestos'
   ]
 )
@@ -71,20 +71,20 @@ udevdir = get_option('udevdir')
 if udevdir == ''
   udevdir = '/etc/udev/rules.d'
 endif
-install_data('packaging/99-mygestures.rules', install_dir: udevdir)
+install_data('packaging/99-gestos.rules', install_dir: udevdir)
 
 # Install systemd modules-load configuration
 modulesloaddir = get_option('modulesloaddir')
 if modulesloaddir == ''
   modulesloaddir = '/lib/modules-load.d'
 endif
-install_data('packaging/mygestures.conf', install_dir: modulesloaddir)
+install_data('packaging/gestos.conf', install_dir: modulesloaddir)
 
 # Install desktop entry, icon and default configuration
 datadir = prefix / get_option('datadir')
 install_data('gestos.desktop', install_dir: datadir / 'applications')
 install_data('gestos.svg', install_dir: datadir / 'icons/hicolor/scalable/apps')
-install_data('mygestures.yaml', install_dir: datadir / 'mygestures')
+install_data('gestos.yaml', install_dir: datadir / 'gestos')
 
 # D-Bus Activation Service
 dbus_service_dir = get_option('dbusservicedir')
@@ -96,8 +96,8 @@ conf_data = configuration_data()
 conf_data.set('bindir', bindir)
 
 configure_file(
-  input: 'build-aux/org.mygestures.Daemon.service.in',
-  output: 'org.mygestures.Daemon.service',
+  input: 'build-aux/io.github.deters.Gestos.Daemon.service.in',
+  output: 'io.github.deters.Gestos.Daemon.service',
   configuration: conf_data,
   install_dir: dbus_service_dir
 )
@@ -108,10 +108,19 @@ if systemd_user_dir == ''
   systemd_user_dir = prefix / 'lib' / 'systemd' / 'user'
 endif
 configure_file(
-  input: 'build-aux/mygestures.service.in',
-  output: 'mygestures.service',
+  input: 'build-aux/gestosd.service.in',
+  output: 'gestosd.service',
   configuration: conf_data,
   install_dir: systemd_user_dir
+)
+
+# Keeps old autostart entries and scripts working after the rename from MyGestures
+configure_file(
+  input: 'build-aux/mygestures-compat.sh.in',
+  output: 'mygestures',
+  configuration: conf_data,
+  install_dir: bindir,
+  install_mode: 'rwxr-xr-x'
 )
 
 # Run post-install script

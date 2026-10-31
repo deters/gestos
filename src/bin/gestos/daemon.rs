@@ -4,7 +4,7 @@ use crate::ui::components::show_error_dialog;
 use gtk4 as gtk;
 
 pub fn is_daemon_running(conn: Option<&zbus::blocking::Connection>) -> bool {
-    let dbus_name = mygestures::config::get_dbus_name();
+    let dbus_name = gestos::config::get_dbus_name();
 
     let check_status = |c: &zbus::blocking::Connection| -> Option<bool> {
         let dbus_proxy = zbus::blocking::fdo::DBusProxy::new(c).ok()?;
@@ -31,10 +31,10 @@ pub fn start_daemon(conn: Option<&zbus::blocking::Connection>) -> Result<(), Str
     }
 
     // Try local binary first, then path
-    let cmd = if std::path::Path::new("./mygestures").exists() {
-        "./mygestures"
+    let cmd = if std::path::Path::new("./gestosd").exists() {
+        "./gestosd"
     } else {
-        "mygestures"
+        "gestosd"
     };
 
     // Spawn the daemon process and pipe stderr
@@ -76,22 +76,22 @@ pub fn start_daemon(conn: Option<&zbus::blocking::Connection>) -> Result<(), Str
 }
 
 pub fn stop_daemon(conn: Option<&zbus::blocking::Connection>) {
-    let dbus_name = mygestures::config::get_dbus_name();
+    let dbus_name = gestos::config::get_dbus_name();
     let stop_via_dbus = || -> zbus::Result<()> {
         let proxy = if let Some(c) = conn {
             zbus::blocking::Proxy::new(
                 c,
                 dbus_name.clone(),
-                "/org/mygestures/Daemon",
-                "org.mygestures.Daemon",
+                "/io/github/deters/Gestos/Daemon",
+                "io.github.deters.Gestos.Daemon",
             )
         } else {
             let new_conn = zbus::blocking::Connection::session()?;
             zbus::blocking::Proxy::new(
                 &new_conn,
                 dbus_name.clone(),
-                "/org/mygestures/Daemon",
-                "org.mygestures.Daemon",
+                "/io/github/deters/Gestos/Daemon",
+                "io.github.deters.Gestos.Daemon",
             )
         }?;
         let _: () = proxy.call("Stop", &())?;
@@ -104,7 +104,7 @@ pub fn stop_daemon(conn: Option<&zbus::blocking::Connection>) {
             .arg("-u")
             .arg(uid.to_string())
             .arg("-x")
-            .arg("mygestures")
+            .arg("gestosd")
             .output()
         {
             if output.status.success() {
@@ -126,22 +126,22 @@ pub fn reload_daemon<W: IsA<gtk::Window>>(
     conn: Option<&zbus::blocking::Connection>,
     parent: Option<&W>,
 ) {
-    let dbus_name = mygestures::config::get_dbus_name();
+    let dbus_name = gestos::config::get_dbus_name();
     let reload_via_dbus = || -> zbus::Result<()> {
         let proxy = if let Some(c) = conn {
             zbus::blocking::Proxy::new(
                 c,
                 dbus_name.clone(),
-                "/org/mygestures/Daemon",
-                "org.mygestures.Daemon",
+                "/io/github/deters/Gestos/Daemon",
+                "io.github.deters.Gestos.Daemon",
             )
         } else {
             let new_conn = zbus::blocking::Connection::session()?;
             zbus::blocking::Proxy::new(
                 &new_conn,
                 dbus_name.clone(),
-                "/org/mygestures/Daemon",
-                "org.mygestures.Daemon",
+                "/io/github/deters/Gestos/Daemon",
+                "io.github.deters.Gestos.Daemon",
             )
         }?;
         let _: () = proxy.call("Reload", &())?;
@@ -152,7 +152,7 @@ pub fn reload_daemon<W: IsA<gtk::Window>>(
         if let Some(p) = parent {
             show_error_dialog(p, &fdo_err.to_string());
         } else {
-            eprintln!("mygestures reload error: {}", fdo_err);
+            eprintln!("gestos reload error: {}", fdo_err);
         }
     }
 }

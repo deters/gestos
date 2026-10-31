@@ -1,5 +1,7 @@
-MyGestures - Simple mouse gestures for Linux
-============================================
+Gestos - Simple mouse gestures for Linux
+========================================
+
+*Formerly MyGestures. See [Upgrading from MyGestures](#upgrading-from-mygestures).*
 
 Mouse gestures - "draw" commands using your mouse.
 
@@ -27,31 +29,31 @@ apk add glib-dev cairo-dev gdk4 gdk-pixbuf-dev pango-dev gtk4.0-dev
 
 ### Build and Install:
 
-You can compile and install `mygestures` either using the compatibility wrapper `Makefile` or directly using `meson`.
+You can compile and install `gestosd` either using the compatibility wrapper `Makefile` or directly using `meson`.
 
 #### Option A: Using the Makefile wrapper (Recommended)
 ```bash
-git clone https://github.com/deters/mygestures.git
-cd mygestures/
+git clone https://github.com/deters/gestos.git
+cd gestos/
 make
 sudo make install
 ```
 
 #### Option B: Using Meson directly
 ```bash
-git clone https://github.com/deters/mygestures.git
-cd mygestures/
+git clone https://github.com/deters/gestos.git
+cd gestos/
 meson setup build
 meson compile -C build
 sudo meson install -C build
 ```
 
-The installation process automatically installs the `mygestures` and `gestos` binaries, installs the udev rules, reloads the udev system, and sets `mygestures` to run with Set-Group-ID (SGID) access to the `input` group. Your user is only added to the `input` group if setting SGID fails.
+The installation process automatically installs the `gestosd` daemon and `gestos` settings app, installs the udev rules, reloads the udev system, and sets `gestosd` to run with Set-Group-ID (SGID) access to the `input` group. Your user is only added to the `input` group if setting SGID fails.
 
 Usage:
 ------
 
-- `mygestures`: Start the daemon. Uses default button (button 3 / right-click) on the default mouse device.
+- `gestosd`: Start the daemon. Uses default button (button 3 / right-click) on the default mouse device.
 - `gestos`: Start the GTK4 GUI configuration editor.
 
 **To use gestures:** Hold the trigger button (default: right-click / button 3) and move the mouse to draw a gesture. Release the button to execute.
@@ -60,22 +62,35 @@ Troubleshooting:
 ----------------
 
 ### Gestures not working or no response:
-1. **Wrong device:** The daemon auto-detects standard pointer devices. If yours is not captured, find its path in `/dev/input/by-path/` and run `mygestures -d '/dev/input/by-path/event-mouse'`.
-2. **Permissions:** Ensure you have installed the udev rules (see above) and configured permissions. By default, the udev rules restrict access to the `input` group for security. You can configure `mygestures` with Set-Group-ID (SGID) privileges to run securely, or fallback to standard `uaccess`/`input` group setups. Running the binary will output detailed instructions on both options.
-3. **Trigger Button:** If you are on a laptop with a touchpad, you might need to use button 1 (left-click) instead of 3. Try `mygestures -b 1`. Only mouse and digitizer buttons can be triggers, and the device must have that button.
-5. **Shortcuts on non-US layouts:** `keypress` keys are physical key positions on a US layout, so a shortcut can land on a different character on other layouts. A shortcut naming a key MyGestures doesn't know is ignored, and the daemon logs an error.
-4. **Missing /dev/uinput (e.g. Alpine Linux):** On some distributions like Alpine Linux, the `uinput` kernel module is not loaded by default, and `/dev/uinput` will not exist. Load it manually using `sudo modprobe uinput`. To make this persistent on boot, add `uinput` to `/etc/modules` (or `/etc/modules-load.d/uinput.conf`). *(Note: If you install MyGestures using the pre-built packages (.deb, .rpm, .apk), the package installation automatically sets up the modules-load rules to load the uinput module on boot.)*
+1. **Wrong device:** The daemon auto-detects standard pointer devices. If yours is not captured, find its path in `/dev/input/by-path/` and run `gestosd -d '/dev/input/by-path/event-mouse'`.
+2. **Permissions:** Ensure you have installed the udev rules (see above) and configured permissions. By default, the udev rules restrict access to the `input` group for security. You can configure `gestosd` with Set-Group-ID (SGID) privileges to run securely, or fallback to standard `uaccess`/`input` group setups. Running the binary will output detailed instructions on both options.
+3. **Trigger Button:** If you are on a laptop with a touchpad, you might need to use button 1 (left-click) instead of 3. Try `gestosd -b 1`. Only mouse and digitizer buttons can be triggers, and the device must have that button.
+5. **Shortcuts on non-US layouts:** `keypress` keys are physical key positions on a US layout, so a shortcut can land on a different character on other layouts. A shortcut naming a key Gestos doesn't know is ignored, and the daemon logs an error.
+4. **Missing /dev/uinput (e.g. Alpine Linux):** On some distributions like Alpine Linux, the `uinput` kernel module is not loaded by default, and `/dev/uinput` will not exist. Load it manually using `sudo modprobe uinput`. To make this persistent on boot, add `uinput` to `/etc/modules` (or `/etc/modules-load.d/uinput.conf`). *(Note: If you install Gestos using the pre-built packages (.deb, .rpm, .apk), the package installation automatically sets up the modules-load rules to load the uinput module on boot.)*
+
+Upgrading from MyGestures:
+--------------------------
+
+MyGestures was renamed to Gestos in version 5.0.0. The `mygestures` package and repository are deprecated.
+
+Install Gestos like any new version. The new packages replace `mygestures`, and `make install` removes what a source install left behind. Then:
+
+- **Your settings carry over.** The first time `gestos` or `gestosd` starts, your configuration is copied from `~/.config/mygestures/` to `~/.config/gestos/`. The old folder is kept, so you can go back to the old version, and can be deleted once you no longer need it.
+- **Autostart keeps working.** The old entry is replaced with one for `gestosd`, including any custom arguments.
+- **A running MyGestures daemon is stopped automatically** when `gestosd` starts. Only a daemon that owns the D-Bus name is found, so stop any other old instance by hand.
+- **A `mygestures` command remains** as a small wrapper that starts `gestosd`, so that old scripts keep working.
+- **systemd users:** if you enabled the user service, enable the new one with `systemctl --user enable --now gestosd`.
 
 Gestures configuration:
 -----------------------
 
-On first execution, MyGestures will create a configuration file for your user:
+On first execution, Gestos will create a configuration file for your user:
 
-`~/.config/mygestures/mygestures.yaml`
+`~/.config/gestos/gestos.yaml`
 
 Gestures are defined using coordinate paths matched using the Protractor gesture recognition algorithm.
 
-Example of `mygestures.yaml`:
+Example of `gestos.yaml`:
 
 ```yaml
 global:

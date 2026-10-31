@@ -349,22 +349,103 @@ pub fn get_environment_suffix() -> Option<&'static str> {
 }
 
 pub fn get_dbus_name() -> String {
-    "org.mygestures.Daemon".to_string()
+    "io.github.deters.Gestos.Daemon".to_string()
 }
 
-pub fn get_default_config_path() -> PathBuf {
-    let base = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+pub fn config_home() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         PathBuf::from(xdg)
     } else if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home).join(".config")
     } else {
         PathBuf::from(".")
+    }
+}
+
+/// The autostart folder this project has always written to, which ignores XDG_CONFIG_HOME.
+pub fn autostart_dir() -> Option<PathBuf> {
+    std::env::var("HOME")
+        .ok()
+        .map(|home| PathBuf::from(home).join(".config").join("autostart"))
+}
+
+/// The daemon's autostart entry, for a command line such as `gestosd -b 8`.
+pub fn daemon_autostart_entry() -> &'static str {
+    "[Desktop Entry]\n\
+     Type=Application\n\
+     Name=Gestos Daemon\n\
+     Comment=Gesture recognition daemon\n\
+     Exec=gestosd\n\
+     Icon=gestos\n\
+     Terminal=false\n\
+     X-GNOME-Autostart-enabled=true\n"
+}
+
+/// Rewrites an old autostart entry for the new binary, keeping any custom arguments.
+fn migrate_autostart_entry(old: &str) -> String {
+    let mut lines: Vec<String> = old
+        .lines()
+        .map(|line| {
+            if line.starts_with("Exec=") {
+                line.replace("mygestures", "gestosd")
+            } else if line.starts_with("Icon=") {
+                line.replace("mygestures", "gestos")
+            } else {
+                line.replace("MyGestures", "Gestos")
+            }
+        })
+        .collect();
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+/// Carries a MyGestures setup over to Gestos, once, for an upgrading user. The old config is
+/// copied rather than moved so that going back to the old version still works. Files that
+/// already exist are never overwritten.
+pub fn migrate_legacy_user_files(config_home: &Path, autostart_dir: Option<&Path>) {
+    let new_dir = config_home.join("gestos");
+    if let Ok(entries) = fs::read_dir(config_home.join("mygestures")) {
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().replacen("mygestures", "gestos", 1);
+            let target = new_dir.join(&name);
+            if target.exists() {
+                continue;
+            }
+            let copied = fs::create_dir_all(&new_dir)
+                .and_then(|_| fs::copy(entry.path(), &target).map(|_| ()));
+            match copied {
+                Ok(()) => println!("Migrated configuration to {}", target.display()),
+                Err(e) => eprintln!("Failed to migrate {}: {}", entry.path().display(), e),
+            }
+        }
+    }
+
+    let Some(autostart_dir) = autostart_dir else {
+        return;
     };
-    let dir = base.join("mygestures");
+    let old_entry = autostart_dir.join("mygestures.desktop");
+    let new_entry = autostart_dir.join("gestosd.desktop");
+    if let Ok(old) = fs::read_to_string(&old_entry) {
+        let written = new_entry.exists()
+            || fs::write(&new_entry, migrate_autostart_entry(&old)).is_ok();
+        if written {
+            let _ = fs::remove_file(&old_entry);
+        }
+    }
+}
+
+pub fn get_default_config_path() -> PathBuf {
+    let dir = config_home().join("gestos");
     if let Some(suffix) = get_environment_suffix() {
-        dir.join(format!("mygestures_{}.yaml", suffix))
+        dir.join(format!("gestos_{}.yaml", suffix))
     } else {
-        dir.join("mygestures.yaml")
+        dir.join("gestos.yaml")
     }
 }
 
@@ -375,10 +456,10 @@ pub fn initialize_user_config_if_missing() -> std::io::Result<PathBuf> {
     }
 
     let sys_paths = vec![
-        PathBuf::from("/etc/mygestures"),
-        PathBuf::from("/usr/local/etc/mygestures"),
-        PathBuf::from("/usr/share/mygestures"),
-        PathBuf::from("/usr/local/share/mygestures"),
+        PathBuf::from("/etc/gestos"),
+        PathBuf::from("/usr/local/etc/gestos"),
+        PathBuf::from("/usr/share/gestos"),
+        PathBuf::from("/usr/local/share/gestos"),
         PathBuf::from("."),
     ];
 
@@ -387,9 +468,9 @@ pub fn initialize_user_config_if_missing() -> std::io::Result<PathBuf> {
 
     for base in &sys_paths {
         let path = if let Some(s) = suffix {
-            base.join(format!("mygestures_{}.yaml", s))
+            base.join(format!("gestos_{}.yaml", s))
         } else {
-            base.join("mygestures.yaml")
+            base.join("gestos.yaml")
         };
         if path.exists() {
             if let Ok(content) = fs::read_to_string(&path) {
@@ -401,7 +482,7 @@ pub fn initialize_user_config_if_missing() -> std::io::Result<PathBuf> {
 
     if default_content.is_none() {
         for base in &sys_paths {
-            let path = base.join("mygestures.yaml");
+            let path = base.join("gestos.yaml");
             if path.exists() {
                 if let Ok(content) = fs::read_to_string(&path) {
                     default_content = Some(content);
@@ -424,7 +505,7 @@ pub fn initialize_user_config_if_missing() -> std::io::Result<PathBuf> {
         if let Some(parent) = user_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&user_path, "# MyGestures Configuration\nglobal:\n")?;
+        fs::write(&user_path, "# Gestos Configuration\nglobal:\n")?;
         println!(
             "Initialized empty user configuration at: {}",
             user_path.display()
@@ -560,7 +641,7 @@ impl Configuration {
             apps: (!self.apps.is_empty()).then(|| self.apps.clone()),
         };
         Ok(format!(
-            "# MyGestures Configuration - Generated by Gestos\n\n{}",
+            "# Gestos Configuration - Generated by Gestos\n\n{}",
             serde_yaml::to_string(&yaml)?
         ))
     }
@@ -628,7 +709,7 @@ mod tests {
     impl TempConfig {
         fn new(test_name: &str, content: &str) -> Self {
             let path = std::env::temp_dir().join(format!(
-                "mygestures-{}-{}.yaml",
+                "gestos-{}-{}.yaml",
                 test_name,
                 std::process::id()
             ));
@@ -641,6 +722,93 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_file(&self.0);
         }
+    }
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(test_name: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "gestos-migrate-{}-{}",
+                test_name,
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(path.join("mygestures")).unwrap();
+            fs::create_dir_all(path.join("autostart")).unwrap();
+            TempDir(path)
+        }
+
+        fn migrate(&self) {
+            migrate_legacy_user_files(&self.0, Some(&self.0.join("autostart")));
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn migration_copies_config_under_the_new_names_and_keeps_the_old_files() {
+        let dir = TempDir::new("copy");
+        let old = dir.0.join("mygestures/mygestures_gnome.yaml");
+        fs::write(&old, "old config").unwrap();
+        fs::write(dir.0.join("mygestures/osd_enabled"), "false").unwrap();
+        dir.migrate();
+
+        let new = dir.0.join("gestos/gestos_gnome.yaml");
+        assert_eq!(fs::read_to_string(new).unwrap(), "old config");
+        assert_eq!(fs::read_to_string(dir.0.join("gestos/osd_enabled")).unwrap(), "false");
+        assert!(old.exists());
+    }
+
+    #[test]
+    fn migration_never_overwrites_a_new_config() {
+        let dir = TempDir::new("keep");
+        fs::write(dir.0.join("mygestures/mygestures.yaml"), "old").unwrap();
+        fs::create_dir_all(dir.0.join("gestos")).unwrap();
+        fs::write(dir.0.join("gestos/gestos.yaml"), "new").unwrap();
+        dir.migrate();
+        assert_eq!(fs::read_to_string(dir.0.join("gestos/gestos.yaml")).unwrap(), "new");
+    }
+
+    #[test]
+    fn migration_rewrites_autostart_and_keeps_custom_arguments() {
+        let dir = TempDir::new("autostart");
+        let old = dir.0.join("autostart/mygestures.desktop");
+        fs::write(
+            &old,
+            "[Desktop Entry]\nName=MyGestures Daemon\nExec=/usr/local/bin/mygestures -b 8\nIcon=mygestures\n",
+        )
+        .unwrap();
+        dir.migrate();
+
+        let new = fs::read_to_string(dir.0.join("autostart/gestosd.desktop")).unwrap();
+        assert!(new.contains("Exec=/usr/local/bin/gestosd -b 8\n"), "{new}");
+        assert!(new.contains("Icon=gestos\n"), "{new}");
+        assert!(new.contains("Name=Gestos Daemon\n"), "{new}");
+        assert!(!new.contains("mygestures"), "{new}");
+        assert!(!old.exists());
+    }
+
+    #[test]
+    fn migration_without_an_old_setup_creates_nothing() {
+        let dir = TempDir::new("none");
+        dir.migrate();
+        assert!(!dir.0.join("gestos").exists());
+        assert!(!dir.0.join("autostart/gestosd.desktop").exists());
+    }
+
+    #[test]
+    fn migration_can_run_twice() {
+        let dir = TempDir::new("twice");
+        fs::write(dir.0.join("mygestures/mygestures.yaml"), "old").unwrap();
+        dir.migrate();
+        fs::write(dir.0.join("gestos/gestos.yaml"), "edited").unwrap();
+        dir.migrate();
+        assert_eq!(fs::read_to_string(dir.0.join("gestos/gestos.yaml")).unwrap(), "edited");
     }
 
     #[test]
@@ -660,7 +828,7 @@ mod tests {
 
     #[test]
     fn load_rejects_a_missing_file() {
-        assert!(Configuration::load_from_file("/nonexistent/mygestures.yaml").is_none());
+        assert!(Configuration::load_from_file("/nonexistent/gestos.yaml").is_none());
     }
 
     #[test]
@@ -790,7 +958,7 @@ mod tests {
     #[test]
     fn saving_through_a_symlink_keeps_the_symlink() {
         let target = TempConfig::new("link-target", "");
-        let link = std::env::temp_dir().join(format!("mygestures-link-{}", std::process::id()));
+        let link = std::env::temp_dir().join(format!("gestos-link-{}", std::process::id()));
         let _ = fs::remove_file(&link);
         std::os::unix::fs::symlink(&target.0, &link).unwrap();
         let config = Configuration {
@@ -809,7 +977,7 @@ mod tests {
 
     #[test]
     fn the_shipped_default_config_is_valid() {
-        let file = TempConfig::new("shipped", include_str!("../mygestures.yaml"));
+        let file = TempConfig::new("shipped", include_str!("../gestos.yaml"));
         let config = Configuration::load_from_file(&file.0).unwrap();
         assert!(!config.gestures.is_empty());
         for gesture in &config.gestures {

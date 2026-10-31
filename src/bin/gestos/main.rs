@@ -11,14 +11,19 @@ use ui::main_window::build_ui;
 use ui::overlay::build_overlay_ui;
 
 fn main() {
+    gestos::config::migrate_legacy_user_files(
+        &gestos::config::config_home(),
+        gestos::config::autostart_dir().as_deref(),
+    );
+
     let args: Vec<String> = std::env::args().collect();
     let is_overlay = args.iter().any(|arg| arg == "--overlay");
 
     let app = gtk::Application::builder()
         .application_id(if is_overlay {
-            "org.mygestures.gestos.overlay"
+            "io.github.deters.Gestos.Overlay"
         } else {
-            "org.mygestures.gestos"
+            "io.github.deters.Gestos"
         })
         .build();
 

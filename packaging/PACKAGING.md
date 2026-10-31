@@ -1,4 +1,4 @@
-# Packaging and Publishing mygestures
+# Packaging and Publishing gestos
 
 This document explains how to build, test, and publish packages for Fedora, Debian/Ubuntu, and Alpine Linux.
 
@@ -49,18 +49,18 @@ rpmdev-setuptree
 ### Step 2: Create the source tarball
 Create a tarball of the current source tree and place it in the RPM sources directory (making sure to exclude any local cache folders):
 ```bash
-VERSION=$(grep '^Version:' packaging/mygestures.spec | awk '{print $2}')
-tar --exclude-vcs --exclude='.cargo' --exclude='target-fedora' --transform "s,^\.,mygestures-$VERSION," -czf ~/rpmbuild/SOURCES/mygestures-$VERSION.tar.gz .
+VERSION=$(grep '^Version:' packaging/gestos.spec | awk '{print $2}')
+tar --exclude-vcs --exclude='.cargo' --exclude='target-fedora' --transform "s,^\.,gestos-$VERSION," -czf ~/rpmbuild/SOURCES/gestos-$VERSION.tar.gz .
 ```
 
 ### Step 3: Build the Source RPM (SRPM)
 ```bash
-rpmbuild -bs packaging/mygestures.spec
+rpmbuild -bs packaging/gestos.spec
 ```
 
 ### Step 4: Build the Binary RPM
 ```bash
-rpmbuild -bb packaging/mygestures.spec
+rpmbuild -bb packaging/gestos.spec
 ```
 The resulting RPM file will be generated under `~/rpmbuild/RPMS/`.
 
@@ -73,22 +73,22 @@ The resulting RPM file will be generated under `~/rpmbuild/RPMS/`.
 ### Step 1: Create a COPR Project
 1. Log in to [Fedora COPR](https://copr.fedorainfracloud.org/) using your Fedora Account (FAS).
 2. Click **New Project**.
-3. Name your project (e.g., `mygestures`), select your target architectures/releases (e.g., `fedora-40-x86_64`), and click **Save**.
+3. Name your project (e.g., `gestos`), select your target architectures/releases (e.g., `fedora-40-x86_64`), and click **Save**.
 
 ### Step 2: Submit a Build
 1. In your COPR project page, click **Builds** -> **New Build**.
-2. Upload the SRPM created in Section 1, or point COPR directly to your GitHub repository URL: `https://github.com/deters/mygestures`.
+2. Upload the SRPM created in Section 1, or point COPR directly to your GitHub repository URL: `https://github.com/deters/gestos`.
 3. COPR will compile, package, and host the package. Users can then install it with:
    ```bash
-   sudo dnf copr enable <username>/mygestures
-   sudo dnf install mygestures
+   sudo dnf copr enable <username>/gestos
+   sudo dnf install gestos
    ```
 
 ---
 
 ## 4. Submitting to Official Fedora Repositories
 
-To get `mygestures` included in the official Fedora distribution:
+To get `gestos` included in the official Fedora distribution:
 
 1. **Create a Package Review Ticket**:
    - Host your `.spec` and `.src.rpm` files publicly (e.g. on GitHub releases or COPR).
@@ -124,7 +124,7 @@ The resulting `.deb` package will be created in the parent directory (`../`).
 ### Step 3: Install the package
 You can install the compiled package using `apt`:
 ```bash
-sudo apt install ../mygestures_*.deb
+sudo apt install ../gestos_*.deb
 ```
 
 ---
@@ -150,7 +150,7 @@ debuild -S -sa
 ### Step 4: Upload to Launchpad PPA
 Upload the generated source package using `dput`:
 ```bash
-dput ppa:your-launchpad-username/ppa-name ../mygestures_*_source.changes
+dput ppa:your-launchpad-username/ppa-name ../gestos_*_source.changes
 ```
 Launchpad will automatically compile it for your target Ubuntu releases and make the package available to users.
 
@@ -195,9 +195,9 @@ To host your own Alpine repository:
 3. Users can then add your repository URL to `/etc/apk/repositories`.
 
 ### Submitting to Alpine Aports (Official Repositories)
-To submit `mygestures` to the official Alpine community repositories:
+To submit `gestos` to the official Alpine community repositories:
 1. Fork the [alpine-aports](https://github.com/alpinelinux/aports) repository on GitHub.
-2. Place your `APKBUILD` and install scripts into a new folder `testing/mygestures/`.
+2. Place your `APKBUILD` and install scripts into a new folder `testing/gestos/`.
 3. Submit a Pull Request. Once approved, the package is built by the Alpine builders and published to the `community` repository.
 
 ---
@@ -205,6 +205,6 @@ To submit `mygestures` to the official Alpine community repositories:
 ## 9. Kernel Module Loading (uinput)
 
 To run correctly, the daemon requires the `uinput` kernel module to be loaded. The packaging configurations automatically install a systemd/OpenRC modules-load configuration file to handle this:
-* **Source File**: `packaging/mygestures.conf`
-* **Installation Target**: `/lib/modules-load.d/mygestures.conf`
+* **Source File**: `packaging/gestos.conf`
+* **Installation Target**: `/lib/modules-load.d/gestos.conf`
 * **Purpose**: Instructs the system to load the `uinput` kernel module automatically at boot time so that users do not need to manually run `sudo modprobe uinput` or add it manually to `/etc/modules`.

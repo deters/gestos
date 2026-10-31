@@ -1,15 +1,26 @@
 #!/bin/sh
 
-# Post-installation script for mygestures
+# Post-installation script for gestosd
 
 if [ -z "$DESTDIR" ]; then
+    # Remove what a source install of MyGestures left behind. Its binary is now a wrapper,
+    # which must not keep the old binary's Set-Group-ID permission.
+    PREFIX="${MESON_INSTALL_PREFIX:-/usr/local}"
+    chmod 755 "$PREFIX/bin/mygestures" 2>/dev/null || true
+    rm -f /etc/udev/rules.d/99-mygestures.rules \
+          /lib/modules-load.d/mygestures.conf \
+          "$PREFIX/share/dbus-1/services/org.mygestures.Daemon.service" \
+          "$PREFIX/lib/systemd/user/mygestures.service" \
+          "$PREFIX/share/mygestures/mygestures.yaml"
+    rmdir "$PREFIX/share/mygestures" 2>/dev/null || true
+
     echo "Reloading udev rules..."
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger 2>/dev/null || true
 
-    # Set Set-Group-ID (SGID) on mygestures to securely access input devices
-    MYGESTURES_BIN="${MESON_INSTALL_PREFIX:-/usr/local}/bin/mygestures"
-    if [ -f "$MYGESTURES_BIN" ]; then
+    # Set Set-Group-ID (SGID) on gestosd to securely access input devices
+    GESTOSD_BIN="${MESON_INSTALL_PREFIX:-/usr/local}/bin/gestosd"
+    if [ -f "$GESTOSD_BIN" ]; then
         # Create 'input' group if it doesn't exist
         if ! grep -q "^input:" /etc/group 2>/dev/null; then
             echo "Creating 'input' group..."
@@ -20,11 +31,11 @@ if [ -z "$DESTDIR" ]; then
             fi
         fi
 
-        echo "Setting Set-Group-ID (SGID) to 'input' group on $MYGESTURES_BIN..."
-        if chown root:input "$MYGESTURES_BIN" 2>/dev/null && chmod 2755 "$MYGESTURES_BIN" 2>/dev/null; then
-            echo "Successfully configured secure SGID permissions for mygestures."
+        echo "Setting Set-Group-ID (SGID) to 'input' group on $GESTOSD_BIN..."
+        if chown root:input "$GESTOSD_BIN" 2>/dev/null && chmod 2755 "$GESTOSD_BIN" 2>/dev/null; then
+            echo "Successfully configured secure SGID permissions for gestosd."
         else
-            echo "Warning: Could not set SGID permissions on $MYGESTURES_BIN."
+            echo "Warning: Could not set SGID permissions on $GESTOSD_BIN."
             echo "Falling back to standard user group configuration..."
             # Determine user to add to input group
             TARGET_USER="${SUDO_USER:-$USER}"

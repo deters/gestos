@@ -1,4 +1,4 @@
-use mygestures::config::{ActionType, Configuration};
+use gestos::config::{ActionType, Configuration};
 use gtk4 as gtk;
 use gtk::glib;
 #[allow(dead_code)]

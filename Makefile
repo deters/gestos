@@ -1,4 +1,4 @@
-# Makefile for mygestures (Meson wrapper)
+# Makefile for gestos (Meson wrapper)
 
 PREFIX ?= /usr/local
 BUILDDIR = build

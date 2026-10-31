@@ -1,10 +1,14 @@
-Name:           mygestures
+Name:           gestos
 Version:        4.2.2
 Release:        1%{?dist}
 Summary:        Pure Wayland/Evdev mouse gestures for Linux
 License:        GPL-2.0-or-later
-URL:            https://github.com/deters/mygestures
+URL:            https://github.com/deters/gestos
 Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
+
+# Renamed from MyGestures in 5.0.0
+Obsoletes:      mygestures < 5.0.0
+Provides:       mygestures = %{version}-%{release}
 
 BuildRequires:  meson
 BuildRequires:  ninja-build
@@ -44,16 +48,17 @@ getent group input >/dev/null || groupadd -r input
 %files
 %license COPYING
 %doc README.md
-# Set secure Set-Group-ID (SGID) permission on mygestures binary
-%attr(2755, root, input) %{_bindir}/mygestures
+# Set secure Set-Group-ID (SGID) permission on gestosd binary
+%attr(2755, root, input) %{_bindir}/gestosd
+%{_bindir}/mygestures
 %{_bindir}/gestos
-%{_udevrulesdir}/99-mygestures.rules
-/lib/modules-load.d/mygestures.conf
+%{_udevrulesdir}/99-gestos.rules
+/lib/modules-load.d/gestos.conf
 %{_datadir}/applications/gestos.desktop
 %{_datadir}/icons/hicolor/scalable/apps/gestos.svg
-%{_datadir}/mygestures/mygestures.yaml
-/usr/lib/systemd/user/mygestures.service
-/usr/share/dbus-1/services/org.mygestures.Daemon.service
+%{_datadir}/gestos/gestos.yaml
+/usr/lib/systemd/user/gestosd.service
+/usr/share/dbus-1/services/io.github.deters.Gestos.Daemon.service
 
 %changelog
 * Sat Oct 31 2026 Lucas Augusto Deters <lucasdeters@gmail.com> - 4.2.2-1

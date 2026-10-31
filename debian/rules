@@ -8,22 +8,26 @@ override_dh_auto_build:
 
 override_dh_auto_install:
 	# Install binaries
-	install -D -m 755 target/release/mygestures debian/mygestures/usr/bin/mygestures
-	install -D -m 755 target/release/gestos debian/mygestures/usr/bin/gestos
+	install -D -m 755 target/release/gestosd debian/gestos/usr/bin/gestosd
+	install -D -m 755 target/release/gestos debian/gestos/usr/bin/gestos
+
+	# Keep old autostart entries and scripts working after the rename from MyGestures
+	sed 's,@bindir@,/usr/bin,' build-aux/mygestures-compat.sh.in > debian/gestos/usr/bin/mygestures
+	chmod 755 debian/gestos/usr/bin/mygestures
 
 	# Install udev rules
-	install -D -m 644 packaging/99-mygestures.rules debian/mygestures/lib/udev/rules.d/99-mygestures.rules
+	install -D -m 644 packaging/99-gestos.rules debian/gestos/lib/udev/rules.d/99-gestos.rules
 
 	# Install systemd modules-load configuration
-	install -D -m 644 packaging/mygestures.conf debian/mygestures/lib/modules-load.d/mygestures.conf
+	install -D -m 644 packaging/gestos.conf debian/gestos/lib/modules-load.d/gestos.conf
 
 	# Install desktop application shortcut, icon, and default configuration
-	install -D -m 644 gestos.desktop debian/mygestures/usr/share/applications/gestos.desktop
-	install -D -m 644 gestos.svg debian/mygestures/usr/share/icons/hicolor/scalable/apps/gestos.svg
-	install -D -m 644 mygestures.yaml debian/mygestures/usr/share/mygestures/mygestures.yaml
+	install -D -m 644 gestos.desktop debian/gestos/usr/share/applications/gestos.desktop
+	install -D -m 644 gestos.svg debian/gestos/usr/share/icons/hicolor/scalable/apps/gestos.svg
+	install -D -m 644 gestos.yaml debian/gestos/usr/share/gestos/gestos.yaml
 
 override_dh_fixperms:
 	dh_fixperms
-	# Set Set-Group-ID (SGID) permission on mygestures binary
-	chgrp input debian/mygestures/usr/bin/mygestures
-	chmod 2755 debian/mygestures/usr/bin/mygestures
+	# Set Set-Group-ID (SGID) permission on gestosd binary
+	chgrp input debian/gestos/usr/bin/gestosd
+	chmod 2755 debian/gestos/usr/bin/gestosd

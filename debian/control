@@ -1,16 +1,19 @@
-Source: mygestures
+Source: gestos
 Section: utils
 Priority: optional
 Maintainer: Lucas Augusto Deters <lucasdeters@gmail.com>
 Build-Depends: debhelper-compat (= 13), cargo, rustc, libevdev-dev, libgtk-4-dev, libc6-dev, pkg-config
 Standards-Version: 4.6.2
-Homepage: https://github.com/deters/mygestures
+Homepage: https://github.com/deters/gestos
 
-Package: mygestures
+Package: gestos
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Replaces: mygestures (<< 5.0.0)
+Breaks: mygestures (<< 5.0.0)
+Provides: mygestures (= ${binary:Version})
 Description: Modern mouse gestures utility for Wayland and Evdev
- MyGestures is a tool that allows you to perform actions by drawing
+ Gestos is a tool that allows you to perform actions by drawing
  gestures with your mouse, touchpad, or touchscreen. It works directly
  with evdev and uinput, making it compatible with Wayland compositors
  like Sway, Hyprland, and GNOME/KDE.

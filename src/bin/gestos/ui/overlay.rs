@@ -5,7 +5,7 @@ use gtk4 as gtk;
 use futures_util::StreamExt;
 use std::rc::Rc;
 use std::cell::RefCell;
-use mygestures::protractor::Point2D;
+use gestos::protractor::Point2D;
 
 enum OverlayEvent {
     Started(f64, f64),
@@ -15,9 +15,9 @@ enum OverlayEvent {
 }
 
 #[zbus::proxy(
-    interface = "org.mygestures.Daemon",
-    default_service = "org.mygestures.Daemon",
-    default_path = "/org/mygestures/Daemon"
+    interface = "io.github.deters.Gestos.Daemon",
+    default_service = "io.github.deters.Gestos.Daemon",
+    default_path = "/io/github/deters/Gestos/Daemon"
 )]
 trait Daemon {
     #[zbus(signal)]

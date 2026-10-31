@@ -707,7 +707,7 @@ mod tests {
             .arg(
                 WaylandContext::default()
                     .control_center_command()
-                    .replace("xfce4-settings-manager", "mygestures-no-such-program true"),
+                    .replace("xfce4-settings-manager", "gestos-no-such-program true"),
             )
             .status()
             .unwrap();
