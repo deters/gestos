@@ -71,8 +71,9 @@ pub fn build_ui(app: &gtk::Application) {
     window.set_titlebar(Some(&header));
 
     // 1. Add gesture button (Primary action on the left)
-    let add_gest_btn = gtk::Button::with_mnemonic("_New Gesture");
-    add_gest_btn.set_tooltip_text(Some("Add Gesture"));
+    let add_gest_btn = gtk::Button::from_icon_name("list-add-symbolic");
+    add_gest_btn.set_tooltip_text(Some("New Gesture"));
+    add_gest_btn.update_property(&[gtk::accessible::Property::Label("New Gesture")]);
     header.pack_start(&add_gest_btn);
 
     // 2. Primary Menu (Hamburger button)
@@ -170,6 +171,10 @@ pub fn build_ui(app: &gtk::Application) {
     empty_subtitle.set_opacity(0.65);
     empty_state_box.append(&empty_subtitle);
 
+    let empty_add_btn = gtk::Button::with_mnemonic("_New Gesture");
+    empty_add_btn.set_halign(gtk::Align::Center);
+    empty_state_box.append(&empty_add_btn);
+
     list_container.append(&empty_state_box);
     scrolled.set_child(Some(&list_container));
 
@@ -181,7 +186,7 @@ pub fn build_ui(app: &gtk::Application) {
 
     let gesture_status = GestureStatus::new("Gestures", dbus_conn.clone());
     header.set_title_widget(Some(gesture_status.title()));
-    header.pack_start(gesture_status.action_button());
+    header.pack_end(gesture_status.action_button());
     content_vbox.insert_child_after(gesture_status.error_area(), Some(&search_bar));
     content_vbox.insert_child_after(gesture_status.notice_area(), Some(gesture_status.error_area()));
 
@@ -211,6 +216,10 @@ pub fn build_ui(app: &gtk::Application) {
     let state_clone2 = Rc::clone(&state);
     add_gest_btn.connect_clicked(move |_| {
         open_gesture_editor(&state_clone2, None);
+    });
+    let state_empty_add = Rc::clone(&state);
+    empty_add_btn.connect_clicked(move |_| {
+        open_gesture_editor(&state_empty_add, None);
     });
 
     // Connect row activation for editing
