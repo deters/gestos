@@ -61,7 +61,7 @@ Usage:
 Starting automatically:
 -----------------------
 
-In `gestos`, turn on **Start When I Log In** at the top of the window. This is the supported method, and it works on GNOME, KDE Plasma, and XFCE on every distribution.
+In `gestos`, open **Preferences** from the main menu and turn on **Start When I Log In**. This is the supported method, and it works on GNOME, KDE Plasma, and XFCE on every distribution.
 
 Sway and Hyprland don't run autostart entries by themselves, so start the daemon from their config instead:
 

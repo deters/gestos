@@ -146,7 +146,7 @@ pub fn build_ui(app: &gtk::Application) {
     let main_list = gtk::ListBox::new();
     main_list.set_halign(gtk::Align::Center);
     main_list.set_width_request(500);
-    main_list.set_margin_top(24);
+    main_list.set_margin_top(12);
     main_list.set_margin_bottom(24);
     main_list.set_margin_start(24);
     main_list.set_margin_end(24);
@@ -183,7 +183,7 @@ pub fn build_ui(app: &gtk::Application) {
     let dbus_conn = zbus::blocking::Connection::session().ok();
 
     let status_card = StatusCard::new(dbus_conn.clone());
-    content_vbox.insert_child_after(status_card.widget(), Some(&search_bar));
+    list_container.prepend(status_card.widget());
 
     let state = Rc::new(RefCell::new(AppState {
         config,

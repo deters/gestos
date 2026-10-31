@@ -1,5 +1,5 @@
 use crate::daemon::{is_daemon_running, turn_off, turn_on};
-use crate::system::{get_autostart_file_path, set_autostart_enabled};
+use crate::system::get_autostart_file_path;
 use gtk::prelude::*;
 use gtk::{gio, glib};
 use gtk4 as gtk;
@@ -11,7 +11,7 @@ const STATUS_POLL_INTERVAL_SECS: u64 = 1;
 fn status_text(running: bool, autostart: bool) -> &'static str {
     match (running, autostart) {
         (true, _) => "Running. Hold the gesture button (normally right) and draw.",
-        (false, true) => "Stopped. Your mouse works normally. Gestures start again at next login.",
+        (false, true) => "Stopped. Gestures start again at next login.",
         (false, false) => "Stopped. Your mouse works normally.",
     }
 }
@@ -26,14 +26,12 @@ fn summarize_error(message: &str) -> String {
     first_line.trim_start_matches("ERROR: ").trim().to_string()
 }
 
-/// The app's main control: whether gestures are on, and whether they start at login. Daemon
-/// calls can block, so they all run off the UI thread.
+/// The app's main control: whether gestures are running. Daemon calls can block, so they all run off the UI thread.
 #[derive(Clone)]
 pub struct StatusCard {
     root: gtk::Box,
     status_label: gtk::Label,
     action_button: gtk::Button,
-    autostart_switch: Option<gtk::Switch>,
     error_box: gtk::Box,
     error_summary: gtk::Label,
     error_details: gtk::Expander,
@@ -41,7 +39,6 @@ pub struct StatusCard {
     dbus_conn: Option<zbus::blocking::Connection>,
     busy: Rc<Cell<bool>>,
     polling: Rc<Cell<bool>>,
-    updating_switches: Rc<Cell<bool>>,
     last_running: Rc<Cell<Option<bool>>>,
 }
 
@@ -82,7 +79,7 @@ impl StatusCard {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
         root.set_halign(gtk::Align::Center);
         root.set_width_request(500);
-        root.set_margin_top(24);
+        root.set_margin_top(12);
         root.set_margin_start(24);
         root.set_margin_end(24);
 
@@ -100,33 +97,6 @@ impl StatusCard {
         action_button.set_sensitive(false);
         gestures_box.append(&action_button);
         list.append(&gestures_row);
-
-        let manual_autostart =
-            gestos::config::manual_autostart_for(gestos::config::get_environment_suffix());
-        let (autostart_row, autostart_box) = card_row();
-        let autostart_switch = match manual_autostart {
-            Some((desktop, config_file, line)) => {
-                let subtitle =
-                    format!("{desktop} doesn't use this setting. Add this line to {config_file}:");
-                let (text, _) = row_text("Start When I Log In", &subtitle);
-                let config_line = gtk::Label::new(Some(line));
-                config_line.add_css_class("monospace");
-                config_line.set_halign(gtk::Align::Start);
-                config_line.set_selectable(true);
-                text.append(&config_line);
-                autostart_box.append(&text);
-                None
-            }
-            None => {
-                let (text, _) = row_text("Start When I Log In", "Start gestures automatically");
-                autostart_box.append(&text);
-                let switch = gtk::Switch::new();
-                switch.set_valign(gtk::Align::Center);
-                autostart_box.append(&switch);
-                Some(switch)
-            }
-        };
-        list.append(&autostart_row);
 
         let error_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
         error_box.add_css_class("warning-box");
@@ -159,7 +129,6 @@ impl StatusCard {
             root,
             status_label,
             action_button,
-            autostart_switch,
             error_box,
             error_summary,
             error_details,
@@ -167,7 +136,6 @@ impl StatusCard {
             dbus_conn,
             busy: Rc::new(Cell::new(false)),
             polling: Rc::new(Cell::new(false)),
-            updating_switches: Rc::new(Cell::new(false)),
             last_running: Rc::new(Cell::new(None)),
         };
         card.connect_signals();
@@ -185,20 +153,6 @@ impl StatusCard {
             let start = card.last_running.get() != Some(true);
             card.set_gestures(start);
         });
-
-        if let Some(switch) = &self.autostart_switch {
-            let card = self.clone();
-            switch.connect_state_set(move |_, enabled| {
-                if !card.updating_switches.get() {
-                    card.show_error(None);
-                    if let Err(e) = set_autostart_enabled(enabled) {
-                        card.show_error(Some(&format!("Could not change the login setting: {e}")));
-                    }
-                    card.render();
-                }
-                glib::Propagation::Proceed
-            });
-        }
     }
 
     fn start_polling(&self) {
@@ -269,18 +223,20 @@ impl StatusCard {
         });
     }
 
+    /// Whether gestures will start at next login. A desktop that needs a manual config line
+    /// doesn't use the autostart entry, so nothing can be said about it there.
     fn autostart_enabled() -> bool {
-        get_autostart_file_path().is_some_and(|path| path.exists())
+        gestos::config::manual_autostart_for(gestos::config::get_environment_suffix()).is_none()
+            && get_autostart_file_path().is_some_and(|path| path.exists())
     }
 
     fn render(&self) {
         let Some(running) = self.last_running.get() else {
             return;
         };
-        let manual_autostart = self.autostart_switch.is_none();
-        let autostart = !manual_autostart && Self::autostart_enabled();
 
-        self.status_label.set_text(status_text(running, autostart));
+        self.status_label
+            .set_text(status_text(running, Self::autostart_enabled()));
         self.action_button
             .set_label(if running { "Stop" } else { "Start" });
         if running {
@@ -289,12 +245,6 @@ impl StatusCard {
             self.action_button.add_css_class("suggested-action");
         }
         self.action_button.set_sensitive(true);
-
-        self.updating_switches.set(true);
-        if let Some(switch) = &self.autostart_switch {
-            switch.set_active(autostart);
-        }
-        self.updating_switches.set(false);
     }
 
     fn show_error(&self, message: Option<&str>) {

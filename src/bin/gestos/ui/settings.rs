@@ -8,14 +8,14 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use crate::state::AppState;
 use crate::daemon::reload_daemon;
-use crate::system::{is_osd_enabled, set_osd_enabled, get_overlay_autostart_file_path, set_overlay_enabled};
+use crate::system::{get_autostart_file_path, set_autostart_enabled, is_osd_enabled, set_osd_enabled, get_overlay_autostart_file_path, set_overlay_enabled};
 
 pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     let parent = state_rc.borrow().window.clone();
     let dialog = gtk::Window::new();
     dialog.set_transient_for(Some(&parent));
     dialog.set_modal(true);
-    dialog.set_title(Some("Settings"));
+    dialog.set_title(Some("Preferences"));
     dialog.set_default_size(380, -1);
     
     let esc_controller = gtk::EventControllerKey::new();
@@ -32,7 +32,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
 
     let header = gtk::HeaderBar::new();
     header.set_show_title_buttons(true);
-    let title_label = gtk::Label::new(Some("Settings"));
+    let title_label = gtk::Label::new(Some("Preferences"));
     title_label.add_css_class("title");
     header.set_title_widget(Some(&title_label));
     dialog.set_titlebar(Some(&header));
@@ -56,6 +56,65 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     general_list.add_css_class("boxed-list");
     general_list.set_selection_mode(gtk::SelectionMode::None);
     main_box.append(&general_list);
+
+    // Start at login row
+    let autostart_row = gtk::ListBoxRow::new();
+    autostart_row.set_activatable(false);
+    let autostart_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    autostart_box.set_margin_start(16);
+    autostart_box.set_margin_end(16);
+    autostart_box.set_margin_top(12);
+    autostart_box.set_margin_bottom(12);
+
+    let autostart_text = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    autostart_text.set_hexpand(true);
+    autostart_text.set_halign(gtk::Align::Start);
+
+    let autostart_title = gtk::Label::new(Some("Start When I Log In"));
+    autostart_title.add_css_class("status-label");
+    autostart_title.set_halign(gtk::Align::Start);
+    autostart_text.append(&autostart_title);
+
+    let manual_autostart =
+        gestos::config::manual_autostart_for(gestos::config::get_environment_suffix());
+    let autostart_subtitle = gtk::Label::new(None);
+    autostart_subtitle.add_css_class("action-label");
+    autostart_subtitle.set_halign(gtk::Align::Start);
+    autostart_subtitle.set_xalign(0.0);
+    autostart_subtitle.set_wrap(true);
+    autostart_text.append(&autostart_subtitle);
+    autostart_box.append(&autostart_text);
+
+    match manual_autostart {
+        Some((desktop, config_file, line)) => {
+            autostart_subtitle.set_text(&format!(
+                "{desktop} doesn't use this setting. Add this line to {config_file}:"
+            ));
+            let config_line = gtk::Label::new(Some(line));
+            config_line.add_css_class("monospace");
+            config_line.set_halign(gtk::Align::Start);
+            config_line.set_selectable(true);
+            autostart_text.append(&config_line);
+        }
+        None => {
+            autostart_subtitle.set_text("Start gestures automatically");
+            let autostart_switch = gtk::Switch::new();
+            autostart_switch.set_valign(gtk::Align::Center);
+            autostart_switch
+                .set_active(get_autostart_file_path().is_some_and(|path| path.exists()));
+            let subtitle = autostart_subtitle.clone();
+            autostart_switch.connect_state_set(move |_, enabled| {
+                match set_autostart_enabled(enabled) {
+                    Ok(()) => subtitle.set_text("Start gestures automatically"),
+                    Err(e) => subtitle.set_text(&format!("Could not change this setting: {e}")),
+                }
+                glib::Propagation::Proceed
+            });
+            autostart_box.append(&autostart_switch);
+        }
+    }
+    autostart_row.set_child(Some(&autostart_box));
+    general_list.append(&autostart_row);
 
     // Overlay (Gesture Trail) row
     let overlay_row = gtk::ListBoxRow::new();
