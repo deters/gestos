@@ -6,17 +6,25 @@ use gtk4 as gtk;
 use std::cell::Cell;
 use std::rc::Rc;
 
-const STATUS_POLL_INTERVAL_SECS: u64 = 1;
+const STATUS_POLL_INTERVAL_SECS: u32 = 1;
 
 fn status_text(running: bool, autostart: bool) -> &'static str {
     match (running, autostart) {
-        (true, _) => "Running. Hold the gesture button (normally right) and draw.",
-        (false, true) => "Stopped. Gestures start again at next login.",
-        (false, false) => "Stopped. Your mouse works normally.",
+        (true, _) => "Running",
+        (false, true) => "Stopped, starts again at next login",
+        (false, false) => "Stopped",
     }
 }
 
-/// One plain sentence for the card. The daemon's full output, with its setup steps, stays
+fn button_tooltip(running: bool) -> &'static str {
+    if running {
+        "Stop gestures. Your mouse will work normally."
+    } else {
+        "Start gestures. Hold the gesture button (normally right) and draw."
+    }
+}
+
+/// One plain sentence for the error area. The daemon's full output, with its setup steps, stays
 /// available under Details.
 fn summarize_error(message: &str) -> String {
     if message.contains("Missing permissions") {
@@ -26,10 +34,12 @@ fn summarize_error(message: &str) -> String {
     first_line.trim_start_matches("ERROR: ").trim().to_string()
 }
 
-/// The app's main control: whether gestures are running. Daemon calls can block, so they all run off the UI thread.
+/// The app's main control, which lives in the header bar: a title showing whether gestures are
+/// running, a Start or Stop button, and an error area for the window's content. Daemon calls
+/// can block, so they all run off the UI thread.
 #[derive(Clone)]
-pub struct StatusCard {
-    root: gtk::Box,
+pub struct GestureStatus {
+    title: gtk::Box,
     status_label: gtk::Label,
     action_button: gtk::Button,
     error_box: gtk::Box,
@@ -42,64 +52,28 @@ pub struct StatusCard {
     last_running: Rc<Cell<Option<bool>>>,
 }
 
-fn card_row() -> (gtk::ListBoxRow, gtk::Box) {
-    let row = gtk::ListBoxRow::new();
-    row.set_activatable(false);
-    let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    row_box.set_margin_start(16);
-    row_box.set_margin_end(16);
-    row_box.set_margin_top(12);
-    row_box.set_margin_bottom(12);
-    row.set_child(Some(&row_box));
-    (row, row_box)
-}
+impl GestureStatus {
+    pub fn new(title_text: &str, dbus_conn: Option<zbus::blocking::Connection>) -> Self {
+        let title = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        title.set_valign(gtk::Align::Center);
+        let title_label = gtk::Label::new(Some(title_text));
+        title_label.add_css_class("title");
+        title.append(&title_label);
+        let status_label = gtk::Label::new(Some("Checking…"));
+        status_label.add_css_class("subtitle");
+        status_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        title.append(&status_label);
 
-fn row_text(title: &str, subtitle: &str) -> (gtk::Box, gtk::Label) {
-    let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    text.set_hexpand(true);
-    text.set_halign(gtk::Align::Start);
-
-    let title_label = gtk::Label::new(Some(title));
-    title_label.add_css_class("status-label");
-    title_label.set_halign(gtk::Align::Start);
-    text.append(&title_label);
-
-    let subtitle_label = gtk::Label::new(Some(subtitle));
-    subtitle_label.add_css_class("action-label");
-    subtitle_label.set_halign(gtk::Align::Start);
-    subtitle_label.set_xalign(0.0);
-    subtitle_label.set_wrap(true);
-    text.append(&subtitle_label);
-
-    (text, subtitle_label)
-}
-
-impl StatusCard {
-    pub fn new(dbus_conn: Option<zbus::blocking::Connection>) -> Self {
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        root.set_halign(gtk::Align::Center);
-        root.set_width_request(500);
-        root.set_margin_top(12);
-        root.set_margin_start(24);
-        root.set_margin_end(24);
-
-        let list = gtk::ListBox::new();
-        list.add_css_class("boxed-list");
-        list.set_selection_mode(gtk::SelectionMode::None);
-        root.append(&list);
-
-        let (gestures_row, gestures_box) = card_row();
-        let (gestures_text, status_label) = row_text("Mouse Gestures", "Checking…");
-        gestures_box.append(&gestures_text);
         let action_button = gtk::Button::with_label("Start");
-        action_button.set_valign(gtk::Align::Center);
-        action_button.set_width_request(80);
         action_button.set_sensitive(false);
-        gestures_box.append(&action_button);
-        list.append(&gestures_row);
 
         let error_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
         error_box.add_css_class("warning-box");
+        error_box.set_halign(gtk::Align::Center);
+        error_box.set_width_request(500);
+        error_box.set_margin_top(12);
+        error_box.set_margin_start(24);
+        error_box.set_margin_end(24);
         error_box.set_visible(false);
 
         let error_summary = gtk::Label::new(None);
@@ -123,10 +97,9 @@ impl StatusCard {
         let error_details = gtk::Expander::with_mnemonic("_Details");
         error_details.set_child(Some(&error_scroller));
         error_box.append(&error_details);
-        root.append(&error_box);
 
-        let card = StatusCard {
-            root,
+        let status = GestureStatus {
+            title,
             status_label,
             action_button,
             error_box,
@@ -138,28 +111,33 @@ impl StatusCard {
             polling: Rc::new(Cell::new(false)),
             last_running: Rc::new(Cell::new(None)),
         };
-        card.connect_signals();
-        card.start_polling();
-        card
-    }
 
-    pub fn widget(&self) -> &gtk::Box {
-        &self.root
-    }
-
-    fn connect_signals(&self) {
-        let card = self.clone();
-        self.action_button.connect_clicked(move |_| {
-            let start = card.last_running.get() != Some(true);
-            card.set_gestures(start);
+        let clicked = status.clone();
+        status.action_button.connect_clicked(move |_| {
+            let start = clicked.last_running.get() != Some(true);
+            clicked.set_gestures(start);
         });
+        status.start_polling();
+        status
+    }
+
+    pub fn title(&self) -> &gtk::Box {
+        &self.title
+    }
+
+    pub fn action_button(&self) -> &gtk::Button {
+        &self.action_button
+    }
+
+    pub fn error_area(&self) -> &gtk::Box {
+        &self.error_box
     }
 
     fn start_polling(&self) {
         self.poll();
-        let card = self.clone();
-        glib::timeout_add_seconds_local(STATUS_POLL_INTERVAL_SECS as u32, move || {
-            card.poll();
+        let status = self.clone();
+        glib::timeout_add_seconds_local(STATUS_POLL_INTERVAL_SECS, move || {
+            status.poll();
             glib::ControlFlow::Continue
         });
     }
@@ -171,17 +149,17 @@ impl StatusCard {
         self.polling.set(true);
         let conn = self.dbus_conn.clone();
         let check = gio::spawn_blocking(move || is_daemon_running(conn.as_ref()));
-        let card = self.clone();
+        let status = self.clone();
         glib::spawn_future_local(async move {
             let running = check.await.unwrap_or(false);
-            card.polling.set(false);
-            if !card.busy.get() {
+            status.polling.set(false);
+            if !status.busy.get() {
                 // A daemon started some other way resolves an earlier failure to start.
-                if running && card.last_running.get() != Some(true) {
-                    card.show_error(None);
+                if running && status.last_running.get() != Some(true) {
+                    status.show_error(None);
                 }
-                card.last_running.set(Some(running));
-                card.render();
+                status.last_running.set(Some(running));
+                status.render();
             }
         });
     }
@@ -209,17 +187,17 @@ impl StatusCard {
             };
             (result, is_daemon_running(conn.as_ref()))
         });
-        let card = self.clone();
+        let status = self.clone();
         glib::spawn_future_local(async move {
             let (result, running) = change
                 .await
                 .unwrap_or_else(|_| (Err("The operation stopped unexpectedly.".to_string()), false));
-            card.busy.set(false);
+            status.busy.set(false);
             if let Err(message) = result {
-                card.show_error(Some(&message));
+                status.show_error(Some(&message));
             }
-            card.last_running.set(Some(running));
-            card.render();
+            status.last_running.set(Some(running));
+            status.render();
         });
     }
 
@@ -239,6 +217,7 @@ impl StatusCard {
             .set_text(status_text(running, Self::autostart_enabled()));
         self.action_button
             .set_label(if running { "Stop" } else { "Start" });
+        self.action_button.set_tooltip_text(Some(button_tooltip(running)));
         if running {
             self.action_button.remove_css_class("suggested-action");
         } else {
@@ -279,7 +258,7 @@ mod tests {
     fn stopped_warns_only_when_gestures_will_return_at_login() {
         assert!(status_text(false, true).contains("next login"));
         assert!(!status_text(false, false).contains("next login"));
-        assert!(status_text(true, true).starts_with("Running."));
-        assert!(status_text(true, false).starts_with("Running."));
+        assert_eq!(status_text(true, true), "Running");
+        assert_eq!(status_text(true, false), "Running");
     }
 }

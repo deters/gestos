@@ -73,7 +73,7 @@ On systemd distributions, Fedora and source installs also include an optional us
 Starting and stopping gestures:
 -------------------------------
 
-Use the **Start** and **Stop** button at the top of `gestos`, or right-click the app icon and choose **Start Gestures** or **Stop Gestures**. From a terminal or a key binding, run `gestos --start` or `gestos --stop`. Stopping also stops the gesture trail overlay, and your mouse works normally. Closing the `gestos` window doesn't stop gestures.
+Use the **Start** or **Stop** button in the title bar of `gestos`, or right-click the app icon and choose **Start Gestures** or **Stop Gestures**. From a terminal or a key binding, run `gestos --start` or `gestos --stop`. Stopping also stops the gesture trail overlay, and your mouse works normally. Closing the `gestos` window doesn't stop gestures.
 
 If **Start When I Log In** is on, gestures start again at your next login.
 

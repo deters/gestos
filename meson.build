@@ -40,7 +40,7 @@ cargo_sources = files(
   'src/bin/gestos/ui/components.rs',
   'src/bin/gestos/ui/editor.rs',
   'src/bin/gestos/ui/settings.rs',
-  'src/bin/gestos/ui/status_card.rs',
+  'src/bin/gestos/ui/gesture_status.rs',
   'src/bin/gestos/system.rs',
   'src/bin/gestos/daemon.rs',
   'src/bin/gestos/state.rs',

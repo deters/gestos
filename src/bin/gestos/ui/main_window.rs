@@ -9,7 +9,7 @@ use crate::state::AppState;
 use crate::ui::editor::open_gesture_editor;
 use crate::ui::settings::open_settings_window;
 use crate::ui::components::create_gesture_row;
-use crate::ui::status_card::StatusCard;
+use crate::ui::gesture_status::GestureStatus;
 
 pub fn get_visible_gestures(state: &AppState) -> Vec<Gesture> {
     let filter = state.search_entry.text().to_lowercase();
@@ -68,9 +68,6 @@ pub fn build_ui(app: &gtk::Application) {
     window.set_default_size(650, 700);
 
     let header = gtk::HeaderBar::new();
-    let title_label = gtk::Label::new(Some("Gestures"));
-    title_label.add_css_class("title");
-    header.set_title_widget(Some(&title_label));
     window.set_titlebar(Some(&header));
 
     // 1. Add gesture button (Primary action on the left)
@@ -146,7 +143,7 @@ pub fn build_ui(app: &gtk::Application) {
     let main_list = gtk::ListBox::new();
     main_list.set_halign(gtk::Align::Center);
     main_list.set_width_request(500);
-    main_list.set_margin_top(12);
+    main_list.set_margin_top(24);
     main_list.set_margin_bottom(24);
     main_list.set_margin_start(24);
     main_list.set_margin_end(24);
@@ -182,8 +179,10 @@ pub fn build_ui(app: &gtk::Application) {
     let config = Configuration::load_from_defaults();
     let dbus_conn = zbus::blocking::Connection::session().ok();
 
-    let status_card = StatusCard::new(dbus_conn.clone());
-    list_container.prepend(status_card.widget());
+    let gesture_status = GestureStatus::new("Gestures", dbus_conn.clone());
+    header.set_title_widget(Some(gesture_status.title()));
+    header.pack_start(gesture_status.action_button());
+    content_vbox.insert_child_after(gesture_status.error_area(), Some(&search_bar));
 
     let state = Rc::new(RefCell::new(AppState {
         config,
