@@ -1,5 +1,6 @@
 name: Build and Release Packages
 
+# Tags build and publish a release. Starting this by hand only builds the packages.
 on:
   push:
     tags: [ 'v*' ]
