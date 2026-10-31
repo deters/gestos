@@ -188,7 +188,13 @@ pub fn open_shortcut_recorder(
             return glib::Propagation::Stop;
         }
 
-        let mut key_name = keyval.name().map(|s| s.to_string()).unwrap_or_default();
+        // Page Down shares its keysym with the alias "Next", which the daemon reads as the
+        // media key, so the page keys are always named explicitly.
+        let mut key_name = match keyval {
+            gdk::Key::Page_Up => "Page_Up".to_string(),
+            gdk::Key::Page_Down => "Page_Down".to_string(),
+            _ => keyval.name().map(|s| s.to_string()).unwrap_or_default(),
+        };
         let display_key = if key_name.len() == 1 {
             key_name.to_uppercase()
         } else {

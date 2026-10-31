@@ -1,5 +1,22 @@
 #[cfg(target_os = "linux")]
 use evdev::uinput::VirtualDevice;
+#[cfg(target_os = "linux")]
+use std::sync::{Arc, Mutex};
+
+/// Maps a trigger button argument to its evdev code. Only mouse and digitizer buttons are
+/// accepted: this binary may run with `input` group rights, so it must not act as a way to
+/// observe keyboard keys.
+pub fn trigger_button_code(button: i32) -> Option<u16> {
+    match button {
+        1 => Some(0x110), // BTN_LEFT
+        2 => Some(0x112), // BTN_MIDDLE
+        3 => Some(0x111), // BTN_RIGHT
+        8 => Some(0x113), // BTN_SIDE
+        9 => Some(0x114), // BTN_EXTRA
+        0x110..=0x11f | 0x140..=0x14f => Some(button as u16),
+        _ => None,
+    }
+}
 
 pub fn name_to_keycode(name: &str) -> Option<u16> {
     let lower = name.to_lowercase();
@@ -89,13 +106,49 @@ pub fn name_to_keycode(name: &str) -> Option<u16> {
         "search" | "xf86search" => Some(217),
         "calc" | "xf86calculator" => Some(140),
         "print" | "printscreen" => Some(99),
+        "insert" => Some(110),
+        "prior" => Some(104),
+        "minus" | "underscore" => Some(12),
+        "equal" | "plus" => Some(13),
+        "bracketleft" | "braceleft" => Some(26),
+        "bracketright" | "braceright" => Some(27),
+        "semicolon" | "colon" => Some(39),
+        "apostrophe" | "quotedbl" => Some(40),
+        "grave" | "asciitilde" => Some(41),
+        "backslash" | "bar" => Some(43),
+        "comma" | "less" => Some(51),
+        "period" | "greater" => Some(52),
+        "slash" | "question" => Some(53),
+        "exclam" => Some(2),
+        "at" => Some(3),
+        "numbersign" => Some(4),
+        "dollar" => Some(5),
+        "percent" => Some(6),
+        "asciicircum" => Some(7),
+        "ampersand" => Some(8),
+        "asterisk" => Some(9),
+        "parenleft" => Some(10),
+        "parenright" => Some(11),
         _ => None,
     }
 }
 
+/// Resolves a shortcut like `Control_L+Alt_L+t` to its key codes. A shortcut with an unknown
+/// key is rejected as a whole, because pressing only the known part would be a different
+/// shortcut. Keys are physical positions on a US layout, not the characters a layout produces.
+pub fn parse_key_combo(keys: &str) -> Result<Vec<u16>, String> {
+    keys.split(['+', ' '])
+        .filter(|token| !token.is_empty())
+        .map(|token| name_to_keycode(token).ok_or_else(|| token.to_string()))
+        .collect()
+}
+
+/// Shared handle to the virtual device. The lock is held only for each write, so an action
+/// that is sleeping between key events never delays pointer forwarding.
 #[cfg(target_os = "linux")]
+#[derive(Clone)]
 pub struct UinputDevice {
-    device: evdev::uinput::VirtualDevice,
+    device: Arc<Mutex<VirtualDevice>>,
 }
 
 #[cfg(target_os = "linux")]
@@ -139,10 +192,18 @@ impl UinputDevice {
         }
 
         let device = builder.build()?;
-        Ok(UinputDevice { device })
+        Ok(UinputDevice {
+            device: Arc::new(Mutex::new(device)),
+        })
     }
 
-    pub fn click(&mut self, button: i32) {
+    // `VirtualDevice::emit` terminates each batch with its own SYN_REPORT.
+    fn emit(&self, events: &[evdev::InputEvent]) {
+        let mut device = self.device.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = device.emit(events);
+    }
+
+    pub fn click(&self, button: i32) {
         let ev_button = match button {
             1 => evdev::KeyCode::BTN_LEFT,
             2 => evdev::KeyCode::BTN_MIDDLE,
@@ -153,30 +214,26 @@ impl UinputDevice {
         };
 
         let press = evdev::InputEvent::new(evdev::EventType::KEY.0, ev_button.0, 1);
-        let syn = evdev::InputEvent::new(evdev::EventType::SYNCHRONIZATION.0, 0, 0);
         let release = evdev::InputEvent::new(evdev::EventType::KEY.0, ev_button.0, 0);
 
-        let _ = self.device.emit(&[press, syn]);
+        self.emit(&[press]);
         std::thread::sleep(std::time::Duration::from_millis(50));
-        let _ = self.device.emit(&[release, syn]);
+        self.emit(&[release]);
     }
 
-    pub fn keypress_string(&mut self, keys: &str) {
-        let mut codes = Vec::new();
-        for token in keys.split(['+', ' ']) {
-            if token.is_empty() {
-                continue;
+    pub fn keypress_string(&self, keys: &str) {
+        let codes = match parse_key_combo(keys) {
+            Ok(codes) => codes,
+            Err(unknown) => {
+                eprintln!("mygestures: Ignoring shortcut '{}': unknown key '{}'", keys, unknown);
+                return;
             }
-            if let Some(code) = name_to_keycode(token) {
-                codes.push(code);
-            }
-        }
+        };
 
         // Press all keys in sequence
         for &code in &codes {
             let press = evdev::InputEvent::new(evdev::EventType::KEY.0, code, 1);
-            let syn = evdev::InputEvent::new(evdev::EventType::SYNCHRONIZATION.0, 0, 0);
-            let _ = self.device.emit(&[press, syn]);
+            self.emit(&[press]);
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
@@ -185,28 +242,105 @@ impl UinputDevice {
         // Release in reverse order
         for &code in codes.iter().rev() {
             let release = evdev::InputEvent::new(evdev::EventType::KEY.0, code, 0);
-            let syn = evdev::InputEvent::new(evdev::EventType::SYNCHRONIZATION.0, 0, 0);
-            let _ = self.device.emit(&[release, syn]);
+            self.emit(&[release]);
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
 
-    pub fn forward_event(&mut self, ev_type: u16, ev_code: u16, ev_value: i32) {
-        let ev = evdev::InputEvent::new(ev_type, ev_code, ev_value);
-        let _ = self.device.emit(&[ev]);
+    /// Forwards one input frame, without its SYN_REPORT.
+    pub fn forward_frame(&self, events: &[evdev::InputEvent]) {
+        self.emit(events);
     }
 }
 
 #[cfg(not(target_os = "linux"))]
+#[derive(Clone)]
 pub struct UinputDevice;
 
 #[cfg(not(target_os = "linux"))]
 impl UinputDevice {
-    pub fn click(&mut self, button: i32) {
+    pub fn click(&self, button: i32) {
         log::info!("uinput click stub: {}", button);
     }
-    pub fn keypress_string(&mut self, keys: &str) {
+    pub fn keypress_string(&self, keys: &str) {
         log::info!("uinput keypress string stub: {}", keys);
     }
-    pub fn forward_event(&mut self, _ev_type: u16, _ev_code: u16, _ev_value: i32) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_combo_resolves_in_order_ignoring_case() {
+        assert_eq!(parse_key_combo("Control_L+Alt_L+t"), Ok(vec![29, 56, 20]));
+        assert_eq!(parse_key_combo("control+C"), Ok(vec![29, 46]));
+        assert_eq!(parse_key_combo("Shift+minus"), Ok(vec![42, 12]));
+    }
+
+    #[test]
+    fn key_combo_with_an_unknown_key_is_rejected_whole() {
+        assert_eq!(
+            parse_key_combo("Control_L+NoSuchKey"),
+            Err("NoSuchKey".to_string())
+        );
+    }
+
+    #[test]
+    fn every_keypress_in_the_shipped_config_resolves() {
+        let path = std::env::temp_dir().join(format!(
+            "mygestures-keys-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(&path, include_str!("../mygestures.yaml")).unwrap();
+        let config = crate::config::Configuration::load_from_file(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        for gesture in &config.gestures {
+            for action in &gesture.actions {
+                if let crate::config::ActionType::Keypress(keys) = action {
+                    assert!(parse_key_combo(keys).is_ok(), "{}: {}", gesture.name, keys);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_fallback_key_used_by_the_desktop_backends_resolves() {
+        for keys in [
+            "Super_L+Shift_L+Control_L+Alt_L+F12",
+            "Alt_L+Print",
+            "Shift_L+Print",
+            "Control_L+Alt_L+Delete",
+            "XF86AudioRaiseVolume",
+            "XF86AudioLowerVolume",
+            "XF86AudioMute",
+            "XF86AudioPlay",
+            "XF86AudioNext",
+            "XF86AudioPrev",
+            "XF86WWW",
+            "XF86Explorer",
+            "XF86Mail",
+            "XF86Search",
+            "XF86Calculator",
+        ] {
+            assert!(parse_key_combo(keys).is_ok(), "{}", keys);
+        }
+    }
+
+    #[test]
+    fn trigger_accepts_mouse_and_digitizer_buttons() {
+        assert_eq!(trigger_button_code(1), Some(0x110));
+        assert_eq!(trigger_button_code(3), Some(0x111));
+        assert_eq!(trigger_button_code(9), Some(0x114));
+        assert_eq!(trigger_button_code(0x11f), Some(0x11f));
+        assert_eq!(trigger_button_code(0x14a), Some(0x14a));
+    }
+
+    #[test]
+    fn trigger_rejects_keyboard_codes() {
+        for code in [-1, 0, 4, 7, 30, 0x10f, 0x120, 0x13f, 0x150, 0x1_0110] {
+            assert_eq!(trigger_button_code(code), None, "code {code}");
+        }
+    }
 }

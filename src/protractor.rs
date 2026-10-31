@@ -282,4 +282,66 @@ mod tests {
         assert_eq!(resampled[3], Point2D { x: 7.5, y: 0.0 });
         assert_eq!(resampled[4], Point2D { x: 10.0, y: 0.0 });
     }
+
+    fn path(coords: &[(f64, f64)]) -> Vec<Point2D> {
+        coords.iter().map(|&(x, y)| Point2D { x, y }).collect()
+    }
+
+    fn templates() -> Vec<(String, Vec<Point2D>)> {
+        vec![
+            ("right".to_string(), path(&[(0.0, 50.0), (100.0, 50.0)])),
+            ("left".to_string(), path(&[(100.0, 50.0), (0.0, 50.0)])),
+            ("down".to_string(), path(&[(50.0, 0.0), (50.0, 100.0)])),
+            (
+                "corner".to_string(),
+                path(&[(0.0, 0.0), (0.0, 100.0), (100.0, 100.0)]),
+            ),
+        ]
+    }
+
+    fn matched(points: &[(f64, f64)]) -> Option<String> {
+        match_gesture(&path(points), &templates())
+    }
+
+    #[test]
+    fn matches_a_stroke_by_direction() {
+        assert_eq!(matched(&[(0.0, 0.0), (80.0, 0.0)]).as_deref(), Some("right"));
+        assert_eq!(matched(&[(80.0, 0.0), (0.0, 0.0)]).as_deref(), Some("left"));
+        assert_eq!(matched(&[(0.0, 0.0), (0.0, 80.0)]).as_deref(), Some("down"));
+    }
+
+    #[test]
+    fn matching_ignores_size_and_position() {
+        let tiny = [(500.0, 500.0), (500.0, 520.0), (520.0, 520.0)];
+        let large = [(-900.0, 0.0), (-900.0, 900.0), (0.0, 900.0)];
+        assert_eq!(matched(&tiny).as_deref(), Some("corner"));
+        assert_eq!(matched(&large).as_deref(), Some("corner"));
+    }
+
+    #[test]
+    fn matching_tolerates_a_slight_tilt() {
+        assert_eq!(matched(&[(0.0, 0.0), (100.0, 10.0)]).as_deref(), Some("right"));
+    }
+
+    #[test]
+    fn rejects_a_shape_unlike_any_template() {
+        let zigzag = [
+            (0.0, 0.0),
+            (100.0, 100.0),
+            (0.0, 100.0),
+            (100.0, 0.0),
+            (50.0, 200.0),
+        ];
+        assert_eq!(matched(&zigzag), None);
+    }
+
+    #[test]
+    fn handles_degenerate_input() {
+        assert_eq!(matched(&[(1.0, 1.0)]), None);
+        assert_eq!(matched(&[]), None);
+        assert_eq!(match_gesture(&path(&[(0.0, 0.0), (9.0, 9.0)]), &[]), None);
+        // A template with no usable path is skipped rather than matched.
+        let unusable = vec![("dot".to_string(), path(&[(0.0, 0.0)]))];
+        assert_eq!(match_gesture(&path(&[(0.0, 0.0), (9.0, 9.0)]), &unusable), None);
+    }
 }

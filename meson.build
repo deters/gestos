@@ -26,6 +26,7 @@ cargo_sources = files(
   'Cargo.lock',
   'src/lib.rs',
   'src/config.rs',
+  'src/gesture.rs',
   'src/ipc.rs',
   'src/protractor.rs',
   'src/uinput.rs',

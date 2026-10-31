@@ -238,7 +238,7 @@ impl WaylandContext {
             ActionType::Email => uinput_handler("XF86Mail"),
             ActionType::Search => uinput_handler("XF86Search"),
             ActionType::Calculator => uinput_handler("XF86Calculator"),
-            ActionType::ControlCenter => uinput_handler("XF86ControlPanel"),
+            ActionType::ControlCenter => self.open_control_center(),
             ActionType::Logout => uinput_handler("Control_L+Alt_L+Delete"),
             ActionType::Screenshot => uinput_handler("Print"),
             ActionType::ScreenshotWindow => uinput_handler("Alt_L+Print"),
@@ -281,7 +281,7 @@ impl WaylandContext {
             ActionType::Email => uinput_handler("XF86Mail"),
             ActionType::Search => uinput_handler("XF86Search"),
             ActionType::Calculator => uinput_handler("XF86Calculator"),
-            ActionType::ControlCenter => uinput_handler("XF86ControlPanel"),
+            ActionType::ControlCenter => self.open_control_center(),
             ActionType::Logout => uinput_handler("Control_L+Alt_L+Delete"),
             ActionType::Screenshot => uinput_handler("Print"),
             ActionType::ScreenshotWindow => uinput_handler("Alt_L+Print"),
@@ -367,9 +367,7 @@ impl WaylandContext {
             ActionType::Calculator => {
                 self.run_gnome_shortcut("calculator", "XF86Calculator", uinput_handler)
             }
-            ActionType::ControlCenter => {
-                self.run_gnome_shortcut("control-center", "XF86ControlPanel", uinput_handler)
-            }
+            ActionType::ControlCenter => self.open_control_center(),
             ActionType::Logout => {
                 self.run_gnome_shortcut("logout", "Control_L+Alt_L+Delete", uinput_handler)
             }
@@ -417,7 +415,7 @@ impl WaylandContext {
             ActionType::Email => uinput_handler("XF86Mail"),
             ActionType::Search => uinput_handler("XF86Search"),
             ActionType::Calculator => uinput_handler("XF86Calculator"),
-            ActionType::ControlCenter => uinput_handler("XF86ControlPanel"),
+            ActionType::ControlCenter => self.open_control_center(),
             ActionType::Logout => uinput_handler("Control_L+Alt_L+Delete"),
             ActionType::Screenshot => uinput_handler("Print"),
             ActionType::ScreenshotWindow => uinput_handler("Alt_L+Print"),
@@ -466,13 +464,34 @@ impl WaylandContext {
             ActionType::Email => uinput_handler("XF86Mail"),
             ActionType::Search => uinput_handler("XF86Search"),
             ActionType::Calculator => uinput_handler("XF86Calculator"),
-            ActionType::ControlCenter => uinput_handler("XF86ControlPanel"),
+            ActionType::ControlCenter => self.open_control_center(),
             ActionType::Logout => uinput_handler("Control_L+Alt_L+Delete"),
             ActionType::Screenshot => uinput_handler("Print"),
             ActionType::ScreenshotWindow => uinput_handler("Alt_L+Print"),
             ActionType::ScreenshotArea => uinput_handler("Shift_L+Print"),
             _ => {}
         }
+    }
+
+    fn control_center_command(&self) -> String {
+        // Sway and Hyprland have no settings app of their own, so use whichever is installed.
+        let candidates: &[&str] = if self.is_sway || self.is_hypr {
+            &["gnome-control-center", "systemsettings", "xfce4-settings-manager"]
+        } else if self.is_gnome {
+            &["gnome-control-center"]
+        } else if self.is_kde {
+            &["systemsettings"]
+        } else {
+            &["xfce4-settings-manager"]
+        };
+        format!(
+            "sh -c 'for c in {}; do command -v $c >/dev/null && exec $c; done'",
+            candidates.join(" ")
+        )
+    }
+
+    fn open_control_center(&self) {
+        self.run_user_cmd(&self.control_center_command());
     }
 
     fn run_swaymsg(&self, msg: &str) {
@@ -543,6 +562,9 @@ impl WaylandContext {
                 translated.push_str("Shift_L+");
                 p = &p[7..];
             } else if p.starts_with("<Control>") {
+                translated.push_str("Control_L+");
+                p = &p[9..];
+            } else if p.starts_with("<Primary>") {
                 translated.push_str("Control_L+");
                 p = &p[9..];
             } else if p.starts_with("<Ctrl>") {
@@ -657,4 +679,38 @@ fn get_username_from_uid(uid: u32) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_center_uses_the_desktops_own_settings_app() {
+        let gnome = WaylandContext {
+            is_gnome: true,
+            ..Default::default()
+        };
+        assert!(gnome.control_center_command().contains("in gnome-control-center;"));
+
+        let kde = WaylandContext {
+            is_kde: true,
+            ..Default::default()
+        };
+        assert!(kde.control_center_command().contains("in systemsettings;"));
+    }
+
+    #[test]
+    fn control_center_command_runs_a_real_program_or_does_nothing() {
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg(
+                WaylandContext::default()
+                    .control_center_command()
+                    .replace("xfce4-settings-manager", "mygestures-no-such-program true"),
+            )
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
 }

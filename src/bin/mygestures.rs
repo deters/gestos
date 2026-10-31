@@ -2,8 +2,15 @@ use mygestures::config::{ActionType, Configuration};
 use mygestures::ipc::DaemonIpc;
 use mygestures::wayland::WaylandContext;
 use std::fs;
+use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::net::UnixStream;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, ExitStatus};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 use zbus::interface;
 
 static RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -12,17 +19,31 @@ static RELOAD_MANAGER: AtomicBool = AtomicBool::new(false);
 static CHILD_PIDS: once_cell::sync::Lazy<std::sync::Mutex<Vec<u32>>> =
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new(Vec::new()));
 
-extern "C" fn sigusr1_handler(_sig: std::os::raw::c_int) {}
+static CONFIG_PATH: OnceLock<PathBuf> = OnceLock::new();
+// Written to by the D-Bus thread to wake the event loop, which may be waiting for input.
+static RELOAD_WAKE: OnceLock<UnixStream> = OnceLock::new();
 
-fn register_sigusr1() {
-    unsafe {
-        let sig_action = nix::sys::signal::SigAction::new(
-            nix::sys::signal::SigHandler::Handler(sigusr1_handler),
-            nix::sys::signal::SaFlags::empty(),
-            nix::sys::signal::SigSet::empty(),
-        );
-        let _ = nix::sys::signal::sigaction(nix::sys::signal::Signal::SIGUSR1, &sig_action);
-    }
+// Exit status for errors that restarting can't fix, such as a device without the trigger button.
+const EXIT_PERMANENT_ERROR: i32 = 2;
+
+const DBUS_PATH: &str = "/org/mygestures/Daemon";
+const DBUS_INTERFACE: &str = "org.mygestures.Daemon";
+const LEGACY_STOP_TIMEOUT: Duration = Duration::from_secs(2);
+const GRAB_ATTEMPTS: u32 = 5;
+const GRAB_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+
+const DBUS_NAME_ATTEMPTS: u32 = 15;
+const DBUS_NAME_RETRY_INTERVAL: Duration = Duration::from_millis(200);
+
+const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(200);
+const CHILD_RESTART_MIN_DELAY: Duration = Duration::from_secs(1);
+const CHILD_RESTART_MAX_DELAY: Duration = Duration::from_secs(30);
+const CHILD_STABLE_RUNTIME: Duration = Duration::from_secs(30);
+
+fn config_is_valid() -> bool {
+    CONFIG_PATH
+        .get()
+        .is_some_and(|path| Configuration::load_from_file(path).is_some())
 }
 
 fn kill_children() {
@@ -40,27 +61,27 @@ struct DaemonDbus;
 #[interface(name = "org.mygestures.Daemon")]
 impl DaemonDbus {
     fn reload(&self) -> Result<(), zbus::fdo::Error> {
+        if !config_is_valid() {
+            return Err(zbus::fdo::Error::Failed(
+                "Invalid configuration file format".to_string(),
+            ));
+        }
         if IS_MANAGER.load(Ordering::Relaxed) {
-            let path = mygestures::config::get_default_config_path();
-            if mygestures::config::Configuration::load_from_file(&path).is_none() {
-                return Err(zbus::fdo::Error::Failed(
-                    "Invalid configuration file format".to_string(),
-                ));
-            }
             RELOAD_MANAGER.store(true, Ordering::Relaxed);
             kill_children();
         } else {
-            let path = mygestures::config::get_default_config_path();
-            if mygestures::config::Configuration::load_from_file(&path).is_none() {
-                return Err(zbus::fdo::Error::Failed(
-                    "Invalid configuration file format".to_string(),
-                ));
-            }
             RELOAD_REQUESTED.store(true, Ordering::Relaxed);
-            let _ =
-                nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::Signal::SIGUSR1);
+            if let Some(mut wake) = RELOAD_WAKE.get() {
+                let _ = wake.write(&[1]);
+            }
         }
         Ok(())
+    }
+
+    // Older releases lack this property, which is how a new instance recognizes them.
+    #[zbus(property)]
+    fn version(&self) -> String {
+        env!("CARGO_PKG_VERSION").to_string()
     }
 
     fn stop(&self) {
@@ -170,34 +191,189 @@ fn check_permissions(device: &str) -> bool {
 }
 
 #[cfg(target_os = "linux")]
+enum DaemonSignal {
+    GestureStarted(f64, f64),
+    GestureUpdated(f64, f64),
+    GestureEnded,
+    ActionExecuted(String, String, String),
+}
+
+/// Emits D-Bus signals on their own thread, because a stalled bus must never hold up pointer
+/// forwarding. If the queue fills up, the event loop drops signals instead of waiting.
+#[cfg(target_os = "linux")]
+fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<DaemonSignal>(1024);
+    std::thread::spawn(move || {
+        let Ok(conn) = zbus::blocking::Connection::session() else {
+            return;
+        };
+        let path = "/org/mygestures/Daemon";
+        let iface = "org.mygestures.Daemon";
+        let dest = None::<zbus::names::BusName>;
+        for signal in receiver {
+            let _ = match signal {
+                DaemonSignal::GestureStarted(x, y) => {
+                    conn.emit_signal(dest.clone(), path, iface, "GestureStarted", &(x, y))
+                }
+                DaemonSignal::GestureUpdated(x, y) => {
+                    conn.emit_signal(dest.clone(), path, iface, "GestureUpdated", &(x, y))
+                }
+                DaemonSignal::GestureEnded => {
+                    conn.emit_signal(dest.clone(), path, iface, "GestureEnded", &())
+                }
+                DaemonSignal::ActionExecuted(name, desc, icon) => {
+                    conn.emit_signal(dest.clone(), path, iface, "ActionExecuted", &(name, desc, icon))
+                }
+            };
+        }
+    });
+    sender
+}
+
+/// Runs a gesture's actions in order on their own thread, because they can sleep or wait on a
+/// child process (`swaylock` runs until the screen is unlocked).
+#[cfg(target_os = "linux")]
+fn spawn_gesture_actions(
+    actions: Vec<ActionType>,
+    wayland_ctx: WaylandContext,
+    uinput: Option<mygestures::uinput::UinputDevice>,
+) {
+    std::thread::spawn(move || {
+        for action in &actions {
+            if let ActionType::Click(btn) = action {
+                if let Some(ref u) = uinput {
+                    u.click(btn.unwrap_or(1));
+                }
+            } else {
+                wayland_ctx.execute_action(action, &|keys_str| {
+                    if let Some(ref u) = uinput {
+                        u.keypress_string(keys_str);
+                    }
+                });
+            }
+        }
+    });
+}
+
+/// Grabs the device, waiting briefly for an instance that is exiting to release it.
+#[cfg(target_os = "linux")]
+fn grab_device(dev: &mut evdev::Device) -> std::io::Result<()> {
+    let mut attempt = 1;
+    loop {
+        match dev.grab() {
+            Err(e) if e.raw_os_error() == Some(libc::EBUSY) && attempt < GRAB_ATTEMPTS => {
+                attempt += 1;
+                std::thread::sleep(GRAB_RETRY_INTERVAL);
+            }
+            result => return result,
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn gesture_templates(config: &Configuration) -> Vec<(String, Vec<mygestures::protractor::Point2D>)> {
+    config
+        .gestures
+        .iter()
+        .filter(|g| !g.is_deleted)
+        .map(|g| (g.name.clone(), g.points.clone()))
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn dispatch_gesture(
+    points: &[mygestures::protractor::Point2D],
+    config: &Configuration,
+    templates: &[(String, Vec<mygestures::protractor::Point2D>)],
+    signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
+    wayland_ctx: &WaylandContext,
+    uinput: &Option<mygestures::uinput::UinputDevice>,
+) {
+    let Some(matched_name) = mygestures::protractor::match_gesture(points, templates) else {
+        println!("Gesture failed: did not match any known template.");
+        return;
+    };
+    let Some(gesture) = config.gestures.iter().find(|g| g.name == matched_name) else {
+        return;
+    };
+    println!("Matched gesture: {}", gesture.name);
+
+    let action_desc = gesture
+        .actions
+        .iter()
+        .map(|action| action.get_description())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let icon_name = gesture
+        .actions
+        .first()
+        .map(|a| a.get_icon_name().to_string())
+        .unwrap_or_else(|| "system-run-symbolic".to_string());
+    let _ = signals.try_send(DaemonSignal::ActionExecuted(
+        gesture.name.clone(),
+        action_desc,
+        icon_name,
+    ));
+
+    spawn_gesture_actions(gesture.actions.clone(), wayland_ctx.clone(), uinput.clone());
+}
+
+#[cfg(target_os = "linux")]
 fn run_grabber(
     device_path: &str,
     trigger_button: i32,
     sensitivity: i32,
     mut config: mygestures::config::Configuration,
     wayland_ctx: mygestures::wayland::WaylandContext,
-    ipc: mygestures::ipc::DaemonIpc,
 ) -> Result<(), std::io::Error> {
     use evdev::{Device, EventType, KeyCode};
-    use mygestures::protractor::{match_gesture, Point2D};
+    use mygestures::gesture::GestureRecognizer;
     use mygestures::uinput::UinputDevice;
 
-    let dbus_conn = zbus::blocking::Connection::session().ok();
+    let signals = spawn_signal_thread();
 
     println!("Attempting to open device: {}", device_path);
     let mut dev = Device::open(device_path)?;
 
+    let target_button = mygestures::uinput::trigger_button_code(trigger_button)
+        .map(KeyCode)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("trigger {} is not a mouse button", trigger_button),
+            )
+        })?;
+    if !dev
+        .supported_keys()
+        .is_some_and(|keys| keys.contains(target_button))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "device {} does not have trigger button {}",
+                device_path, trigger_button
+            ),
+        ));
+    }
+
     // Adjust sensitivity threshold if relative device vs absolute device
     let mut threshold = sensitivity as f64;
+    let mut min_path_length = 15.0;
     let abs_x = dev
         .get_absinfo()
         .ok()
         .and_then(|mut iter| iter.find(|(code, _)| *code == evdev::AbsoluteAxisCode::ABS_X))
         .map(|(_, info)| info);
     if let Some(abs_info) = abs_x {
+        // Absolute units vary by device, so scale from its resolution (units per mm) or range.
+        let range = abs_info.maximum() - abs_info.minimum();
+        let resolution = abs_info.resolution();
+        if resolution > 0 {
+            min_path_length = (resolution * 2) as f64;
+        } else if range > 0 {
+            min_path_length = (range / 50) as f64;
+        }
         if sensitivity <= 30 {
-            let range = abs_info.maximum() - abs_info.minimum();
-            let resolution = abs_info.resolution();
             if resolution > 0 {
                 threshold = (resolution * 4) as f64;
             } else if range > 0 {
@@ -206,29 +382,9 @@ fn run_grabber(
         }
     }
 
-    // Translate trigger button to evdev code
-    let target_button = match trigger_button {
-        1 => KeyCode::BTN_LEFT,
-        2 => KeyCode::BTN_MIDDLE,
-        3 => KeyCode::BTN_RIGHT,
-        8 => KeyCode::BTN_SIDE,
-        9 => KeyCode::BTN_EXTRA,
-        other => KeyCode(other as u16),
-    };
-
-    // Exclusive grab (only for button 3 by default)
-    let mut grabbed = false;
-    if trigger_button == 3 {
-        if let Err(e) = dev.grab() {
-            eprintln!("mygestures: Failed to grab device exclusively: {}", e);
-        } else {
-            println!("mygestures: Grabbed device exclusively.");
-            grabbed = true;
-        }
-    }
-
-    // Initialize uinput virtual clone
-    let mut uinput = match UinputDevice::init_from_device(&dev) {
+    // Create the virtual device first: a grabbed mouse with nowhere to forward its events
+    // would leave the user without a pointer.
+    let uinput = match UinputDevice::init_from_device(&dev) {
         Ok(u) => Some(u),
         Err(e) => {
             eprintln!("mygestures: Failed to initialize uinput: {}", e);
@@ -236,18 +392,29 @@ fn run_grabber(
         }
     };
 
-    // Drop elevated GID privileges if running as setgid (SGID)
+    // Exclusive grab (only for button 3 by default)
+    let mut grabbed = false;
+    if trigger_button == 3 {
+        if uinput.is_none() {
+            eprintln!("mygestures: Not grabbing the device because uinput is unavailable.");
+        } else if let Err(e) = grab_device(&mut dev) {
+            eprintln!("mygestures: Failed to grab device exclusively: {}", e);
+        } else {
+            println!("mygestures: Grabbed device exclusively.");
+            grabbed = true;
+        }
+    }
+
+    // Drop the elevated GID for good, including the saved GID that setegid would leave behind
     let rgid = nix::unistd::getgid();
     let egid = nix::unistd::getegid();
     if egid != rgid {
-        if nix::unistd::setegid(rgid).is_ok() {
-            println!(
-                "mygestures: Successfully dropped elevated GID from {} to {}",
-                egid, rgid
-            );
-        } else {
-            eprintln!("mygestures: Warning: Failed to drop elevated GID.");
-        }
+        nix::unistd::setresgid(rgid, rgid, rgid)
+            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+        println!(
+            "mygestures: Successfully dropped elevated GID from {} to {}",
+            egid, rgid
+        );
     }
 
     println!(
@@ -255,34 +422,22 @@ fn run_grabber(
         trigger_button
     );
 
-    let mut is_drawing = false;
-    let mut captured_points = Vec::new();
-    let mut virtual_x = 0.0;
-    let mut virtual_y = 0.0;
-    let mut moved = false;
+    let (mut wake_reader, wake_writer) = UnixStream::pair()?;
+    wake_reader.set_nonblocking(true)?;
+    wake_writer.set_nonblocking(true)?;
+    let _ = RELOAD_WAKE.set(wake_writer);
 
-    // Convert templates for matching
-    let mut templates: Vec<(String, Vec<Point2D>)> = config
-        .gestures
-        .iter()
-        .filter(|g| !g.is_deleted)
-        .map(|g| (g.name.clone(), g.points.clone()))
-        .collect();
+    let mut recognizer = GestureRecognizer::new(threshold / 10.0, min_path_length);
+    let mut pending_frame: Vec<evdev::InputEvent> = Vec::new();
+    let mut templates = gesture_templates(&config);
 
     // Event loop
     loop {
         if RELOAD_REQUESTED.swap(false, Ordering::Relaxed) {
             println!("mygestures: Reloading configuration dynamically...");
-            if let Some(new_config) =
-                mygestures::config::Configuration::load_from_file(&config.user_config_path)
-            {
+            if let Some(new_config) = Configuration::load_from_file(&config.user_config_path) {
                 config = new_config;
-                templates = config
-                    .gestures
-                    .iter()
-                    .filter(|g| !g.is_deleted)
-                    .map(|g| (g.name.clone(), g.points.clone()))
-                    .collect();
+                templates = gesture_templates(&config);
                 println!("mygestures: Configuration reloaded successfully.");
             } else {
                 eprintln!(
@@ -292,13 +447,33 @@ fn run_grabber(
             }
         }
 
-        // Check if another instance requested us to exit via shared memory
-        if ipc.is_kill_requested() {
-            println!("Mygestures asked me to exit via IPC.");
-            break;
+        let mut poll_fds = [
+            libc::pollfd {
+                fd: dev.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: wake_reader.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        if unsafe { libc::poll(poll_fds.as_mut_ptr(), poll_fds.len() as libc::nfds_t, -1) } < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(err);
+        }
+        if poll_fds[1].revents != 0 {
+            let mut drained = [0u8; 64];
+            let _ = wake_reader.read(&mut drained);
+        }
+        if poll_fds[0].revents == 0 {
+            continue;
         }
 
-        // Fetch events blocking
         let events = match dev.fetch_events() {
             Ok(events) => events,
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -312,179 +487,63 @@ fn run_grabber(
 
             if ev_type == EventType::KEY && ev_code == target_button.0 {
                 if ev_value == 1 {
-                    // Start gesture movement
-                    is_drawing = true;
-                    captured_points.clear();
-                    captured_points.push(Point2D {
-                        x: virtual_x,
-                        y: virtual_y,
-                    });
-                    println!(
-                        "Gesture drawing started at ({:.1}, {:.1})",
-                        virtual_x, virtual_y
-                    );
-                    if let Some(ref conn) = dbus_conn {
-                        let _ = conn.emit_signal(
-                            None::<zbus::names::BusName>,
-                            "/org/mygestures/Daemon",
-                            "org.mygestures.Daemon",
-                            "GestureStarted",
-                            &(virtual_x, virtual_y),
-                        );
-                    }
+                    let start = recognizer.press();
+                    println!("Gesture drawing started at ({:.1}, {:.1})", start.x, start.y);
+                    let _ = signals.try_send(DaemonSignal::GestureStarted(start.x, start.y));
                 } else if ev_value == 0 {
-                    // End gesture movement
-                    is_drawing = false;
+                    let path = recognizer.release();
+                    let _ = signals.try_send(DaemonSignal::GestureEnded);
 
-                    // Final coordinate
-                    if moved {
-                        captured_points.push(Point2D {
-                            x: virtual_x,
-                            y: virtual_y,
-                        });
-                    }
-
-                    println!(
-                        "Gesture drawing finished. Path points: {}",
-                        captured_points.len()
-                    );
-
-                    if let Some(ref conn) = dbus_conn {
-                        let _ = conn.emit_signal(
-                            None::<zbus::names::BusName>,
-                            "/org/mygestures/Daemon",
-                            "org.mygestures.Daemon",
-                            "GestureEnded",
-                            &(),
+                    if let Some(points) = path {
+                        println!("Gesture drawing finished. Path points: {}", points.len());
+                        dispatch_gesture(
+                            &points, &config, &templates, &signals, &wayland_ctx, &uinput,
                         );
-                    }
-
-                    // Calculate path length
-                    let len = mygestures::protractor::path_length(&captured_points);
-                    if captured_points.len() < 5 || len < 15.0 {
-                        println!("Gesture failed: path too short or too few points (points: {}, length: {:.1})", captured_points.len(), len);
+                    } else {
+                        println!("Gesture failed: path too short or too few points.");
                         // Click emulation
                         if grabbed {
-                            if let Some(ref mut u) = uinput {
-                                u.click(trigger_button);
+                            if let Some(ref u) = uinput {
+                                let u = u.clone();
+                                std::thread::spawn(move || u.click(trigger_button));
                             }
                         }
-                    } else {
-                        // Match gesture
-                        if let Some(matched_name) = match_gesture(&captured_points, &templates) {
-                            if let Some(gesture) =
-                                config.gestures.iter().find(|g| g.name == matched_name)
-                            {
-                                println!("Matched gesture: {}", gesture.name);
-
-                                let mut action_descs = Vec::new();
-                                for action in &gesture.actions {
-                                    action_descs.push(action.get_description());
-                                }
-                                let action_desc = action_descs.join(", ");
-                                let icon_name = gesture.actions.first()
-                                    .map(|a| a.get_icon_name().to_string())
-                                    .unwrap_or_else(|| "system-run-symbolic".to_string());
-
-                                if let Some(ref conn) = dbus_conn {
-                                    let _ = conn.emit_signal(
-                                        None::<zbus::names::BusName>,
-                                        "/org/mygestures/Daemon",
-                                        "org.mygestures.Daemon",
-                                        "ActionExecuted",
-                                        &(gesture.name.clone(), action_desc, icon_name),
-                                    );
-                                }
-
-                                for action in &gesture.actions {
-                                    if let ActionType::Click(btn) = action {
-                                        if let Some(ref mut u) = uinput {
-                                            u.click(btn.unwrap_or(1));
-                                        }
-                                    } else {
-                                        let ui_cell = std::cell::RefCell::new(uinput.as_mut());
-                                        wayland_ctx.execute_action(action, &|keys_str| {
-                                            if let Some(ref mut u) = *ui_cell.borrow_mut() {
-                                                u.keypress_string(keys_str);
-                                            }
-                                        });
-                                    }
-                                }
-                            }
-                        } else {
-                            println!("Gesture failed: did not match any known template.");
-                        }
-                    }
-                    moved = false;
-                }
-            } else {
-                // Forward events to virtual device if grabbed
-                if grabbed {
-                    if let Some(ref mut u) = uinput {
-                        u.forward_event(ev_type.0, ev_code, ev_value);
                     }
                 }
+                continue;
+            }
 
-                // Update coordinate tracking
-                if ev_type == EventType::RELATIVE {
-                    if ev_code == 0 {
-                        // REL_X
-                        virtual_x += ev_value as f64;
-                        moved = true;
-                    } else if ev_code == 1 {
-                        // REL_Y
-                        virtual_y += ev_value as f64;
-                        moved = true;
+            // Forward whole frames, so one movement isn't split across several reports
+            if grabbed {
+                if ev_type != EventType::SYNCHRONIZATION {
+                    pending_frame.push(ev);
+                } else if ev_code == 0 && !pending_frame.is_empty() {
+                    if let Some(ref u) = uinput {
+                        u.forward_frame(&pending_frame);
                     }
-                } else if ev_type == EventType::ABSOLUTE {
-                    if ev_code == 0 {
-                        // ABS_X
-                        virtual_x = ev_value as f64;
-                        moved = true;
-                    } else if ev_code == 1 {
-                        // ABS_Y
-                        virtual_y = ev_value as f64;
-                        moved = true;
-                    }
-                } else if ev_type == EventType::SYNCHRONIZATION && ev_code == 0 {
-                    // SYN_REPORT
-                    if moved && is_drawing {
-                        let last = captured_points.last();
-                        let add_point = match last {
-                            Some(lp) => {
-                                let dx = virtual_x - lp.x;
-                                let dy = virtual_y - lp.y;
-                                dx * dx + dy * dy >= threshold * threshold / 100.0
-                                // check sensitivity threshold
-                            }
-                            None => true,
-                        };
-                        if add_point {
-                            captured_points.push(Point2D {
-                                x: virtual_x,
-                                y: virtual_y,
-                            });
-                            if let Some(ref conn) = dbus_conn {
-                                let _ = conn.emit_signal(
-                                    None::<zbus::names::BusName>,
-                                    "/org/mygestures/Daemon",
-                                    "org.mygestures.Daemon",
-                                    "GestureUpdated",
-                                    &(virtual_x, virtual_y),
-                                );
-                            }
-                        }
-                    }
-                    moved = false;
+                    pending_frame.clear();
+                }
+            }
+
+            if ev_type == EventType::RELATIVE {
+                match ev_code {
+                    0 => recognizer.move_by(ev_value as f64, 0.0),
+                    1 => recognizer.move_by(0.0, ev_value as f64),
+                    _ => {}
+                }
+            } else if ev_type == EventType::ABSOLUTE {
+                match ev_code {
+                    0 => recognizer.set_x(ev_value as f64),
+                    1 => recognizer.set_y(ev_value as f64),
+                    _ => {}
+                }
+            } else if ev_type == EventType::SYNCHRONIZATION && ev_code == 0 {
+                if let Some(point) = recognizer.sync() {
+                    let _ = signals.try_send(DaemonSignal::GestureUpdated(point.x, point.y));
                 }
             }
         }
     }
-
-    if grabbed {
-        let _ = dev.ungrab();
-    }
-    Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -494,12 +553,248 @@ fn run_grabber(
     _sensitivity: i32,
     _config: mygestures::config::Configuration,
     _wayland_ctx: mygestures::wayland::WaylandContext,
-    _ipc: mygestures::ipc::DaemonIpc,
 ) -> Result<(), std::io::Error> {
     println!("evdev grabbing is only supported on Linux. Mock daemon sleeping...");
     loop {
         std::thread::sleep(std::time::Duration::from_secs(60));
     }
+}
+
+/// A child stopped with SIGTERM was stopped on purpose, either by this manager or by a new
+/// instance taking over its device, so restarting it would fight that decision.
+fn should_restart(status: ExitStatus) -> bool {
+    !status.success()
+        && status.signal() != Some(libc::SIGTERM)
+        && status.code() != Some(EXIT_PERMANENT_ERROR)
+}
+
+/// Returns how long to wait before a restart, and the delay to use after that one.
+fn restart_backoff(delay: Duration, ran_for: Duration) -> (Duration, Duration) {
+    let wait = if ran_for >= CHILD_STABLE_RUNTIME {
+        CHILD_RESTART_MIN_DELAY
+    } else {
+        delay
+    };
+    (wait, (wait * 2).min(CHILD_RESTART_MAX_DELAY))
+}
+
+struct ManagedChild {
+    device: String,
+    process: Option<Child>,
+    started_at: Instant,
+    restart_at: Option<Instant>,
+    restart_delay: Duration,
+}
+
+fn name_has_owner(conn: &zbus::blocking::Connection, name: &str) -> zbus::Result<bool> {
+    let bus = zbus::blocking::fdo::DBusProxy::new(conn)?;
+    Ok(bus.name_has_owner(zbus::names::BusName::try_from(name.to_string())?)?)
+}
+
+fn is_missing_property_error(err: &zbus::Error) -> bool {
+    const MISSING: [&str; 2] = [
+        "org.freedesktop.DBus.Error.UnknownProperty",
+        "org.freedesktop.DBus.Error.InvalidArgs",
+    ];
+    match err {
+        zbus::Error::MethodError(name, _, _) => MISSING.contains(&name.as_str()),
+        zbus::Error::FDO(fdo_err) => matches!(
+            **fdo_err,
+            zbus::fdo::Error::UnknownProperty(_) | zbus::fdo::Error::InvalidArgs(_)
+        ),
+        _ => false,
+    }
+}
+
+/// Asks `name`'s owner to stop if it is a release without the instance lock, returning whether
+/// it did. Such a release can't be replaced through the lock, and it would keep its device
+/// grabbed. Any failure other than the missing property leaves the owner running.
+fn request_legacy_stop(conn: &zbus::blocking::Connection, name: &str) -> zbus::Result<bool> {
+    // The name is D-Bus activatable, so calling it without an owner would start a daemon.
+    if !name_has_owner(conn, name)? {
+        return Ok(false);
+    }
+    match conn.call_method(
+        Some(name),
+        DBUS_PATH,
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &(DBUS_INTERFACE, "Version"),
+    ) {
+        Ok(_) => return Ok(false),
+        Err(e) if !is_missing_property_error(&e) => return Err(e),
+        Err(_) => {}
+    }
+    // The owner exits without replying, so an error here is the expected result.
+    let _ = conn.call_method(Some(name), DBUS_PATH, Some(DBUS_INTERFACE), "Stop", &());
+    Ok(true)
+}
+
+/// Stops an older release left running in this session, typically across a package upgrade.
+/// Bounded by a timeout, so a hung bus or daemon can't prevent startup.
+fn stop_legacy_instance() {
+    if std::env::var("MYGESTURES_CHILD").is_ok() {
+        return;
+    }
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let stopped = (|| -> zbus::Result<bool> {
+            let conn = zbus::blocking::Connection::session()?;
+            let name = mygestures::config::get_dbus_name();
+            if !request_legacy_stop(&conn, &name)? {
+                return Ok(false);
+            }
+            while name_has_owner(&conn, &name)? {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Ok(true)
+        })();
+        let _ = done.send(stopped);
+    });
+    match finished.recv_timeout(LEGACY_STOP_TIMEOUT) {
+        Ok(Ok(true)) => println!("mygestures: Stopped an older running version."),
+        Ok(Ok(false)) => {}
+        Ok(Err(e)) => eprintln!("mygestures: Could not check for an older version: {}", e),
+        Err(_) => eprintln!("mygestures: Timed out stopping an older running version."),
+    }
+}
+
+fn start_dbus_service() {
+    if std::env::var("MYGESTURES_CHILD").is_ok() {
+        return;
+    }
+    std::thread::spawn(|| {
+        // The bus doesn't queue this request, and an instance being replaced may still own
+        // the name for a moment.
+        let mut result = None;
+        for attempt in 0..DBUS_NAME_ATTEMPTS {
+            if attempt > 0 {
+                std::thread::sleep(DBUS_NAME_RETRY_INTERVAL);
+            }
+            let built = zbus::blocking::connection::Builder::session()
+                .and_then(|b| b.name(mygestures::config::get_dbus_name()))
+                .and_then(|b| b.serve_at(DBUS_PATH, DaemonDbus))
+                .and_then(|b| b.build());
+            let done = built.is_ok();
+            result = Some(built);
+            if done {
+                break;
+            }
+        }
+        match result {
+            Some(Ok(_conn)) => {
+                println!("mygestures: Registered D-Bus service.");
+                loop {
+                    std::thread::sleep(Duration::from_secs(3600));
+                }
+            }
+            Some(Err(e)) => eprintln!("mygestures: D-Bus initialization error: {}", e),
+            None => {}
+        }
+    });
+}
+
+fn spawn_device_process(
+    exe: &Path,
+    device: &str,
+    button: i32,
+    sensitivity: i32,
+    custom_config: Option<&str>,
+) -> Option<Child> {
+    let mut cmd = Command::new(exe);
+    cmd.env("MYGESTURES_CHILD", "1");
+    cmd.arg("-d").arg(device);
+    cmd.arg("-b").arg(button.to_string());
+    cmd.arg("-s").arg(sensitivity.to_string());
+    if let Some(cfg) = custom_config {
+        cmd.arg(cfg);
+    }
+    match cmd.spawn() {
+        Ok(child) => Some(child),
+        Err(e) => {
+            eprintln!("Failed to spawn listener process for {}: {}", device, e);
+            None
+        }
+    }
+}
+
+/// Runs one child process per device, restarting any that fail with an increasing delay.
+fn run_manager(devices: &[String], button: i32, sensitivity: i32, custom_config: Option<&str>) {
+    IS_MANAGER.store(true, Ordering::Relaxed);
+    let exe = std::env::current_exe().unwrap();
+    let now = Instant::now();
+    let mut children: Vec<ManagedChild> = devices
+        .iter()
+        .map(|device| ManagedChild {
+            device: device.clone(),
+            process: None,
+            started_at: now,
+            restart_at: Some(now),
+            restart_delay: CHILD_RESTART_MIN_DELAY,
+        })
+        .collect();
+
+    loop {
+        let now = Instant::now();
+        for child in &mut children {
+            if let Some(process) = child.process.as_mut() {
+                if let Ok(Some(status)) = process.try_wait() {
+                    child.process = None;
+                    if should_restart(status) {
+                        let (wait, next_delay) =
+                            restart_backoff(child.restart_delay, now - child.started_at);
+                        eprintln!(
+                            "mygestures: Listener for {} exited ({}). Restarting in {}s.",
+                            child.device,
+                            status,
+                            wait.as_secs()
+                        );
+                        child.restart_at = Some(now + wait);
+                        child.restart_delay = next_delay;
+                    }
+                }
+            }
+        }
+
+        let any_running = children.iter().any(|c| c.process.is_some());
+        if !any_running && RELOAD_MANAGER.swap(false, Ordering::Relaxed) {
+            println!("mygestures parent: Config reload triggered. Restarting child processes...");
+            for child in &mut children {
+                child.restart_at = Some(now);
+                child.restart_delay = CHILD_RESTART_MIN_DELAY;
+            }
+        }
+
+        for child in &mut children {
+            if child.restart_at.is_some_and(|at| at <= now) {
+                child.restart_at = None;
+                child.started_at = now;
+                child.process =
+                    spawn_device_process(&exe, &child.device, button, sensitivity, custom_config);
+            }
+        }
+
+        // Exited children are removed here, so a reload never signals a reused pid.
+        *CHILD_PIDS.lock().unwrap() = children
+            .iter()
+            .filter_map(|c| c.process.as_ref().map(Child::id))
+            .collect();
+
+        if children
+            .iter()
+            .all(|c| c.process.is_none() && c.restart_at.is_none())
+        {
+            return;
+        }
+        std::thread::sleep(CHILD_POLL_INTERVAL);
+    }
+}
+
+fn parse_number_arg(flag: &str, value: &str) -> i32 {
+    value.parse().unwrap_or_else(|_| {
+        eprintln!("Error: {} needs a number, got '{}'.", flag, value);
+        std::process::exit(EXIT_PERMANENT_ERROR);
+    })
 }
 
 fn main() {
@@ -515,11 +810,11 @@ fn main() {
             help = true;
         } else if arg == "-b" || arg == "--button" {
             if let Some(val) = args.next() {
-                button = val.parse::<i32>().unwrap_or(3);
+                button = parse_number_arg("--button", &val);
             }
         } else if arg == "-s" || arg == "--sensitivity" {
             if let Some(val) = args.next() {
-                sensitivity = val.parse::<i32>().unwrap_or(30);
+                sensitivity = parse_number_arg("--sensitivity", &val);
             }
         } else if arg == "-d" || arg == "--device" {
             if let Some(val) = args.next() {
@@ -528,15 +823,10 @@ fn main() {
         } else if arg.starts_with("--device=") {
             devices.push(arg.trim_start_matches("--device=").to_string());
         } else if arg.starts_with("--button=") {
-            button = arg
-                .trim_start_matches("--button=")
-                .parse::<i32>()
-                .unwrap_or(3);
+            button = parse_number_arg("--button", arg.trim_start_matches("--button="));
         } else if arg.starts_with("--sensitivity=") {
-            sensitivity = arg
-                .trim_start_matches("--sensitivity=")
-                .parse::<i32>()
-                .unwrap_or(30);
+            sensitivity =
+                parse_number_arg("--sensitivity", arg.trim_start_matches("--sensitivity="));
         } else if !arg.starts_with('-') {
             custom_config = Some(arg);
         }
@@ -555,11 +845,22 @@ fn main() {
         println!("  -d, --device <DEVICENAME>  : Device to grab (can specify multiple times)");
         println!("  -b, --button <BUTTON>      : Button used to draw the gesture");
         println!("                              Default: '3' (Right Click)");
-        println!("  -s, --sensitivity <VAL>    : Sensitivity threshold (pixels)");
-        println!("                              Default: '30'");
+        println!("  -s, --sensitivity <VAL>    : Distance between recorded points, in tenths");
+        println!("                              of a pixel. Default: '30' (3 pixels)");
         println!("  -h, --help                 : Help");
         return;
     }
+
+    if mygestures::uinput::trigger_button_code(button).is_none() {
+        eprintln!("Error: trigger {} is not a mouse button.", button);
+        std::process::exit(EXIT_PERMANENT_ERROR);
+    }
+
+    let config_path = custom_config
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(mygestures::config::get_default_config_path);
+    let _ = CONFIG_PATH.set(config_path.clone());
 
     // Resolve target device list
     if devices.is_empty() {
@@ -571,77 +872,13 @@ fn main() {
         }
     }
 
-    // If NOT spawned as a child process of the manager, run D-Bus registration
-    if std::env::var("MYGESTURES_CHILD").is_err() {
-        register_sigusr1();
-        std::thread::spawn(move || {
-            let dbus_name = mygestures::config::get_dbus_name();
-            match zbus::blocking::connection::Builder::session()
-                .and_then(|b| b.name(dbus_name))
-                .and_then(|b| b.serve_at("/org/mygestures/Daemon", DaemonDbus))
-                .and_then(|b| b.build())
-            {
-                Ok(_conn) => {
-                    println!("mygestures: Registered D-Bus service.");
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_secs(3600));
-                    }
-                }
-                Err(e) => {
-                    eprintln!("mygestures: D-Bus initialization error: {}", e);
-                }
-            }
-        });
-    }
-
     // If multiple devices are specified, run process manager
     if devices.len() > 1 {
-        IS_MANAGER.store(true, Ordering::Relaxed);
-
-        loop {
-            let exe = std::env::current_exe().unwrap();
-            let mut children = Vec::new();
-
-            for dev in &devices {
-                let mut cmd = std::process::Command::new(&exe);
-                cmd.env("MYGESTURES_CHILD", "1");
-                cmd.arg("-d").arg(dev);
-                cmd.arg("-b").arg(button.to_string());
-                cmd.arg("-s").arg(sensitivity.to_string());
-                if let Some(ref cfg) = custom_config {
-                    cmd.arg(cfg);
-                }
-
-                match cmd.spawn() {
-                    Ok(child) => {
-                        children.push(child);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to spawn listener process for {}: {}", dev, e);
-                    }
-                }
-            }
-
-            {
-                let mut pids = CHILD_PIDS.lock().unwrap();
-                pids.clear();
-                for child in &children {
-                    pids.push(child.id());
-                }
-            }
-
-            for mut child in children {
-                let _ = child.wait();
-            }
-
-            if RELOAD_MANAGER.swap(false, Ordering::Relaxed) {
-                println!(
-                    "mygestures parent: Config reload triggered. Restarting child processes..."
-                );
-                continue;
-            }
-            break;
+        if devices.iter().all(|device| check_permissions(device)) && config_is_valid() {
+            stop_legacy_instance();
         }
+        start_dbus_service();
+        run_manager(&devices, button, sensitivity, custom_config.as_deref());
         return;
     }
 
@@ -652,41 +889,35 @@ fn main() {
     }
 
     // Load configuration
-    let config = if let Some(ref path) = custom_config {
-        if !std::path::Path::new(path).exists() {
-            eprintln!("Error: Configuration file not found at {}.", path);
-            std::process::exit(1);
-        }
-        if let Some(c) = Configuration::load_from_file(path) {
-            c
-        } else {
-            eprintln!("Failed to load config from: {}", path);
-            std::process::exit(1);
-        }
-    } else {
-        let user_path = mygestures::config::get_default_config_path();
-        if !user_path.exists() {
-            eprintln!(
-                "Error: Configuration file not found at {}.",
-                user_path.display()
-            );
+    if !config_path.exists() {
+        eprintln!(
+            "Error: Configuration file not found at {}.",
+            config_path.display()
+        );
+        if custom_config.is_none() {
             eprintln!("Please run gestos first to initialize the configuration.");
-            std::process::exit(1);
         }
-        Configuration::load_from_defaults()
+        std::process::exit(1);
+    }
+    let Some(config) = Configuration::load_from_file(&config_path) else {
+        eprintln!("Failed to load config from: {}", config_path.display());
+        std::process::exit(1);
     };
 
-    // Initialize IPC and kill previous instance of mygestures running on this device
-    let ipc = match DaemonIpc::new(device_path) {
-        Ok(ipc_inst) => {
-            ipc_inst.send_kill_message();
-            ipc_inst
-        }
+    // Only now, so that a daemon that can't start doesn't take a working one down with it
+    stop_legacy_instance();
+
+    // Replace any instance already running on this device; the lock is held until exit
+    let _instance_lock = match DaemonIpc::acquire(device_path) {
+        Ok(lock) => lock,
         Err(e) => {
-            eprintln!("Failed to allocate shared memory segment: {}", e);
+            eprintln!("Failed to acquire the mygestures instance lock: {}", e);
             std::process::exit(1);
         }
     };
+
+    // Registered only now, because the instance just replaced owned the bus name until it exited
+    start_dbus_service();
 
     let wayland_ctx = WaylandContext::discover();
 
@@ -694,8 +925,155 @@ fn main() {
     println!("Capture method: evdev");
     println!("Starting grabber...");
 
-    if let Err(e) = run_grabber(device_path, button, sensitivity, config, wayland_ctx, ipc) {
+    if let Err(e) = run_grabber(device_path, button, sensitivity, config, wayland_ctx) {
         eprintln!("mygestures: Daemon error: {}", e);
-        std::process::exit(1);
+        let permanent = e.kind() == std::io::ErrorKind::InvalidInput;
+        std::process::exit(if permanent { EXIT_PERMANENT_ERROR } else { 1 });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn exited(code: i32) -> ExitStatus {
+        ExitStatus::from_raw(code << 8)
+    }
+
+    fn killed_by(signal: i32) -> ExitStatus {
+        ExitStatus::from_raw(signal)
+    }
+
+    struct FakeDaemon {
+        stop_calls: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    }
+
+    #[interface(name = "org.mygestures.Daemon")]
+    impl FakeDaemon {
+        fn stop(&self) {
+            self.stop_calls.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    struct FakeCurrentDaemon {
+        stop_calls: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    }
+
+    #[interface(name = "org.mygestures.Daemon")]
+    impl FakeCurrentDaemon {
+        #[zbus(property)]
+        fn version(&self) -> String {
+            "9.9.9".to_string()
+        }
+
+        fn stop(&self) {
+            self.stop_calls.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn session_bus() -> Option<zbus::blocking::Connection> {
+        let conn = zbus::blocking::Connection::session().ok();
+        if conn.is_none() {
+            eprintln!("skipped: no D-Bus session bus");
+        }
+        conn
+    }
+
+    // Names are unique per test and process, so this can't reach a real daemon on the bus.
+    fn test_name(suffix: &str) -> String {
+        format!("org.mygestures.Test{}.P{}", suffix, std::process::id())
+    }
+
+    #[test]
+    fn a_release_without_the_version_property_is_stopped() {
+        let Some(client) = session_bus() else { return };
+        let name = test_name("Legacy");
+        let stop_calls = std::sync::Arc::default();
+        let daemon = FakeDaemon {
+            stop_calls: std::sync::Arc::clone(&stop_calls),
+        };
+        let _service = zbus::blocking::connection::Builder::session()
+            .and_then(|b| b.name(name.clone()))
+            .and_then(|b| b.serve_at(DBUS_PATH, daemon))
+            .and_then(|b| b.build())
+            .unwrap();
+
+        assert!(request_legacy_stop(&client, &name).unwrap());
+        assert_eq!(stop_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_release_with_the_version_property_is_left_running() {
+        let Some(client) = session_bus() else { return };
+        let name = test_name("Current");
+        let stop_calls = std::sync::Arc::default();
+        let daemon = FakeCurrentDaemon {
+            stop_calls: std::sync::Arc::clone(&stop_calls),
+        };
+        let _service = zbus::blocking::connection::Builder::session()
+            .and_then(|b| b.name(name.clone()))
+            .and_then(|b| b.serve_at(DBUS_PATH, daemon))
+            .and_then(|b| b.build())
+            .unwrap();
+
+        assert!(!request_legacy_stop(&client, &name).unwrap());
+        assert_eq!(stop_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn a_name_without_an_owner_is_not_called() {
+        let Some(client) = session_bus() else { return };
+        assert!(!request_legacy_stop(&client, &test_name("Absent")).unwrap());
+    }
+
+    #[test]
+    fn this_release_exposes_the_version_property() {
+        let Some(client) = session_bus() else { return };
+        let name = test_name("Real");
+        // Only the property is read here: the real Stop method would exit the test process.
+        let _service = zbus::blocking::connection::Builder::session()
+            .and_then(|b| b.name(name.clone()))
+            .and_then(|b| b.serve_at(DBUS_PATH, DaemonDbus))
+            .and_then(|b| b.build())
+            .unwrap();
+
+        assert!(!request_legacy_stop(&client, &name).unwrap());
+    }
+
+    #[test]
+    fn restarts_only_children_that_failed_unexpectedly() {
+        assert!(should_restart(exited(1)));
+        assert!(should_restart(exited(101)));
+        assert!(should_restart(killed_by(libc::SIGSEGV)));
+        assert!(should_restart(killed_by(libc::SIGKILL)));
+
+        assert!(!should_restart(exited(0)));
+        assert!(!should_restart(exited(EXIT_PERMANENT_ERROR)));
+        assert!(!should_restart(killed_by(libc::SIGTERM)));
+    }
+
+    #[test]
+    fn restart_delay_doubles_up_to_the_maximum() {
+        let quick = Duration::from_secs(1);
+        assert_eq!(
+            restart_backoff(Duration::from_secs(1), quick),
+            (Duration::from_secs(1), Duration::from_secs(2))
+        );
+        assert_eq!(
+            restart_backoff(Duration::from_secs(16), quick),
+            (Duration::from_secs(16), Duration::from_secs(30))
+        );
+        assert_eq!(
+            restart_backoff(Duration::from_secs(30), quick),
+            (Duration::from_secs(30), Duration::from_secs(30))
+        );
+    }
+
+    #[test]
+    fn restart_delay_resets_after_a_stable_run() {
+        assert_eq!(
+            restart_backoff(Duration::from_secs(30), CHILD_STABLE_RUNTIME),
+            (Duration::from_secs(1), Duration::from_secs(2))
+        );
     }
 }
