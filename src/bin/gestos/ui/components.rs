@@ -94,10 +94,10 @@ pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static 
         ActionType::Restore => ("window-restore-symbolic", "icon-bg-blue"),
         ActionType::ToggleFullscreen => ("view-fullscreen-symbolic", "icon-bg-blue"),
         ActionType::Lower | ActionType::Raise => ("window-new-symbolic", "icon-bg-blue"),
-        ActionType::WorkspaceLeft
-        | ActionType::WorkspaceRight
-        | ActionType::WorkspaceUp
-        | ActionType::WorkspaceDown => ("go-next-symbolic", "icon-bg-blue"),
+        ActionType::WorkspaceLeft => ("go-previous-symbolic", "icon-bg-blue"),
+        ActionType::WorkspaceRight => ("go-next-symbolic", "icon-bg-blue"),
+        ActionType::WorkspaceUp => ("go-up-symbolic", "icon-bg-blue"),
+        ActionType::WorkspaceDown => ("go-down-symbolic", "icon-bg-blue"),
         ActionType::VolumeUp | ActionType::VolumeDown | ActionType::VolumeMute => {
             ("audio-volume-high-symbolic", "icon-bg-green")
         }
@@ -306,7 +306,7 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     main_hbox.set_margin_top(12);
     main_hbox.set_margin_bottom(12);
 
-    let drag_handle = gtk::Image::from_icon_name("drag-handle-symbolic");
+    let drag_handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
     drag_handle.add_css_class("drag-handle");
     drag_handle.set_valign(gtk::Align::Center);
     main_hbox.append(&drag_handle);

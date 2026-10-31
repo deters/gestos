@@ -121,10 +121,10 @@ impl ActionType {
             ActionType::Restore => "window-restore-symbolic",
             ActionType::ToggleFullscreen => "view-fullscreen-symbolic",
             ActionType::Lower | ActionType::Raise => "window-new-symbolic",
-            ActionType::WorkspaceLeft
-            | ActionType::WorkspaceRight
-            | ActionType::WorkspaceUp
-            | ActionType::WorkspaceDown => "go-next-symbolic",
+            ActionType::WorkspaceLeft => "go-previous-symbolic",
+            ActionType::WorkspaceRight => "go-next-symbolic",
+            ActionType::WorkspaceUp => "go-up-symbolic",
+            ActionType::WorkspaceDown => "go-down-symbolic",
             ActionType::VolumeUp | ActionType::VolumeDown | ActionType::VolumeMute => {
                 "audio-volume-high-symbolic"
             }
@@ -837,6 +837,14 @@ mod tests {
         for desktop in [Some("gnome"), Some("kde"), Some("xfce"), None] {
             assert_eq!(manual_autostart_for(desktop), None);
         }
+    }
+
+    #[test]
+    fn workspace_icons_point_in_their_direction() {
+        assert_eq!(ActionType::WorkspaceLeft.get_icon_name(), "go-previous-symbolic");
+        assert_eq!(ActionType::WorkspaceRight.get_icon_name(), "go-next-symbolic");
+        assert_eq!(ActionType::WorkspaceUp.get_icon_name(), "go-up-symbolic");
+        assert_eq!(ActionType::WorkspaceDown.get_icon_name(), "go-down-symbolic");
     }
 
     #[test]

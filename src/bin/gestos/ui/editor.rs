@@ -9,7 +9,7 @@ use gestos::config::generate_unique_id;
 use crate::state::{AppState, EditorActionOption, CATEGORY_NAMES};
 use crate::actions::{fetch_gnome_action_options, fetch_kde_action_options, get_static_action_options, action_matches};
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
-use crate::ui::components::{draw_gesture_path, get_action_category_icon};
+use crate::ui::components::{draw_gesture_path, get_action_category_icon, show_confirm_dialog};
 use crate::daemon::reload_daemon;
 use crate::ui::main_window::refresh_gesture_list;
 use gestos::protractor::Point2D;
@@ -266,10 +266,6 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
     let action_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     action_row.add_css_class("settings-row");
 
-    let action_icon = gtk::Image::from_icon_name("system-run-symbolic");
-    action_icon.set_valign(gtk::Align::Center);
-    action_row.append(&action_icon);
-
     let action_label = gtk::Label::new(Some("Action"));
     action_label.set_halign(gtk::Align::Start);
     action_label.add_css_class("status-label");
@@ -304,10 +300,6 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
     // Row 4: Action Details Parameter
     let action_details_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     action_details_row.add_css_class("settings-row");
-
-    let action_details_icon = gtk::Image::from_icon_name("system-run-symbolic");
-    action_details_icon.set_valign(gtk::Align::Center);
-    action_details_row.append(&action_details_icon);
 
     let action_details_label = gtk::Label::new(None);
     action_details_label.set_halign(gtk::Align::Start);
@@ -564,8 +556,6 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
     let btn_label_clone = action_select_label.clone();
     let btn_icon_clone = action_select_icon.clone();
     let row_clone = action_details_row.clone();
-    let action_icon_act = action_icon.clone();
-    let action_details_icon_act = action_details_icon.clone();
     let entry_clone = action_details_entry.clone();
     let label_clone = action_details_label.clone();
     let sdb_clone_act = shortcut_display_box.clone();
@@ -596,17 +586,6 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
             _ => false,
         };
         row_clone.set_visible(show_entry);
-
-        let (act_icon, _) = get_action_category_icon(&opt.action_type);
-        action_icon_act.set_icon_name(Some(act_icon));
-
-        let details_icon_name = match &opt.action_type {
-            ActionType::Keypress(_) => "preferences-desktop-keyboard-shortcuts-symbolic",
-            ActionType::Execute(_) => "utilities-terminal-symbolic",
-            ActionType::Click(_) => "input-mouse-symbolic",
-            _ => "system-run-symbolic",
-        };
-        action_details_icon_act.set_icon_name(Some(details_icon_name));
 
         let is_keypress = matches!(&opt.action_type, ActionType::Keypress(_));
         entry_clone.set_visible(!is_keypress);
@@ -837,18 +816,31 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
         let name_clone = gest.name.clone();
         let dialog_clone3 = dialog.clone();
         delete_btn.connect_clicked(move |_| {
-            let mut state = state_clone.borrow_mut();
-            if let Some(pos) = state.config.gestures.iter().position(|g| g.id == target_id) {
-                state.config.gestures.remove(pos);
-                if let Err(e) = state.config.save_to_file() {
-                    println!("Failed to save config to file on delete: {}", e);
-                }
-                println!("Gesture deleted successfully: {}", name_clone);
-                reload_daemon(state.dbus_conn.as_ref(), Some(&dialog_clone3));
-                drop(state);
-                refresh_gesture_list(&state_clone, None);
-                dialog_clone3.destroy();
-            }
+            let state_clone = Rc::clone(&state_clone);
+            let target_id = target_id.clone();
+            let name_clone = name_clone.clone();
+            let dialog_for_delete = dialog_clone3.clone();
+            show_confirm_dialog(
+                &dialog_clone3,
+                "Delete Gesture?",
+                &format!("\u{201c}{}\u{201d} will be removed. This can't be undone.", name_clone),
+                "Delete",
+                true,
+                move || {
+                    let mut state = state_clone.borrow_mut();
+                    if let Some(pos) = state.config.gestures.iter().position(|g| g.id == target_id) {
+                        state.config.gestures.remove(pos);
+                        if let Err(e) = state.config.save_to_file() {
+                            println!("Failed to save config to file on delete: {}", e);
+                        }
+                        println!("Gesture deleted successfully: {}", name_clone);
+                        reload_daemon(state.dbus_conn.as_ref(), Some(&dialog_for_delete));
+                        drop(state);
+                        refresh_gesture_list(&state_clone, None);
+                        dialog_for_delete.destroy();
+                    }
+                },
+            );
         });
         main_box.append(&delete_btn);
     }
