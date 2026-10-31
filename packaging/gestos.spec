@@ -16,6 +16,7 @@ BuildRequires:  cargo
 BuildRequires:  gtk4-devel
 BuildRequires:  libevdev-devel
 BuildRequires:  gcc
+BuildRequires:  systemd-rpm-macros
 
 Requires:       gtk4
 Requires:       libevdev
