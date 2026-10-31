@@ -387,11 +387,10 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     // 3. Mini Cairo preview canvas
     let preview_frame = gtk::Frame::new(None);
     preview_frame.add_css_class("gesture-preview-frame");
-    preview_frame.set_size_request(60, 60);
+    preview_frame.set_size_request(120, 60);
     preview_frame.set_valign(gtk::Align::Center);
 
     let preview_canvas = gtk::DrawingArea::new();
-    preview_canvas.set_hexpand(true);
     preview_canvas.set_vexpand(true);
     let pts_clone = gesture.points.clone();
     preview_canvas.set_draw_func(move |_, cr, width, height| {

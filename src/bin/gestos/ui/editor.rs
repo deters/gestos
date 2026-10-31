@@ -829,6 +829,7 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
     if let Some(ref gest) = target_gesture {
         let delete_btn = gtk::Button::with_mnemonic("_Delete Gesture");
         delete_btn.add_css_class("destructive-action");
+        delete_btn.set_halign(gtk::Align::Center);
         delete_btn.set_margin_top(8);
 
         let state_clone = Rc::clone(state_rc);
