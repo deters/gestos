@@ -1,5 +1,5 @@
 project('gestos',
-  version: '4.2.2',
+  version: '5.0.0',
   meson_version: '>= 0.56.0'
 )
 
