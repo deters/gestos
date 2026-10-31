@@ -68,31 +68,52 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     text_vbox.set_hexpand(true);
     text_vbox.set_halign(gtk::Align::Start);
 
-    let row_title = gtk::Label::new(Some("Start on Boot"));
+    let row_title = gtk::Label::new(Some("Start on Login"));
     row_title.add_css_class("status-label");
     row_title.set_halign(gtk::Align::Start);
     text_vbox.append(&row_title);
 
-    let row_subtitle = gtk::Label::new(Some("Automatically launch daemon at startup"));
+    let manual_autostart =
+        gestos::config::manual_autostart_for(gestos::config::get_environment_suffix());
+
+    let subtitle = match manual_autostart {
+        Some((desktop, config_file, _)) => {
+            format!("{desktop} doesn't use this setting. Add this line to {config_file}:")
+        }
+        None => "Automatically launch daemon when you log in".to_string(),
+    };
+    let row_subtitle = gtk::Label::new(Some(&subtitle));
     row_subtitle.add_css_class("action-label");
     row_subtitle.set_halign(gtk::Align::Start);
+    row_subtitle.set_wrap(true);
+    row_subtitle.set_xalign(0.0);
     text_vbox.append(&row_subtitle);
+
+    if let Some((_, _, line)) = manual_autostart {
+        let config_line = gtk::Label::new(Some(line));
+        config_line.add_css_class("monospace");
+        config_line.set_halign(gtk::Align::Start);
+        config_line.set_selectable(true);
+        text_vbox.append(&config_line);
+    }
 
     row_box.append(&text_vbox);
 
-    let autostart_switch = gtk::Switch::new();
-    autostart_switch.set_valign(gtk::Align::Center);
+    if manual_autostart.is_none() {
+        let autostart_switch = gtk::Switch::new();
+        autostart_switch.set_valign(gtk::Align::Center);
 
-    let autostart_file = get_autostart_file_path();
-    let is_autostart = autostart_file.map(|p| p.exists()).unwrap_or(false);
-    autostart_switch.set_active(is_autostart);
+        let autostart_file = get_autostart_file_path();
+        let is_autostart = autostart_file.map(|p| p.exists()).unwrap_or(false);
+        autostart_switch.set_active(is_autostart);
 
-    autostart_switch.connect_state_set(move |_, state| {
-        set_autostart_enabled(state);
-        glib::Propagation::Proceed
-    });
+        autostart_switch.connect_state_set(move |_, state| {
+            set_autostart_enabled(state);
+            glib::Propagation::Proceed
+        });
 
-    row_box.append(&autostart_switch);
+        row_box.append(&autostart_switch);
+    }
     autostart_row.set_child(Some(&row_box));
     general_list.append(&autostart_row);
 

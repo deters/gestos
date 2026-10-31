@@ -58,6 +58,18 @@ Usage:
 
 **To use gestures:** Hold the trigger button (default: right-click / button 3) and move the mouse to draw a gesture. Release the button to execute.
 
+Starting automatically:
+-----------------------
+
+In `gestos`, open Settings and turn on **Start on Login**. This is the supported method, and it works on GNOME, KDE Plasma, and XFCE on every distribution.
+
+Sway and Hyprland don't run autostart entries by themselves, so start the daemon from their config instead:
+
+- **Sway** (`~/.config/sway/config`): `exec gestosd`
+- **Hyprland** (`~/.config/hypr/hyprland.conf`): `exec-once = gestosd`
+
+On systemd distributions, Fedora and source installs also include an optional user service, for people who prefer `systemctl --user enable --now gestosd`. The Debian package doesn't include it, and Alpine doesn't use systemd. Use one method only: the Settings switch doesn't know about the service.
+
 Troubleshooting:
 ----------------
 

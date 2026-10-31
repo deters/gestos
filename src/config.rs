@@ -348,6 +348,22 @@ pub fn get_environment_suffix() -> Option<&'static str> {
     None
 }
 
+/// A desktop that doesn't run autostart entries by itself: its name, its config file, and the
+/// line that starts the daemon from there.
+pub fn manual_autostart_for(
+    environment: Option<&str>,
+) -> Option<(&'static str, &'static str, &'static str)> {
+    match environment {
+        Some("sway") => Some(("Sway", "~/.config/sway/config", "exec gestosd")),
+        Some("hyprland") => Some((
+            "Hyprland",
+            "~/.config/hypr/hyprland.conf",
+            "exec-once = gestosd",
+        )),
+        _ => None,
+    }
+}
+
 pub fn get_dbus_name() -> String {
     "io.github.deters.Gestos.Daemon".to_string()
 }
@@ -809,6 +825,18 @@ mod tests {
         fs::write(dir.0.join("gestos/gestos.yaml"), "edited").unwrap();
         dir.migrate();
         assert_eq!(fs::read_to_string(dir.0.join("gestos/gestos.yaml")).unwrap(), "edited");
+    }
+
+    #[test]
+    fn only_sway_and_hyprland_need_a_manual_autostart_line() {
+        assert_eq!(manual_autostart_for(Some("sway")).unwrap().2, "exec gestosd");
+        assert_eq!(
+            manual_autostart_for(Some("hyprland")).unwrap().2,
+            "exec-once = gestosd"
+        );
+        for desktop in [Some("gnome"), Some("kde"), Some("xfce"), None] {
+            assert_eq!(manual_autostart_for(desktop), None);
+        }
     }
 
     #[test]
