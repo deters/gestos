@@ -14,7 +14,8 @@ const STATUS_POLL_INTERVAL_SECS: u32 = 1;
 fn status_text(running: bool, autostart: bool) -> &'static str {
     match (running, autostart) {
         (true, _) => "Running",
-        (false, true) => "Stopped, starts again at next login",
+        // Short enough to keep the title centered in the header.
+        (false, true) => "Stopped, starts at login",
         (false, false) => "Stopped",
     }
 }
@@ -313,8 +314,8 @@ mod tests {
 
     #[test]
     fn stopped_warns_only_when_gestures_will_return_at_login() {
-        assert!(status_text(false, true).contains("next login"));
-        assert!(!status_text(false, false).contains("next login"));
+        assert!(status_text(false, true).contains("login"));
+        assert!(!status_text(false, false).contains("login"));
         assert_eq!(status_text(true, true), "Running");
         assert_eq!(status_text(true, false), "Running");
     }

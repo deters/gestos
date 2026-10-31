@@ -449,5 +449,15 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     reset_row.set_child(Some(&reset_box));
     maintenance_list.append(&reset_row);
 
+    let about_btn = gtk::Button::with_label("About Gestos");
+    about_btn.add_css_class("flat");
+    about_btn.set_halign(gtk::Align::Center);
+    about_btn.set_margin_top(12);
+    let about_parent = dialog.clone();
+    about_btn.connect_clicked(move |_| {
+        crate::ui::main_window::show_about_dialog(&about_parent);
+    });
+    main_box.append(&about_btn);
+
     dialog.present();
 }

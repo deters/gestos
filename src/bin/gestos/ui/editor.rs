@@ -279,7 +279,7 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
     action_spacer.set_hexpand(true);
     action_row.append(&action_spacer);
 
-    let action_select_btn = gtk::MenuButton::new();
+    let action_select_btn = gtk::Button::new();
     action_select_btn.set_halign(gtk::Align::End);
     action_select_btn.set_size_request(240, -1);
     
@@ -290,7 +290,7 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
     action_select_label.set_hexpand(true);
     action_select_label.set_halign(gtk::Align::Start);
     
-    let arrow_icon = gtk::Image::from_icon_name("pan-down-symbolic");
+    let arrow_icon = gtk::Image::from_icon_name("go-next-symbolic");
     
     btn_content.append(&action_select_icon);
     btn_content.append(&action_select_label);
@@ -341,26 +341,42 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
 
     let selected_action: Rc<RefCell<Option<EditorActionOption>>> = Rc::new(RefCell::new(None));
 
-    let action_popover = gtk::Popover::new();
-    action_popover.set_autohide(true);
-    action_popover.set_position(gtk::PositionType::Bottom);
+    let action_picker = gtk::Window::new();
+    action_picker.set_transient_for(Some(&dialog));
+    action_picker.set_modal(true);
+    action_picker.set_destroy_with_parent(true);
+    action_picker.set_hide_on_close(true);
+    action_picker.set_title(Some("Choose Action"));
+    action_picker.set_titlebar(Some(&gtk::HeaderBar::new()));
+    action_picker.set_default_size(400, 480);
 
-    let popover_vbox = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    popover_vbox.set_margin_top(6);
-    popover_vbox.set_margin_bottom(6);
-    popover_vbox.set_margin_start(6);
-    popover_vbox.set_margin_end(6);
+    let picker_esc_controller = gtk::EventControllerKey::new();
+    let picker_esc_window = action_picker.clone();
+    picker_esc_controller.connect_key_pressed(move |_, keyval, _, _| {
+        if keyval == gtk::gdk::Key::Escape {
+            picker_esc_window.set_visible(false);
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+    action_picker.add_controller(picker_esc_controller);
+
+    let picker_vbox = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    picker_vbox.set_margin_top(6);
+    picker_vbox.set_margin_bottom(6);
+    picker_vbox.set_margin_start(6);
+    picker_vbox.set_margin_end(6);
 
     let search_entry = gtk::SearchEntry::new();
     search_entry.set_hexpand(true);
     search_entry.set_placeholder_text(Some("Search actions…"));
-    popover_vbox.append(&search_entry);
+    picker_vbox.append(&search_entry);
 
     let scrolled_window = gtk::ScrolledWindow::new();
     scrolled_window.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
     scrolled_window.set_min_content_height(350);
     scrolled_window.set_min_content_width(320);
-    popover_vbox.append(&scrolled_window);
+    picker_vbox.append(&scrolled_window);
 
     let list_store = gio::ListStore::new::<glib::BoxedAnyObject>();
 
@@ -397,7 +413,7 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
     });
 
     let search_entry_focus = search_entry.clone();
-    action_popover.connect_map(move |_| {
+    action_picker.connect_map(move |_| {
         search_entry_focus.grab_focus();
     });
 
@@ -460,8 +476,9 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
     list_view.set_single_click_activate(true);
     list_view.add_css_class("boxed-list");
     scrolled_window.set_child(Some(&list_view));
-    action_popover.set_child(Some(&popover_vbox));
-    action_select_btn.set_popover(Some(&action_popover));
+    action_picker.set_child(Some(&picker_vbox));
+    let picker_window = action_picker.clone();
+    action_select_btn.connect_clicked(move |_| picker_window.present());
 
     let filter_clone = custom_filter.clone();
     let text_clone = Rc::clone(&filter_text);
@@ -556,10 +573,10 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
     let udn_clone = Rc::clone(&update_default_name);
     let selected_action_clone = Rc::clone(&selected_action);
 
-    let popover_activate_clone = action_popover.clone();
+    let picker_activate_clone = action_picker.clone();
     let selection_model_clone = selection_model.clone();
     list_view.connect_activate(move |_, position| {
-        popover_activate_clone.popdown();
+        picker_activate_clone.set_visible(false);
         let item = match selection_model_clone.item(position) {
             Some(i) => i,
             None => return,

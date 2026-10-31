@@ -62,10 +62,24 @@ pub fn refresh_gesture_list(state_rc: &Rc<RefCell<AppState>>, select_name: Optio
         }
     }
 }
+pub fn show_about_dialog<W: IsA<gtk::Window>>(parent: &W) {
+    let dialog = gtk::AboutDialog::new();
+    dialog.set_transient_for(Some(parent));
+    dialog.set_modal(true);
+    dialog.set_program_name(Some("Gestos"));
+    dialog.set_version(Some("5.0.0"));
+    dialog.set_comments(Some(
+        "A modern mouse gestures editor for Wayland desktop environments.",
+    ));
+    dialog.set_authors(&["Lucas Augusto Deters <lucasdeters@gmail.com>"]);
+    dialog.present();
+}
+
 pub fn build_ui(app: &gtk::Application) {
     let window = gtk::ApplicationWindow::new(app);
     window.set_title(Some("Gestos"));
-    window.set_default_size(650, 700);
+    // Wide enough for the header to keep its title centered with any status.
+    window.set_default_size(700, 700);
 
     let header = gtk::HeaderBar::new();
     window.set_titlebar(Some(&header));
@@ -76,40 +90,17 @@ pub fn build_ui(app: &gtk::Application) {
     add_gest_btn.update_property(&[gtk::accessible::Property::Label("New Gesture")]);
     header.pack_start(&add_gest_btn);
 
-    // 2. Primary Menu (Hamburger button)
-    let menu_btn = gtk::MenuButton::new();
-    menu_btn.set_icon_name("open-menu-symbolic");
-    menu_btn.set_tooltip_text(Some("Main Menu"));
-    
-    let popover = gtk::Popover::new();
-    let menu_vbox = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    menu_vbox.set_margin_start(6);
-    menu_vbox.set_margin_end(6);
-    menu_vbox.set_margin_top(6);
-    menu_vbox.set_margin_bottom(6);
-    
-    // Settings Button
-    let settings_btn = gtk::Button::with_label("Preferences");
-    settings_btn.add_css_class("flat");
-    settings_btn.set_halign(gtk::Align::Fill);
-    menu_vbox.append(&settings_btn);
-    
-    // About Button
-    let about_btn = gtk::Button::with_label("About Gestos");
-    about_btn.add_css_class("flat");
-    about_btn.set_halign(gtk::Align::Fill);
-    menu_vbox.append(&about_btn);
-    
-    popover.set_child(Some(&menu_vbox));
-    menu_btn.set_popover(Some(&popover));
-    
-    header.pack_end(&menu_btn);
+    // 2. Preferences button
+    let settings_btn = gtk::Button::from_icon_name("emblem-system-symbolic");
+    settings_btn.set_tooltip_text(Some("Preferences"));
+    settings_btn.update_property(&[gtk::accessible::Property::Label("Preferences")]);
+    header.pack_end(&settings_btn);
 
     // 3. Search button
     let search_toggle_btn = gtk::ToggleButton::new();
     search_toggle_btn.set_icon_name("system-search-symbolic");
     search_toggle_btn.set_tooltip_text(Some("Search"));
-    header.pack_end(&search_toggle_btn);
+    header.pack_start(&search_toggle_btn);
 
     // Content VBox
     let content_vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -240,27 +231,9 @@ pub fn build_ui(app: &gtk::Application) {
             }
         });
 
-    // Connect about button
-    let window_clone = state.borrow().window.clone();
-    let popover_about_clone = popover.clone();
-    about_btn.connect_clicked(move |_| {
-        popover_about_clone.popdown();
-        let dialog = gtk::AboutDialog::new();
-        dialog.set_transient_for(Some(&window_clone));
-        dialog.set_program_name(Some("Gestos"));
-        dialog.set_version(Some("5.0.0"));
-        dialog.set_comments(Some(
-            "A modern mouse gestures editor for Wayland desktop environments.",
-        ));
-        dialog.set_authors(&["Lucas Augusto Deters <lucasdeters@gmail.com>"]);
-        dialog.present();
-    });
-
     // Connect settings button
     let state_settings_clone = Rc::clone(&state);
-    let popover_settings_clone = popover.clone();
     settings_btn.connect_clicked(move |_| {
-        popover_settings_clone.popdown();
         open_settings_window(&state_settings_clone);
     });
 

@@ -61,7 +61,7 @@ Usage:
 Starting automatically:
 -----------------------
 
-The first time you click **Start** in `gestos`, gestures are also set to start when you log in, and a note lets you undo that. After that, it's your choice: open **Preferences** from the main menu and change **Start When I Log In**. If you upgraded from MyGestures, your setting is kept. This is the supported method, and it works on GNOME, KDE Plasma, and XFCE on every distribution.
+The first time you click **Start** in `gestos`, gestures are also set to start when you log in, and a note lets you undo that. After that, it's your choice: click the **Preferences** button and change **Start When I Log In**. If you upgraded from MyGestures, your setting is kept. This is the supported method, and it works on GNOME, KDE Plasma, and XFCE on every distribution.
 
 Sway and Hyprland don't run autostart entries by themselves, so start the daemon from their config instead:
 
