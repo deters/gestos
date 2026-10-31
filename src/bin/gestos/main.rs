@@ -17,10 +17,10 @@ fn main() {
     );
 
     let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|arg| arg == "--on") {
+    if args.iter().any(|arg| arg == "--start") {
         std::process::exit(daemon::run_command(true));
     }
-    if args.iter().any(|arg| arg == "--off") {
+    if args.iter().any(|arg| arg == "--stop") {
         std::process::exit(daemon::run_command(false));
     }
 

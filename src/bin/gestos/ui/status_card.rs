@@ -10,16 +10,10 @@ const STATUS_POLL_INTERVAL_SECS: u64 = 1;
 
 fn status_text(running: bool, autostart: bool) -> &'static str {
     match (running, autostart) {
-        (true, _) => "On. Hold the gesture button (normally right) and draw.",
-        (false, true) => "Off. Your mouse works normally. Gestures turn on again at next login.",
-        (false, false) => "Off. Your mouse works normally.",
+        (true, _) => "Running. Hold the gesture button (normally right) and draw.",
+        (false, true) => "Stopped. Your mouse works normally. Gestures start again at next login.",
+        (false, false) => "Stopped. Your mouse works normally.",
     }
-}
-
-/// The one-click setup is for someone with nothing turned on. It isn't offered where the
-/// autostart setting doesn't apply, because the button enables both.
-fn offers_setup(running: bool, autostart: bool, manual_autostart: bool) -> bool {
-    !running && !autostart && !manual_autostart
 }
 
 /// The app's main control: whether gestures are on, and whether they start at login. Daemon
@@ -28,9 +22,8 @@ fn offers_setup(running: bool, autostart: bool, manual_autostart: bool) -> bool 
 pub struct StatusCard {
     root: gtk::Box,
     status_label: gtk::Label,
-    gestures_switch: gtk::Switch,
+    action_button: gtk::Button,
     autostart_switch: Option<gtk::Switch>,
-    setup_button: gtk::Button,
     error_scroller: gtk::ScrolledWindow,
     error_label: gtk::Label,
     dbus_conn: Option<zbus::blocking::Connection>,
@@ -89,10 +82,11 @@ impl StatusCard {
         let (gestures_row, gestures_box) = card_row();
         let (gestures_text, status_label) = row_text("Mouse gestures", "Checking...");
         gestures_box.append(&gestures_text);
-        let gestures_switch = gtk::Switch::new();
-        gestures_switch.set_valign(gtk::Align::Center);
-        gestures_switch.set_sensitive(false);
-        gestures_box.append(&gestures_switch);
+        let action_button = gtk::Button::with_label("Start");
+        action_button.set_valign(gtk::Align::Center);
+        action_button.set_width_request(80);
+        action_button.set_sensitive(false);
+        gestures_box.append(&action_button);
         list.append(&gestures_row);
 
         let manual_autostart =
@@ -112,7 +106,7 @@ impl StatusCard {
                 None
             }
             None => {
-                let (text, _) = row_text("Start when I log in", "Turn gestures on automatically");
+                let (text, _) = row_text("Start when I log in", "Start gestures automatically");
                 autostart_box.append(&text);
                 let switch = gtk::Switch::new();
                 switch.set_valign(gtk::Align::Center);
@@ -121,13 +115,6 @@ impl StatusCard {
             }
         };
         list.append(&autostart_row);
-
-        let setup_button = gtk::Button::with_mnemonic("_Turn On Gestures");
-        setup_button.add_css_class("suggested-action");
-        setup_button.set_halign(gtk::Align::Center);
-        setup_button.set_tooltip_text(Some("Turn gestures on now and whenever you log in"));
-        setup_button.set_visible(false);
-        root.append(&setup_button);
 
         let error_label = gtk::Label::new(None);
         error_label.add_css_class("warning-label");
@@ -148,9 +135,8 @@ impl StatusCard {
         let card = StatusCard {
             root,
             status_label,
-            gestures_switch,
+            action_button,
             autostart_switch,
-            setup_button,
             error_scroller,
             error_label,
             dbus_conn,
@@ -170,11 +156,9 @@ impl StatusCard {
 
     fn connect_signals(&self) {
         let card = self.clone();
-        self.gestures_switch.connect_state_set(move |_, enabled| {
-            if !card.updating_switches.get() {
-                card.set_gestures(enabled, false);
-            }
-            glib::Propagation::Proceed
+        self.action_button.connect_clicked(move |_| {
+            let start = card.last_running.get() != Some(true);
+            card.set_gestures(start);
         });
 
         if let Some(switch) = &self.autostart_switch {
@@ -190,11 +174,6 @@ impl StatusCard {
                 glib::Propagation::Proceed
             });
         }
-
-        let card = self.clone();
-        self.setup_button.connect_clicked(move |_| {
-            card.set_gestures(true, true);
-        });
     }
 
     fn start_polling(&self) {
@@ -228,23 +207,22 @@ impl StatusCard {
         });
     }
 
-    fn set_gestures(&self, enabled: bool, enable_autostart: bool) {
+    fn set_gestures(&self, start: bool) {
         if self.busy.get() {
             return;
         }
         self.busy.set(true);
         self.show_error(None);
-        self.gestures_switch.set_sensitive(false);
-        self.setup_button.set_visible(false);
-        self.status_label.set_text(if enabled {
-            "Turning on..."
+        self.action_button.set_sensitive(false);
+        self.status_label.set_text(if start {
+            "Starting..."
         } else {
-            "Turning off..."
+            "Stopping..."
         });
 
         let conn = self.dbus_conn.clone();
         let change = gio::spawn_blocking(move || {
-            let result = if enabled {
+            let result = if start {
                 turn_on(conn.as_ref())
             } else {
                 turn_off(conn.as_ref());
@@ -258,14 +236,8 @@ impl StatusCard {
                 .await
                 .unwrap_or_else(|_| (Err("The operation stopped unexpectedly.".to_string()), false));
             card.busy.set(false);
-            match result {
-                Ok(()) if enable_autostart => {
-                    if let Err(e) = set_autostart_enabled(true) {
-                        card.show_error(Some(&format!("Could not change the login setting: {e}")));
-                    }
-                }
-                Ok(()) => {}
-                Err(message) => card.show_error(Some(&message)),
+            if let Err(message) = result {
+                card.show_error(Some(&message));
             }
             card.last_running.set(Some(running));
             card.render();
@@ -284,12 +256,16 @@ impl StatusCard {
         let autostart = !manual_autostart && Self::autostart_enabled();
 
         self.status_label.set_text(status_text(running, autostart));
-        self.setup_button
-            .set_visible(offers_setup(running, autostart, manual_autostart));
+        self.action_button
+            .set_label(if running { "Stop" } else { "Start" });
+        if running {
+            self.action_button.remove_css_class("suggested-action");
+        } else {
+            self.action_button.add_css_class("suggested-action");
+        }
+        self.action_button.set_sensitive(true);
 
         self.updating_switches.set(true);
-        self.gestures_switch.set_active(running);
-        self.gestures_switch.set_sensitive(true);
         if let Some(switch) = &self.autostart_switch {
             switch.set_active(autostart);
         }
@@ -307,18 +283,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn off_warns_only_when_gestures_will_return_at_login() {
+    fn stopped_warns_only_when_gestures_will_return_at_login() {
         assert!(status_text(false, true).contains("next login"));
         assert!(!status_text(false, false).contains("next login"));
-        assert!(status_text(true, true).starts_with("On."));
-        assert!(status_text(true, false).starts_with("On."));
-    }
-
-    #[test]
-    fn setup_is_offered_only_when_nothing_is_on() {
-        assert!(offers_setup(false, false, false));
-        assert!(!offers_setup(true, false, false));
-        assert!(!offers_setup(false, true, false));
-        assert!(!offers_setup(false, false, true));
+        assert!(status_text(true, true).starts_with("Running."));
+        assert!(status_text(true, false).starts_with("Running."));
     }
 }

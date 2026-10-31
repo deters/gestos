@@ -7,12 +7,12 @@ Icon=gestos
 Terminal=false
 Categories=Settings;GTK;Utility;
 StartupNotify=true
-Actions=TurnOn;TurnOff;
+Actions=Start;Stop;
 
-[Desktop Action TurnOn]
-Name=Turn Gestures On
-Exec=gestos --on
+[Desktop Action Start]
+Name=Start Gestures
+Exec=gestos --start
 
-[Desktop Action TurnOff]
-Name=Turn Gestures Off
-Exec=gestos --off
+[Desktop Action Stop]
+Name=Stop Gestures
+Exec=gestos --stop

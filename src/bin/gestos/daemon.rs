@@ -164,7 +164,7 @@ pub fn stop_daemon(conn: Option<&zbus::blocking::Connection>) {
     }
 }
 
-/// Turns gestures on, including the overlay if the user has it enabled.
+/// Starts gestures, including the overlay if the user has it enabled.
 pub fn turn_on(conn: Option<&zbus::blocking::Connection>) -> Result<(), String> {
     gestos::config::initialize_user_config_if_missing()
         .map_err(|e| format!("Could not create the configuration: {}", e))?;
@@ -173,7 +173,7 @@ pub fn turn_on(conn: Option<&zbus::blocking::Connection>) -> Result<(), String> 
     Ok(())
 }
 
-/// Turns gestures off completely, including the overlay.
+/// Stops gestures completely, including the overlay.
 pub fn turn_off(conn: Option<&zbus::blocking::Connection>) {
     stop_daemon(conn);
     stop_overlay();
@@ -201,28 +201,28 @@ fn send_notification(summary: &str, body: &str) {
     );
 }
 
-/// Handles `gestos --on` and `gestos --off`, which also run from the app icon's menu, where a
+/// Handles `gestos --start` and `gestos --stop`, which also run from the app icon's menu, where a
 /// notification is the only feedback. Returns the process exit code.
 pub fn run_command(enable: bool) -> i32 {
     let conn = zbus::blocking::Connection::session().ok();
     if enable {
         match turn_on(conn.as_ref()) {
             Ok(()) => {
-                send_notification("Gestures are on", "");
+                send_notification("Gestures started", "");
                 0
             }
             Err(message) => {
                 eprintln!("{}", message);
                 send_notification(
-                    "Could not turn gestures on",
-                    "Open Gestos and turn them on there for details.",
+                    "Could not start gestures",
+                    "Open Gestos and start them there for details.",
                 );
                 1
             }
         }
     } else {
         turn_off(conn.as_ref());
-        send_notification("Gestures are off", "Your mouse works normally.");
+        send_notification("Gestures stopped", "Your mouse works normally.");
         0
     }
 }
@@ -231,7 +231,7 @@ pub fn reload_daemon<W: IsA<gtk::Window>>(
     conn: Option<&zbus::blocking::Connection>,
     parent: Option<&W>,
 ) {
-    // The name is D-Bus activatable, so reloading with gestures off would turn them on.
+    // The name is D-Bus activatable, so reloading with gestures stopped would start them.
     if !is_daemon_running(conn) {
         return;
     }

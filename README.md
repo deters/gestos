@@ -54,7 +54,7 @@ Usage:
 ------
 
 - `gestosd`: Start the daemon. Uses default button (button 3 / right-click) on the default mouse device.
-- `gestos`: Start the GTK4 GUI to turn gestures on and off and edit them.
+- `gestos`: Start the GTK4 GUI to start and stop gestures and edit them.
 
 **To use gestures:** Hold the trigger button (default: right-click / button 3) and move the mouse to draw a gesture. Release the button to execute.
 
@@ -70,12 +70,12 @@ Sway and Hyprland don't run autostart entries by themselves, so start the daemon
 
 On systemd distributions, Fedora and source installs also include an optional user service, for people who prefer `systemctl --user enable --now gestosd`. The Debian package doesn't include it, and Alpine doesn't use systemd. Use one method only: the switch in `gestos` doesn't know about the service.
 
-Turning gestures on and off:
-----------------------------
+Starting and stopping gestures:
+-------------------------------
 
-Use the **Mouse gestures** switch at the top of `gestos`, or right-click the app icon and choose **Turn Gestures On** or **Turn Gestures Off**. From a terminal or a key binding, run `gestos --on` or `gestos --off`. Off stops the daemon and the gesture trail overlay, and your mouse works normally. Closing the `gestos` window doesn't turn gestures off.
+Use the **Start** and **Stop** button at the top of `gestos`, or right-click the app icon and choose **Start Gestures** or **Stop Gestures**. From a terminal or a key binding, run `gestos --start` or `gestos --stop`. Stopping also stops the gesture trail overlay, and your mouse works normally. Closing the `gestos` window doesn't stop gestures.
 
-If **Start when I log in** is on, gestures turn on again at your next login.
+If **Start when I log in** is on, gestures start again at your next login.
 
 Troubleshooting:
 ----------------
