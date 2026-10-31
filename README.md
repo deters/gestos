@@ -54,21 +54,28 @@ Usage:
 ------
 
 - `gestosd`: Start the daemon. Uses default button (button 3 / right-click) on the default mouse device.
-- `gestos`: Start the GTK4 GUI configuration editor.
+- `gestos`: Start the GTK4 GUI to turn gestures on and off and edit them.
 
 **To use gestures:** Hold the trigger button (default: right-click / button 3) and move the mouse to draw a gesture. Release the button to execute.
 
 Starting automatically:
 -----------------------
 
-In `gestos`, open Settings and turn on **Start on Login**. This is the supported method, and it works on GNOME, KDE Plasma, and XFCE on every distribution.
+In `gestos`, turn on **Start when I log in** at the top of the window. This is the supported method, and it works on GNOME, KDE Plasma, and XFCE on every distribution.
 
 Sway and Hyprland don't run autostart entries by themselves, so start the daemon from their config instead:
 
 - **Sway** (`~/.config/sway/config`): `exec gestosd`
 - **Hyprland** (`~/.config/hypr/hyprland.conf`): `exec-once = gestosd`
 
-On systemd distributions, Fedora and source installs also include an optional user service, for people who prefer `systemctl --user enable --now gestosd`. The Debian package doesn't include it, and Alpine doesn't use systemd. Use one method only: the Settings switch doesn't know about the service.
+On systemd distributions, Fedora and source installs also include an optional user service, for people who prefer `systemctl --user enable --now gestosd`. The Debian package doesn't include it, and Alpine doesn't use systemd. Use one method only: the switch in `gestos` doesn't know about the service.
+
+Turning gestures on and off:
+----------------------------
+
+Use the **Mouse gestures** switch at the top of `gestos`, or right-click the app icon and choose **Turn Gestures On** or **Turn Gestures Off**. From a terminal or a key binding, run `gestos --on` or `gestos --off`. Off stops the daemon and the gesture trail overlay, and your mouse works normally. Closing the `gestos` window doesn't turn gestures off.
+
+If **Start when I log in** is on, gestures turn on again at your next login.
 
 Troubleshooting:
 ----------------

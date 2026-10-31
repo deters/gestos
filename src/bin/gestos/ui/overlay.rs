@@ -284,7 +284,12 @@ pub fn build_overlay_ui(app: &gtk::Application) {
             }
         };
 
-        let proxy = match DaemonProxy::new(&connection).await {
+        // Without the property cache, this proxy makes no calls that could start the daemon.
+        let proxy = match DaemonProxy::builder(&connection)
+            .cache_properties(zbus::proxy::CacheProperties::No)
+            .build()
+            .await
+        {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("Failed to create Daemon D-Bus proxy: {}", e);

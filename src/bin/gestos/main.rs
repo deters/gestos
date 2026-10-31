@@ -17,6 +17,13 @@ fn main() {
     );
 
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--on") {
+        std::process::exit(daemon::run_command(true));
+    }
+    if args.iter().any(|arg| arg == "--off") {
+        std::process::exit(daemon::run_command(false));
+    }
+
     let is_overlay = args.iter().any(|arg| arg == "--overlay");
 
     let app = gtk::Application::builder()

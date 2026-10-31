@@ -1,6 +1,6 @@
 use gtk::prelude::*;
 use gtk::{gdk, glib};
-use crate::ui::components::{get_action_human_readable, show_error_dialog};
+use crate::ui::components::get_action_human_readable;
 use gtk4 as gtk;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -9,7 +9,7 @@ use crate::state::AppState;
 use crate::ui::editor::open_gesture_editor;
 use crate::ui::settings::open_settings_window;
 use crate::ui::components::create_gesture_row;
-use crate::daemon::{start_daemon, stop_daemon, is_daemon_running};
+use crate::ui::status_card::StatusCard;
 
 pub fn get_visible_gestures(state: &AppState) -> Vec<Gesture> {
     let filter = state.search_entry.text().to_lowercase();
@@ -90,24 +90,6 @@ pub fn build_ui(app: &gtk::Application) {
     menu_vbox.set_margin_end(6);
     menu_vbox.set_margin_top(6);
     menu_vbox.set_margin_bottom(6);
-    
-    // Daemon Row
-    let daemon_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    daemon_row.set_margin_start(6);
-    daemon_row.set_margin_end(6);
-    daemon_row.set_margin_top(6);
-    daemon_row.set_margin_bottom(6);
-    let daemon_lbl = gtk::Label::new(Some("Background Daemon"));
-    daemon_lbl.set_hexpand(true);
-    daemon_lbl.set_halign(gtk::Align::Start);
-    daemon_row.append(&daemon_lbl);
-    
-    let daemon_switch = gtk::Switch::new();
-    daemon_switch.set_valign(gtk::Align::Center);
-    daemon_row.append(&daemon_switch);
-    menu_vbox.append(&daemon_row);
-    
-    menu_vbox.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     
     // Settings Button
     let settings_btn = gtk::Button::with_label("Preferences");
@@ -201,13 +183,14 @@ pub fn build_ui(app: &gtk::Application) {
     let config = Configuration::load_from_defaults();
     let dbus_conn = zbus::blocking::Connection::session().ok();
 
+    let status_card = StatusCard::new(dbus_conn.clone());
+    content_vbox.insert_child_after(status_card.widget(), Some(&search_bar));
+
     let state = Rc::new(RefCell::new(AppState {
         config,
         main_list,
         search_entry,
-        daemon_switch,
         window,
-        switch_handler_id: None,
         newly_added_gestures: Vec::new(),
         dbus_conn,
         empty_state_box,
@@ -271,48 +254,6 @@ pub fn build_ui(app: &gtk::Application) {
     settings_btn.connect_clicked(move |_| {
         popover_settings_clone.popdown();
         open_settings_window(&state_settings_clone);
-    });
-
-    // Connect daemon switch state controller
-    let state_clone4 = Rc::clone(&state);
-    let handler_id = state
-        .borrow()
-        .daemon_switch
-        .connect_state_set(move |_, state| {
-            if state {
-                if let Err(err) = start_daemon(state_clone4.borrow().dbus_conn.as_ref()) {
-                    show_error_dialog(&state_clone4.borrow().window, &err);
-                }
-            } else {
-                stop_daemon(state_clone4.borrow().dbus_conn.as_ref());
-            }
-
-            let state_borrow = state_clone4.borrow();
-            let running = is_daemon_running(state_borrow.dbus_conn.as_ref());
-            if !running {
-                // Toggle the switch back off immediately if daemon startup failed
-                if let Some(ref hid) = state_borrow.switch_handler_id {
-                    state_borrow.daemon_switch.block_signal(hid);
-                    state_borrow.daemon_switch.set_active(false);
-                    state_borrow.daemon_switch.unblock_signal(hid);
-                }
-            }
-            glib::Propagation::Proceed
-        });
-    state.borrow_mut().switch_handler_id = Some(handler_id);
-
-    // Setup periodic status check timer (every 1 second)
-    let state_clone5 = Rc::clone(&state);
-    glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
-        let state_borrow = state_clone5.borrow();
-        let running = is_daemon_running(state_borrow.dbus_conn.as_ref());
-
-        if let Some(ref hid) = state_borrow.switch_handler_id {
-            state_borrow.daemon_switch.block_signal(hid);
-            state_borrow.daemon_switch.set_active(running);
-            state_borrow.daemon_switch.unblock_signal(hid);
-        }
-        glib::ControlFlow::Continue
     });
 
     // Global Keyboard Shortcuts

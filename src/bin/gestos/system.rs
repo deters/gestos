@@ -13,17 +13,32 @@ pub fn get_overlay_autostart_file_path() -> Option<std::path::PathBuf> {
     })
 }
 
-pub fn set_autostart_enabled(enabled: bool) {
-    if let Some(path) = get_autostart_file_path() {
-        if enabled {
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let content = gestos::config::daemon_autostart_entry();
-            let _ = std::fs::write(&path, content);
-        } else if path.exists() {
-            let _ = std::fs::remove_file(&path);
+pub fn set_autostart_enabled(enabled: bool) -> std::io::Result<()> {
+    let Some(path) = get_autostart_file_path() else {
+        return Err(std::io::Error::other("HOME is not set"));
+    };
+    if enabled {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
         }
+        std::fs::write(&path, gestos::config::daemon_autostart_entry())
+    } else if path.exists() {
+        std::fs::remove_file(&path)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn stop_overlay() {
+    let _ = Command::new("pkill").args(["-f", "gestos --overlay"]).status();
+}
+
+/// Starts the overlay if the user has it enabled. Only the daemon's signals drive it, so it's
+/// stopped and started along with the daemon.
+pub fn start_overlay_if_enabled() {
+    if get_overlay_autostart_file_path().is_some_and(|path| path.exists()) {
+        let exe = std::env::current_exe().unwrap_or_else(|_| "gestos".into());
+        let _ = Command::new(exe).arg("--overlay").spawn();
     }
 }
 
@@ -50,7 +65,7 @@ pub fn set_overlay_enabled(enabled: bool) {
                 let _ = std::fs::remove_file(&path);
             }
             // Kill any running overlay instance
-            let _ = Command::new("pkill").args(["-f", "gestos --overlay"]).status();
+            stop_overlay();
         }
     }
 }

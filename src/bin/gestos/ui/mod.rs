@@ -4,3 +4,4 @@ pub mod editor;
 pub mod settings;
 pub mod main_window;
 pub mod overlay;
+pub mod status_card;

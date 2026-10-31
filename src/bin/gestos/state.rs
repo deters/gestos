@@ -1,6 +1,5 @@
 use gestos::config::{ActionType, Configuration};
 use gtk4 as gtk;
-use gtk::glib;
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EditorActionOption {
@@ -26,9 +25,7 @@ pub struct AppState {
     pub config: Configuration,
     pub main_list: gtk::ListBox,
     pub search_entry: gtk::SearchEntry,
-    pub daemon_switch: gtk::Switch,
     pub window: gtk::ApplicationWindow,
-    pub switch_handler_id: Option<glib::SignalHandlerId>,
     pub newly_added_gestures: Vec<String>,
     pub dbus_conn: Option<zbus::blocking::Connection>,
     pub empty_state_box: gtk::Box,
