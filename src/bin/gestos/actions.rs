@@ -23,6 +23,22 @@ pub fn action_matches(a: &ActionType, opt: &EditorActionOption) -> bool {
     }
 }
 
+/// Whether an action needs a value from the user. Most don't: GNOME and KDE actions and custom
+/// GNOME shortcuts are complete as they are, and only the generic Run Command takes a command.
+pub fn action_needs_parameter(opt: &EditorActionOption) -> bool {
+    match &opt.action_type {
+        ActionType::Keypress(_) | ActionType::Click(_) => true,
+        ActionType::Execute(_) => opt.category == 7,
+        _ => false,
+    }
+}
+
+/// Keybinding keys hold a list of accelerators. The schemas also hold settings that aren't
+/// actions, such as the volume step and the list of custom shortcut paths.
+fn is_gnome_action_key(key: &str, holds_string_list: bool) -> bool {
+    holds_string_list && key != "custom-keybindings"
+}
+
 pub fn get_static_action_options() -> Vec<EditorActionOption> {
     vec![
         // Input Emulation (0)
@@ -359,6 +375,11 @@ pub fn fetch_gnome_action_options() -> Vec<EditorActionOption> {
         let settings = gio::Settings::new(schema_id);
 
         for key in schema.list_keys() {
+            let val = settings.value(&key);
+            if !is_gnome_action_key(&key, val.is_type(gtk::glib::VariantTy::STRING_ARRAY)) {
+                continue;
+            }
+
             let skey = schema.key(&key);
             let mut summary = skey.summary().map(|s| s.to_string()).unwrap_or_default();
             if summary.is_empty() {
@@ -371,7 +392,6 @@ pub fn fetch_gnome_action_options() -> Vec<EditorActionOption> {
                 summary = key.to_string();
             }
 
-            let val = settings.value(&key);
             let mut accel = String::new();
             if let Some(s) = val.get::<String>() {
                 accel = s;
@@ -425,4 +445,41 @@ pub fn fetch_gnome_action_options() -> Vec<EditorActionOption> {
         options.len()
     );
     options
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn option(category: usize, action_type: ActionType) -> EditorActionOption {
+        EditorActionOption {
+            category,
+            action_type,
+            name: String::new(),
+            tooltip: String::new(),
+        }
+    }
+
+    #[test]
+    fn only_keys_clicks_and_run_command_need_a_parameter() {
+        assert!(action_needs_parameter(&option(0, ActionType::Keypress(String::new()))));
+        assert!(action_needs_parameter(&option(0, ActionType::Click(None))));
+        assert!(action_needs_parameter(&option(7, ActionType::Execute(String::new()))));
+
+        assert!(!action_needs_parameter(&option(6, ActionType::Gnome("close".to_string()))));
+        assert!(!action_needs_parameter(&option(
+            8,
+            ActionType::Kde("kwin".to_string(), "Overview".to_string())
+        )));
+        assert!(!action_needs_parameter(&option(6, ActionType::Execute("firefox".to_string()))));
+        assert!(!action_needs_parameter(&option(1, ActionType::Kill)));
+        assert!(!action_needs_parameter(&option(7, ActionType::Abort)));
+    }
+
+    #[test]
+    fn only_keybinding_keys_are_gnome_actions() {
+        assert!(is_gnome_action_key("close", true));
+        assert!(!is_gnome_action_key("volume-step", false));
+        assert!(!is_gnome_action_key("custom-keybindings", true));
+    }
 }

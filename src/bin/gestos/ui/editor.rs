@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use gestos::config::{ActionType, Gesture};
 use gestos::config::generate_unique_id;
 use crate::state::{AppState, EditorActionOption, CATEGORY_NAMES};
-use crate::actions::{fetch_gnome_action_options, fetch_kde_action_options, get_static_action_options, action_matches};
+use crate::actions::{action_needs_parameter, fetch_gnome_action_options, fetch_kde_action_options, get_static_action_options, action_matches};
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
 use crate::ui::components::{draw_gesture_path, get_action_category_icon, show_confirm_dialog};
 use crate::daemon::reload_daemon;
@@ -40,6 +40,36 @@ pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> Strin
         _ => opt.name.clone(),
     }
 }
+/// Shows the parameter row only for an action that takes one, in the form that action uses.
+fn show_action_parameter(
+    opt: &EditorActionOption,
+    row: &gtk::Box,
+    label: &gtk::Label,
+    entry: &gtk::Entry,
+    shortcut_display: &gtk::Box,
+    record_button: &gtk::Button,
+) {
+    row.set_visible(action_needs_parameter(opt));
+
+    let is_keypress = matches!(&opt.action_type, ActionType::Keypress(_));
+    entry.set_visible(!is_keypress);
+    shortcut_display.set_visible(is_keypress);
+    record_button.set_visible(is_keypress);
+
+    match &opt.action_type {
+        ActionType::Keypress(_) => label.set_text("Keys to Send"),
+        ActionType::Execute(_) => {
+            label.set_text("Command to Execute");
+            entry.set_placeholder_text(Some("e.g. firefox"));
+        }
+        ActionType::Click(_) => {
+            label.set_text("Mouse Button");
+            entry.set_placeholder_text(Some("e.g. 1 (Left), 2 (Middle), 3 (Right)"));
+        }
+        _ => {}
+    }
+}
+
 pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Option<Gesture>) {
     let state = state_rc.borrow();
     let dialog = gtk::Window::new();
@@ -579,32 +609,15 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
         btn_icon_clone.set_icon_name(Some(icon_name));
         *selected_action_clone.borrow_mut() = Some(opt.clone());
 
-        let show_entry = match &opt.action_type {
-            ActionType::Keypress(_) => true,
-            ActionType::Execute(_) if opt.category == 7 => true,
-            ActionType::Click(_) => true,
-            _ => false,
-        };
-        row_clone.set_visible(show_entry);
+        show_action_parameter(
+            &opt,
+            &row_clone,
+            &label_clone,
+            &entry_clone,
+            &sdb_clone_act,
+            &record_btn_clone_act,
+        );
 
-        let is_keypress = matches!(&opt.action_type, ActionType::Keypress(_));
-        entry_clone.set_visible(!is_keypress);
-        sdb_clone_act.set_visible(is_keypress);
-        record_btn_clone_act.set_visible(is_keypress);
-
-        match &opt.action_type {
-            ActionType::Keypress(_) => label_clone.set_text("Keys to Send"),
-            ActionType::Execute(_) => {
-                label_clone.set_text("Command to Execute");
-                entry_clone.set_placeholder_text(Some("e.g. firefox"));
-            }
-            ActionType::Click(_) => {
-                label_clone.set_text("Mouse Button");
-                entry_clone.set_placeholder_text(Some("e.g. 1 (Left), 2 (Middle), 3 (Right)"));
-            }
-            _ => {}
-        }
-        
         udn_clone();
     });
 
@@ -647,26 +660,18 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
         udn_init();
     }
 
-    // Explicitly update UI visibility to prevent "text input instead of key presentation" bug
+    // Nothing to fill in until an action is known, such as one that's no longer available
+    action_details_row.set_visible(false);
     if let Some(opt) = initial_opt {
         *selected_action.borrow_mut() = Some(opt.clone());
-        let is_keypress = matches!(&opt.action_type, ActionType::Keypress(_));
-        action_details_entry.set_visible(!is_keypress);
-        shortcut_display_box.set_visible(is_keypress);
-        record_btn.set_visible(is_keypress);
-
-        match &opt.action_type {
-            ActionType::Keypress(_) => action_details_label.set_text("Keys to Send"),
-            ActionType::Execute(_) => {
-                action_details_label.set_text("Command to Execute");
-                action_details_entry.set_placeholder_text(Some("e.g. firefox"));
-            }
-            ActionType::Click(_) => {
-                action_details_label.set_text("Mouse Button");
-                action_details_entry.set_placeholder_text(Some("e.g. 1 (Left), 2 (Middle), 3 (Right)"));
-            }
-            _ => {}
-        }
+        show_action_parameter(
+            &opt,
+            &action_details_row,
+            &action_details_label,
+            &action_details_entry,
+            &shortcut_display_box,
+            &record_btn,
+        );
         action_select_label.set_text(&opt.name);
         let (icon_name, _) = get_action_category_icon(&opt.action_type);
         action_select_icon.set_icon_name(Some(icon_name));
