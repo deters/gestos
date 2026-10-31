@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use crate::state::AppState;
 use crate::daemon::reload_daemon;
-use crate::system::{get_autostart_file_path, set_autostart_enabled, is_osd_enabled, set_osd_enabled, get_overlay_autostart_file_path, set_overlay_enabled};
+use crate::system::{get_autostart_file_path, mark_autostart_decided, set_autostart_enabled, is_osd_enabled, set_osd_enabled, get_overlay_autostart_file_path, set_overlay_enabled};
 
 pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     let parent = state_rc.borrow().window.clone();
@@ -104,7 +104,8 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
                 .set_active(get_autostart_file_path().is_some_and(|path| path.exists()));
             let subtitle = autostart_subtitle.clone();
             autostart_switch.connect_state_set(move |_, enabled| {
-                match set_autostart_enabled(enabled) {
+                let changed = mark_autostart_decided().and_then(|_| set_autostart_enabled(enabled));
+                match changed {
                     Ok(()) => subtitle.set_text("Start gestures automatically"),
                     Err(e) => subtitle.set_text(&format!("Could not change this setting: {e}")),
                 }

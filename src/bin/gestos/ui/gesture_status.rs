@@ -1,5 +1,8 @@
 use crate::daemon::{is_daemon_running, turn_off, turn_on};
-use crate::system::get_autostart_file_path;
+use crate::system::{
+    get_autostart_file_path, mark_autostart_decided, set_autostart_enabled,
+    should_enable_autostart_on_first_start,
+};
 use gtk::prelude::*;
 use gtk::{gio, glib};
 use gtk4 as gtk;
@@ -35,7 +38,7 @@ fn summarize_error(message: &str) -> String {
 }
 
 /// The app's main control, which lives in the header bar: a title showing whether gestures are
-/// running, a Start or Stop button, and an error area for the window's content. Daemon calls
+/// running, a Start or Stop button, and areas for errors and notices in the window's content. Daemon calls
 /// can block, so they all run off the UI thread.
 #[derive(Clone)]
 pub struct GestureStatus {
@@ -46,6 +49,7 @@ pub struct GestureStatus {
     error_summary: gtk::Label,
     error_details: gtk::Expander,
     error_label: gtk::Label,
+    notice_box: gtk::Box,
     dbus_conn: Option<zbus::blocking::Connection>,
     busy: Rc<Cell<bool>>,
     polling: Rc<Cell<bool>>,
@@ -98,6 +102,28 @@ impl GestureStatus {
         error_details.set_child(Some(&error_scroller));
         error_box.append(&error_details);
 
+        let notice_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        notice_box.add_css_class("notice-box");
+        notice_box.set_halign(gtk::Align::Center);
+        notice_box.set_width_request(500);
+        notice_box.set_margin_top(12);
+        notice_box.set_margin_start(24);
+        notice_box.set_margin_end(24);
+        notice_box.set_visible(false);
+        let notice_label = gtk::Label::new(Some("Gestures will also start when you log in."));
+        notice_label.set_hexpand(true);
+        notice_label.set_xalign(0.0);
+        notice_label.set_wrap(true);
+        notice_box.append(&notice_label);
+        let undo_button = gtk::Button::with_mnemonic("_Undo");
+        undo_button.set_valign(gtk::Align::Center);
+        notice_box.append(&undo_button);
+        let dismiss_button = gtk::Button::from_icon_name("window-close-symbolic");
+        dismiss_button.add_css_class("flat");
+        dismiss_button.set_valign(gtk::Align::Center);
+        dismiss_button.set_tooltip_text(Some("Dismiss"));
+        notice_box.append(&dismiss_button);
+
         let status = GestureStatus {
             title,
             status_label,
@@ -106,6 +132,7 @@ impl GestureStatus {
             error_summary,
             error_details,
             error_label,
+            notice_box,
             dbus_conn,
             busy: Rc::new(Cell::new(false)),
             polling: Rc::new(Cell::new(false)),
@@ -117,6 +144,18 @@ impl GestureStatus {
             let start = clicked.last_running.get() != Some(true);
             clicked.set_gestures(start);
         });
+
+        let undone = status.clone();
+        undo_button.connect_clicked(move |_| {
+            undone.notice_box.set_visible(false);
+            if let Err(e) = set_autostart_enabled(false) {
+                undone.show_error(Some(&format!("Could not change the login setting: {e}")));
+            }
+            undone.render();
+        });
+        let dismissed = status.notice_box.clone();
+        dismiss_button.connect_clicked(move |_| dismissed.set_visible(false));
+
         status.start_polling();
         status
     }
@@ -131,6 +170,20 @@ impl GestureStatus {
 
     pub fn error_area(&self) -> &gtk::Box {
         &self.error_box
+    }
+
+    pub fn notice_area(&self) -> &gtk::Box {
+        &self.notice_box
+    }
+
+    /// A new user's first start also turns on login startup, with a way to undo it. Either
+    /// way, it's only decided for them once.
+    fn enable_autostart_for_new_user(&self) {
+        let result = mark_autostart_decided().and_then(|_| set_autostart_enabled(true));
+        match result {
+            Ok(()) => self.notice_box.set_visible(true),
+            Err(e) => self.show_error(Some(&format!("Could not change the login setting: {e}"))),
+        }
     }
 
     fn start_polling(&self) {
@@ -170,7 +223,9 @@ impl GestureStatus {
         }
         self.busy.set(true);
         self.show_error(None);
+        self.notice_box.set_visible(false);
         self.action_button.set_sensitive(false);
+        let new_user = start && should_enable_autostart_on_first_start();
         self.status_label.set_text(if start {
             "Starting…"
         } else {
@@ -193,8 +248,10 @@ impl GestureStatus {
                 .await
                 .unwrap_or_else(|_| (Err("The operation stopped unexpectedly.".to_string()), false));
             status.busy.set(false);
-            if let Err(message) = result {
-                status.show_error(Some(&message));
+            match result {
+                Ok(()) if new_user => status.enable_autostart_for_new_user(),
+                Ok(()) => {}
+                Err(message) => status.show_error(Some(&message)),
             }
             status.last_running.set(Some(running));
             status.render();

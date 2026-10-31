@@ -183,6 +183,7 @@ pub fn build_ui(app: &gtk::Application) {
     header.set_title_widget(Some(gesture_status.title()));
     header.pack_start(gesture_status.action_button());
     content_vbox.insert_child_after(gesture_status.error_area(), Some(&search_bar));
+    content_vbox.insert_child_after(gesture_status.notice_area(), Some(gesture_status.error_area()));
 
     let state = Rc::new(RefCell::new(AppState {
         config,
@@ -298,6 +299,7 @@ pub fn build_ui(app: &gtk::Application) {
          .status-label { font-weight: bold; }\n\
          .warning-box { padding: 8px; background-color: alpha(@warning_color, 0.15); border: 1px solid alpha(@warning_color, 0.3); border-radius: 6px; }\n\
          .warning-label { color: @warning_color; font-size: 0.95em; }\n\
+         .notice-box { padding: 8px 8px 8px 12px; background-color: alpha(currentColor, 0.06); border-radius: 6px; }\n\
          .keycap { padding: 6px 12px; background-color: alpha(currentColor, 0.08); border: 1px solid alpha(currentColor, 0.15); border-radius: 6px; font-weight: bold; font-size: 1.1em; }\n\
          .drag-handle { opacity: 0.35; cursor: grab; margin-right: 4px; }\n\
          .drag-handle:hover { opacity: 0.85; }\n\

@@ -29,6 +29,40 @@ pub fn set_autostart_enabled(enabled: bool) -> std::io::Result<()> {
     }
 }
 
+fn autostart_decided_path() -> std::path::PathBuf {
+    gestos::config::config_home().join("gestos").join("autostart_decided")
+}
+
+/// Records that login startup is the user's own choice from now on, so that it's never changed
+/// for them again.
+pub fn mark_autostart_decided() -> std::io::Result<()> {
+    let path = autostart_decided_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, "")
+}
+
+/// Whether a first start should also turn on login startup: only for someone new. Anyone who
+/// has chosen, or who used MyGestures and may have left it off on purpose, keeps their setting.
+fn is_new_to_autostart(
+    decided: bool,
+    autostart_enabled: bool,
+    used_mygestures: bool,
+    needs_manual_setup: bool,
+) -> bool {
+    !decided && !autostart_enabled && !used_mygestures && !needs_manual_setup
+}
+
+pub fn should_enable_autostart_on_first_start() -> bool {
+    is_new_to_autostart(
+        autostart_decided_path().exists(),
+        get_autostart_file_path().is_some_and(|path| path.exists()),
+        gestos::config::config_home().join("mygestures").exists(),
+        gestos::config::manual_autostart_for(gestos::config::get_environment_suffix()).is_some(),
+    )
+}
+
 pub fn stop_overlay() {
     let _ = Command::new("pkill").args(["-f", "gestos --overlay"]).status();
 }
@@ -104,4 +138,19 @@ pub fn set_osd_enabled(enabled: bool) {
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::write(&path, if enabled { "true" } else { "false" });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_someone_new_gets_autostart_on_first_start() {
+        assert!(is_new_to_autostart(false, false, false, false));
+
+        assert!(!is_new_to_autostart(true, false, false, false));
+        assert!(!is_new_to_autostart(false, true, false, false));
+        assert!(!is_new_to_autostart(false, false, true, false));
+        assert!(!is_new_to_autostart(false, false, false, true));
+    }
 }
