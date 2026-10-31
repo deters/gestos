@@ -40,13 +40,29 @@ case "$1" in
         ;;
 esac
 
+# Check everything that could stop the commit before editing any file, so that a failure
+# can't leave a half-finished bump behind.
+if ! git var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
+    echo "Error: Git has no author identity. Set user.name and user.email first."
+    exit 1
+fi
+if [ -n "$(git status --porcelain)" ]; then
+    echo "Error: Commit or stash your changes first, so they stay out of the version commit."
+    git status --short
+    exit 1
+fi
+if git rev-parse -q --verify "refs/tags/v$NEW_VERSION" >/dev/null; then
+    echo "Error: Tag v$NEW_VERSION already exists."
+    exit 1
+fi
+
 echo "Bumping version from $CURRENT_VERSION to $NEW_VERSION..."
 
 # 1. Cargo.toml
 perl -i -pe "s/^(version\s*=\s*\")[^\"]+/\${1}$NEW_VERSION/ if \$. < 10" Cargo.toml
 
 # 2. meson.build
-perl -i -pe "s/(version:\s*')[^']+(\s*,\s*\n\s*meson_version)/\${1}$NEW_VERSION\${2}/ if \$. < 5" meson.build
+perl -0777 -i -pe "s/(version:\s*')[^']+('\s*,\s*\n\s*meson_version)/\${1}$NEW_VERSION\${2}/" meson.build
 
 # 3. mygestures.spec
 perl -i -pe "s/^(Version:\s*)\S+/\${1}$NEW_VERSION/g" packaging/mygestures.spec
@@ -83,7 +99,7 @@ cargo check >/dev/null 2>&1 || true
 
 # Commit and tag
 echo "Staging version changes in Git..."
-git add Cargo.toml Cargo.lock meson.build packaging/mygestures.spec packaging/APKBUILD src/bin/gestos debian/changelog
+git add Cargo.toml Cargo.lock meson.build packaging/mygestures.spec packaging/APKBUILD src/bin/gestos/ui/main_window.rs debian/changelog
 
 git commit -m "Bump version to $NEW_VERSION"
 git tag "v$NEW_VERSION"
