@@ -61,7 +61,7 @@ Usage:
 Starting automatically:
 -----------------------
 
-In `gestos`, turn on **Start when I log in** at the top of the window. This is the supported method, and it works on GNOME, KDE Plasma, and XFCE on every distribution.
+In `gestos`, turn on **Start When I Log In** at the top of the window. This is the supported method, and it works on GNOME, KDE Plasma, and XFCE on every distribution.
 
 Sway and Hyprland don't run autostart entries by themselves, so start the daemon from their config instead:
 
@@ -75,7 +75,7 @@ Starting and stopping gestures:
 
 Use the **Start** and **Stop** button at the top of `gestos`, or right-click the app icon and choose **Start Gestures** or **Stop Gestures**. From a terminal or a key binding, run `gestos --start` or `gestos --stop`. Stopping also stops the gesture trail overlay, and your mouse works normally. Closing the `gestos` window doesn't stop gestures.
 
-If **Start when I log in** is on, gestures start again at your next login.
+If **Start When I Log In** is on, gestures start again at your next login.
 
 Troubleshooting:
 ----------------

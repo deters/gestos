@@ -285,7 +285,7 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
     
     let btn_content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     let action_select_icon = gtk::Image::new();
-    let action_select_label = gtk::Label::new(Some("Select Action..."));
+    let action_select_label = gtk::Label::new(Some("Select Action…"));
     action_select_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     action_select_label.set_hexpand(true);
     action_select_label.set_halign(gtk::Align::Start);
@@ -353,7 +353,7 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
 
     let search_entry = gtk::SearchEntry::new();
     search_entry.set_hexpand(true);
-    search_entry.set_placeholder_text(Some("Search actions..."));
+    search_entry.set_placeholder_text(Some("Search actions…"));
     popover_vbox.append(&search_entry);
 
     let scrolled_window = gtk::ScrolledWindow::new();

@@ -173,7 +173,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
 
     export_box.append(&export_text_vbox);
 
-    let export_btn = gtk::Button::with_mnemonic("_Export...");
+    let export_btn = gtk::Button::with_mnemonic("_Export…");
     export_btn.set_valign(gtk::Align::Center);
     
     let parent_clone = parent.clone();
@@ -254,7 +254,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
 
     import_box.append(&import_text_vbox);
 
-    let import_btn = gtk::Button::with_mnemonic("_Import...");
+    let import_btn = gtk::Button::with_mnemonic("_Import…");
     import_btn.set_valign(gtk::Align::Center);
 
     let parent_clone = parent.clone();
@@ -350,7 +350,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
 
     reset_box.append(&reset_text_vbox);
 
-    let reset_btn = gtk::Button::with_mnemonic("_Reset...");
+    let reset_btn = gtk::Button::with_mnemonic("_Reset…");
     reset_btn.set_valign(gtk::Align::Center);
     reset_btn.add_css_class("destructive-action");
 

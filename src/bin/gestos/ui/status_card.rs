@@ -16,6 +16,16 @@ fn status_text(running: bool, autostart: bool) -> &'static str {
     }
 }
 
+/// One plain sentence for the card. The daemon's full output, with its setup steps, stays
+/// available under Details.
+fn summarize_error(message: &str) -> String {
+    if message.contains("Missing permissions") {
+        return "Gestos can't access your mouse. Reinstalling usually fixes this.".to_string();
+    }
+    let first_line = message.lines().find(|line| !line.trim().is_empty()).unwrap_or(message);
+    first_line.trim_start_matches("ERROR: ").trim().to_string()
+}
+
 /// The app's main control: whether gestures are on, and whether they start at login. Daemon
 /// calls can block, so they all run off the UI thread.
 #[derive(Clone)]
@@ -24,7 +34,9 @@ pub struct StatusCard {
     status_label: gtk::Label,
     action_button: gtk::Button,
     autostart_switch: Option<gtk::Switch>,
-    error_scroller: gtk::ScrolledWindow,
+    error_box: gtk::Box,
+    error_summary: gtk::Label,
+    error_details: gtk::Expander,
     error_label: gtk::Label,
     dbus_conn: Option<zbus::blocking::Connection>,
     busy: Rc<Cell<bool>>,
@@ -80,7 +92,7 @@ impl StatusCard {
         root.append(&list);
 
         let (gestures_row, gestures_box) = card_row();
-        let (gestures_text, status_label) = row_text("Mouse gestures", "Checking...");
+        let (gestures_text, status_label) = row_text("Mouse Gestures", "Checking…");
         gestures_box.append(&gestures_text);
         let action_button = gtk::Button::with_label("Start");
         action_button.set_valign(gtk::Align::Center);
@@ -96,7 +108,7 @@ impl StatusCard {
             Some((desktop, config_file, line)) => {
                 let subtitle =
                     format!("{desktop} doesn't use this setting. Add this line to {config_file}:");
-                let (text, _) = row_text("Start when I log in", &subtitle);
+                let (text, _) = row_text("Start When I Log In", &subtitle);
                 let config_line = gtk::Label::new(Some(line));
                 config_line.add_css_class("monospace");
                 config_line.set_halign(gtk::Align::Start);
@@ -106,7 +118,7 @@ impl StatusCard {
                 None
             }
             None => {
-                let (text, _) = row_text("Start when I log in", "Start gestures automatically");
+                let (text, _) = row_text("Start When I Log In", "Start gestures automatically");
                 autostart_box.append(&text);
                 let switch = gtk::Switch::new();
                 switch.set_valign(gtk::Align::Center);
@@ -116,28 +128,41 @@ impl StatusCard {
         };
         list.append(&autostart_row);
 
+        let error_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        error_box.add_css_class("warning-box");
+        error_box.set_visible(false);
+
+        let error_summary = gtk::Label::new(None);
+        error_summary.add_css_class("warning-label");
+        error_summary.set_wrap(true);
+        error_summary.set_xalign(0.0);
+        error_summary.set_halign(gtk::Align::Start);
+        error_box.append(&error_summary);
+
         let error_label = gtk::Label::new(None);
-        error_label.add_css_class("warning-label");
         error_label.set_wrap(true);
         error_label.set_selectable(true);
         error_label.set_xalign(0.0);
         error_label.set_halign(gtk::Align::Start);
         let error_scroller = gtk::ScrolledWindow::new();
-        error_scroller.add_css_class("warning-box");
         error_scroller.set_hscrollbar_policy(gtk::PolicyType::Never);
         error_scroller.set_propagate_natural_height(true);
         error_scroller.set_min_content_height(80);
         error_scroller.set_max_content_height(180);
         error_scroller.set_child(Some(&error_label));
-        error_scroller.set_visible(false);
-        root.append(&error_scroller);
+        let error_details = gtk::Expander::with_mnemonic("_Details");
+        error_details.set_child(Some(&error_scroller));
+        error_box.append(&error_details);
+        root.append(&error_box);
 
         let card = StatusCard {
             root,
             status_label,
             action_button,
             autostart_switch,
-            error_scroller,
+            error_box,
+            error_summary,
+            error_details,
             error_label,
             dbus_conn,
             busy: Rc::new(Cell::new(false)),
@@ -215,9 +240,9 @@ impl StatusCard {
         self.show_error(None);
         self.action_button.set_sensitive(false);
         self.status_label.set_text(if start {
-            "Starting..."
+            "Starting…"
         } else {
-            "Stopping..."
+            "Stopping…"
         });
 
         let conn = self.dbus_conn.clone();
@@ -273,14 +298,32 @@ impl StatusCard {
     }
 
     fn show_error(&self, message: Option<&str>) {
-        self.error_label.set_text(message.unwrap_or_default());
-        self.error_scroller.set_visible(message.is_some());
+        self.error_box.set_visible(message.is_some());
+        let Some(message) = message else {
+            return;
+        };
+        let summary = summarize_error(message);
+        self.error_summary.set_text(&summary);
+        self.error_label.set_text(message);
+        self.error_details.set_expanded(false);
+        self.error_details.set_visible(summary != message);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_are_summarized_in_one_line() {
+        let permissions = "ERROR: Missing permissions or kernel module to run gestosd.\n - Cannot read";
+        assert!(summarize_error(permissions).starts_with("Gestos can't access your mouse."));
+        assert_eq!(
+            summarize_error("\nERROR: Something else\nmore detail"),
+            "Something else"
+        );
+        assert_eq!(summarize_error("Just one line"), "Just one line");
+    }
 
     #[test]
     fn stopped_warns_only_when_gestures_will_return_at_login() {

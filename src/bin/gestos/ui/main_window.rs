@@ -75,7 +75,6 @@ pub fn build_ui(app: &gtk::Application) {
 
     // 1. Add gesture button (Primary action on the left)
     let add_gest_btn = gtk::Button::with_mnemonic("_New Gesture");
-    add_gest_btn.add_css_class("suggested-action");
     add_gest_btn.set_tooltip_text(Some("Add Gesture"));
     header.pack_start(&add_gest_btn);
 
@@ -126,7 +125,7 @@ pub fn build_ui(app: &gtk::Application) {
     let search_entry = gtk::SearchEntry::new();
     search_entry.set_halign(gtk::Align::Center);
     search_entry.set_width_request(400);
-    search_entry.set_placeholder_text(Some("Search gestures..."));
+    search_entry.set_placeholder_text(Some("Search gestures…"));
     
     search_bar.set_child(Some(&search_entry));
     
