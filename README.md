@@ -6,7 +6,7 @@ Search some action and create a gesture:
 
 ![Searching for "screen" lists matching actions to create a gesture for](docs/screenshots/search-suggestions.jpg)
 
-Draw the gesture and save it. Gestos warns you if your drawing is close to one you already have:
+Draw the gesture and save it:
 
 ![The gesture editor with a drawn path and the Take Screenshot action](docs/screenshots/gesture-editor.jpg)
 
