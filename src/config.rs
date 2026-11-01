@@ -684,6 +684,7 @@ pub fn initialize_user_config_if_missing() -> std::io::Result<PathBuf> {
             fs::create_dir_all(parent)?;
         }
         fs::write(&user_path, &content)?;
+        keep_private_from_other_users(&user_path, &user_path)?;
         println!(
             "Initialized user configuration from template at: {}",
             user_path.display()
@@ -693,6 +694,7 @@ pub fn initialize_user_config_if_missing() -> std::io::Result<PathBuf> {
             fs::create_dir_all(parent)?;
         }
         fs::write(&user_path, "# Gestos Configuration\nglobal:\n")?;
+        keep_private_from_other_users(&user_path, &user_path)?;
         println!(
             "Initialized empty user configuration at: {}",
             user_path.display()
@@ -702,7 +704,58 @@ pub fn initialize_user_config_if_missing() -> std::io::Result<PathBuf> {
     Ok(user_path)
 }
 
+/// Why a config file can't be trusted, if so. Its gestures can run commands as this user, so
+/// nobody else may be able to change it, or replace it through its folder. The system's own
+/// account owning it is fine, since that account could do anything anyway.
+fn config_permission_problem(
+    path: &Path,
+    file: &fs::Metadata,
+    folder: Option<&fs::Metadata>,
+    uid: u32,
+) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let display = path.display();
+    if file.uid() != uid && file.uid() != 0 {
+        return Some(format!("Refusing to use {display}: it belongs to another user."));
+    }
+    if file.mode() & 0o022 != 0 {
+        return Some(format!(
+            "Refusing to use {display}: other users can change it. To fix this, run: chmod go-w {display}"
+        ));
+    }
+    // The sticky bit keeps others from replacing a file they don't own, as in /tmp.
+    if folder.is_some_and(|folder| folder.mode() & 0o002 != 0 && folder.mode() & 0o1000 == 0) {
+        return Some(format!(
+            "Refusing to use {display}: any user can change the folder it's in."
+        ));
+    }
+    None
+}
+
+/// Gives `file` the permissions of `source`, without letting others write to it, which would make
+/// the daemon refuse it. A umask like 002 would otherwise allow that.
+fn keep_private_from_other_users(source: &Path, file: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = fs::metadata(source)?.permissions().mode();
+    fs::set_permissions(file, fs::Permissions::from_mode(mode & !0o022))
+}
+
 impl Configuration {
+    /// Loads a config whose gestures are going to run, which needs it to be safe from other users.
+    pub fn load_trusted<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+        let path = path.as_ref();
+        let unreadable = |e: std::io::Error| format!("Could not read {}: {}", path.display(), e);
+        let target = fs::canonicalize(path).map_err(unreadable)?;
+        let file = fs::metadata(&target).map_err(unreadable)?;
+        let folder = target.parent().and_then(|parent| fs::metadata(parent).ok());
+        let uid = unsafe { libc::getuid() };
+        if let Some(problem) = config_permission_problem(path, &file, folder.as_ref(), uid) {
+            return Err(problem);
+        }
+        Self::load_from_file(path)
+            .ok_or_else(|| format!("Failed to load config from: {}", path.display()))
+    }
+
     pub fn load_from_defaults() -> Self {
         let user_path = get_default_config_path();
         let mut config = Configuration {
@@ -875,9 +928,9 @@ impl Configuration {
         let temp_path = PathBuf::from(temp_name);
 
         let result = fs::write(&temp_path, content)
-            .and_then(|_| match fs::metadata(&target) {
-                Ok(metadata) => fs::set_permissions(&temp_path, metadata.permissions()),
-                Err(_) => Ok(()),
+            .and_then(|_| {
+                let source = if target.exists() { &target } else { &temp_path };
+                keep_private_from_other_users(source, &temp_path)
             })
             .and_then(|_| fs::rename(&temp_path, &target));
         if result.is_err() {
@@ -1247,6 +1300,60 @@ mod tests {
         let mut temp_name = file.0.clone().into_os_string();
         temp_name.push(format!(".{}.tmp", std::process::id()));
         assert!(!Path::new(&temp_name).exists());
+    }
+
+    fn set_mode(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[test]
+    fn a_config_others_can_write_to_is_refused() {
+        let file = TempConfig::new("trust", "global:\n");
+        set_mode(&file.0, 0o644);
+        assert!(Configuration::load_trusted(&file.0).is_ok());
+        for mode in [0o664, 0o646, 0o666] {
+            set_mode(&file.0, mode);
+            let problem = Configuration::load_trusted(&file.0).unwrap_err();
+            assert!(problem.contains("chmod go-w"), "{problem}");
+        }
+    }
+
+    #[test]
+    fn a_config_of_another_user_or_in_an_open_folder_is_refused() {
+        let file = TempConfig::new("trust-owner", "global:\n");
+        set_mode(&file.0, 0o644);
+        let metadata = fs::metadata(&file.0).unwrap();
+        let mine = unsafe { libc::getuid() };
+        assert!(config_permission_problem(&file.0, &metadata, None, mine).is_none());
+        let problem = config_permission_problem(&file.0, &metadata, None, mine + 1);
+        if mine != 0 {
+            assert!(problem.unwrap().contains("another user"));
+        }
+
+        let dir = TempDir::new("trust-folder");
+        set_mode(&dir.0, 0o777);
+        let open = fs::metadata(&dir.0).unwrap();
+        assert!(config_permission_problem(&file.0, &metadata, Some(&open), mine).is_some());
+        set_mode(&dir.0, 0o1777);
+        let sticky = fs::metadata(&dir.0).unwrap();
+        assert!(config_permission_problem(&file.0, &metadata, Some(&sticky), mine).is_none());
+    }
+
+    #[test]
+    fn saving_takes_away_write_access_for_others() {
+        use std::os::unix::fs::PermissionsExt;
+        let file = TempConfig::new("strip", "");
+        set_mode(&file.0, 0o664);
+        let config = Configuration {
+            gestures: Vec::new(),
+            apps: Vec::new(),
+            user_config_path: file.0.clone(),
+            reduce_notifications: false,
+        };
+        config.save_to_file().unwrap();
+        assert_eq!(fs::metadata(&file.0).unwrap().permissions().mode() & 0o777, 0o644);
+        assert!(Configuration::load_trusted(&file.0).is_ok());
     }
 
     #[test]

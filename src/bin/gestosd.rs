@@ -60,7 +60,7 @@ const CHILD_STABLE_RUNTIME: Duration = Duration::from_secs(30);
 fn config_is_valid() -> bool {
     CONFIG_PATH
         .get()
-        .is_some_and(|path| Configuration::load_from_file(path).is_some())
+        .is_some_and(|path| Configuration::load_trusted(path).is_ok())
 }
 
 fn kill_children() {
@@ -709,15 +709,13 @@ fn run_grabber(
     loop {
         if RELOAD_REQUESTED.swap(false, Ordering::Relaxed) {
             println!("gestosd: Reloading configuration dynamically...");
-            if let Some(new_config) = Configuration::load_from_file(&config.user_config_path) {
-                config = new_config;
-                restart_requested |= keyboards.is_none() && config.uses_modifiers();
-                println!("gestosd: Configuration reloaded successfully.");
-            } else {
-                eprintln!(
-                    "gestosd: Failed to reload configuration from {}",
-                    config.user_config_path.display()
-                );
+            match Configuration::load_trusted(&config.user_config_path) {
+                Ok(new_config) => {
+                    config = new_config;
+                    restart_requested |= keyboards.is_none() && config.uses_modifiers();
+                    println!("gestosd: Configuration reloaded successfully.");
+                }
+                Err(problem) => eprintln!("gestosd: Failed to reload configuration: {problem}"),
             }
         }
 
@@ -1209,10 +1207,10 @@ fn main() {
         }
         std::process::exit(1);
     }
-    let Some(config) = Configuration::load_from_file(&config_path) else {
-        eprintln!("Failed to load config from: {}", config_path.display());
+    let config = Configuration::load_trusted(&config_path).unwrap_or_else(|problem| {
+        eprintln!("ERROR: {problem}");
         std::process::exit(1);
-    };
+    });
 
     // Only now, so that a daemon that can't start doesn't take a working one down with it
     stop_legacy_instance();
