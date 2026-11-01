@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use crate::system::{start_overlay_if_enabled, stop_overlay};
+use crate::system::{set_stopped_by_user, start_overlay_if_enabled, stop_overlay};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -166,6 +166,7 @@ pub fn stop_daemon(conn: Option<&zbus::blocking::Connection>) {
 
 /// Starts gestures, including the overlay if the user has it enabled.
 pub fn turn_on(conn: Option<&zbus::blocking::Connection>) -> Result<(), String> {
+    set_stopped_by_user(false);
     gestos::config::initialize_user_config_if_missing()
         .map_err(|e| format!("Could not create the configuration: {}", e))?;
     start_daemon(conn)?;
@@ -175,6 +176,7 @@ pub fn turn_on(conn: Option<&zbus::blocking::Connection>) -> Result<(), String> 
 
 /// Stops gestures completely, including the overlay.
 pub fn turn_off(conn: Option<&zbus::blocking::Connection>) {
+    set_stopped_by_user(true);
     stop_daemon(conn);
     stop_overlay();
 }

@@ -29,6 +29,27 @@ pub fn set_autostart_enabled(enabled: bool) -> std::io::Result<()> {
     }
 }
 
+fn stopped_by_user_path() -> std::path::PathBuf {
+    gestos::config::config_home().join("gestos").join("stopped_by_user")
+}
+
+/// Whether the user turned gestures off, so that opening the app doesn't turn them back on.
+pub fn is_stopped_by_user() -> bool {
+    stopped_by_user_path().exists()
+}
+
+pub fn set_stopped_by_user(stopped: bool) {
+    let path = stopped_by_user_path();
+    if stopped {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, "");
+    } else {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 fn autostart_decided_path() -> std::path::PathBuf {
     gestos::config::config_home().join("gestos").join("autostart_decided")
 }

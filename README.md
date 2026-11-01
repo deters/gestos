@@ -5,8 +5,7 @@
 1. [Install Gestos](#install), then open it from your applications menu, or run `gestos`.
 2. Click **+**, or search for what you want a gesture to do.
 3. Draw the gesture and click **Save**.
-4. Click **Start**. The first time, gestures are also set to start when you log in, and a note lets you undo that.
-5. Hold the right mouse button anywhere, draw your gesture, and let go.
+4. Hold the right mouse button anywhere, draw your gesture, and let go.
 
 ![The Gestos main window, listing gestures with the shape that triggers each one](docs/screenshots/main-window.jpg)
 
@@ -61,7 +60,9 @@ When a drawing matches several gestures almost equally, they appear at the point
 
 ### Start and stop
 
-Use the **Start** or **Stop** button in the title bar, or right-click the app icon and choose **Start Gestures** or **Stop Gestures**. In a terminal or a key binding, use:
+Gestures start when you open Gestos, and the first time, they're also set to start when you log in, with a note that lets you undo that. If you stop them, opening Gestos won't start them again, though **Start When I Log In** still does at your next login.
+
+Use the **Stop** or **Start** button in the title bar, or right-click the app icon and choose **Start Gestures** or **Stop Gestures**. In a terminal or a key binding, use:
 
 ```bash
 gestos --start

@@ -1,6 +1,6 @@
 use crate::daemon::{is_daemon_running, turn_off, turn_on};
 use crate::system::{
-    get_autostart_file_path, mark_autostart_decided, set_autostart_enabled,
+    get_autostart_file_path, is_stopped_by_user, mark_autostart_decided, set_autostart_enabled,
     should_enable_autostart_on_first_start,
 };
 use gtk::prelude::*;
@@ -18,6 +18,11 @@ fn status_text(running: bool, autostart: bool) -> &'static str {
         (false, true) => "Stopped, starts at login",
         (false, false) => "Stopped",
     }
+}
+
+/// Opening the app starts gestures, unless the user is the one who stopped them.
+fn should_start_on_open(running: bool, stopped_by_user: bool) -> bool {
+    !running && !stopped_by_user
 }
 
 fn button_tooltip(running: bool) -> &'static str {
@@ -55,6 +60,7 @@ pub struct GestureStatus {
     busy: Rc<Cell<bool>>,
     polling: Rc<Cell<bool>>,
     last_running: Rc<Cell<Option<bool>>>,
+    just_opened: Rc<Cell<bool>>,
 }
 
 impl GestureStatus {
@@ -138,6 +144,7 @@ impl GestureStatus {
             busy: Rc::new(Cell::new(false)),
             polling: Rc::new(Cell::new(false)),
             last_running: Rc::new(Cell::new(None)),
+            just_opened: Rc::new(Cell::new(true)),
         };
 
         let clicked = status.clone();
@@ -213,6 +220,12 @@ impl GestureStatus {
                     status.show_error(None);
                 }
                 status.last_running.set(Some(running));
+                if status.just_opened.replace(false)
+                    && should_start_on_open(running, is_stopped_by_user())
+                {
+                    status.set_gestures(true);
+                    return;
+                }
                 status.render();
             }
         });
@@ -310,6 +323,14 @@ mod tests {
             "Something else"
         );
         assert_eq!(summarize_error("Just one line"), "Just one line");
+    }
+
+    #[test]
+    fn opening_starts_gestures_unless_the_user_stopped_them() {
+        assert!(should_start_on_open(false, false));
+        assert!(!should_start_on_open(false, true));
+        assert!(!should_start_on_open(true, false));
+        assert!(!should_start_on_open(true, true));
     }
 
     #[test]
