@@ -92,15 +92,26 @@ fn parse_gnome_shortcut(raw: &str) -> Option<String> {
     Some(keys)
 }
 
-/// A command that runs the first of these that's installed.
-fn first_available_command<'a>(commands: impl Iterator<Item = &'a &'a str>) -> String {
-    let attempts: Vec<String> = commands
-        .map(|command| {
-            let program = command.split_whitespace().next().unwrap_or(command);
-            format!("command -v {program} >/dev/null && exec {command}")
+/// Whether a program can be found in PATH.
+fn is_installed(program: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|dir| {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::metadata(dir.join(program))
+                .is_ok_and(|file| file.is_file() && file.permissions().mode() & 0o111 != 0)
         })
-        .collect();
-    format!("sh -c '{}'", attempts.join("; "))
+    })
+}
+
+/// The first of these commands whose program passes the check, as its program and arguments.
+fn first_installed<'a>(
+    commands: &[&'a str],
+    installed: impl Fn(&str) -> bool,
+) -> Option<Vec<&'a str>> {
+    commands
+        .iter()
+        .map(|command| command.split_whitespace().collect::<Vec<_>>())
+        .find(|parts| parts.first().is_some_and(|program| installed(program)))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -324,7 +335,7 @@ impl WaylandContext {
             ActionType::ShowAppGrid => uinput_handler("Super_L+d"),
             ActionType::ShowDesktop => uinput_handler("Super_L+d"),
             ActionType::LockScreen => {
-                self.run_user_cmd("swaylock");
+                self.run_user_cmd("swaylock", &[]);
             }
             ActionType::Terminal => self.open_terminal(),
             ActionType::VolumeUp => uinput_handler("XF86AudioRaiseVolume"),
@@ -367,7 +378,7 @@ impl WaylandContext {
             ActionType::ShowAppGrid => uinput_handler("Super_L+a"),
             ActionType::ShowDesktop => uinput_handler("Super_L+d"),
             ActionType::LockScreen => {
-                self.run_user_cmd("hyprlock");
+                self.run_user_cmd("hyprlock", &[]);
             }
             ActionType::Terminal => self.open_terminal(),
             ActionType::VolumeUp => uinput_handler("XF86AudioRaiseVolume"),
@@ -519,11 +530,17 @@ impl WaylandContext {
             ActionType::ScreenshotWindow => uinput_handler("Alt_L+Print"),
             ActionType::ScreenshotArea => uinput_handler("Shift_L+Print"),
             ActionType::Kde(comp, short) => {
-                let cmd = format!(
-                    "dbus-send --session --type=method_call --dest=org.kde.kglobalaccel /component/{} org.kde.kglobalaccel.Component.invokeShortcut string:\"{}\"",
-                    comp, short
+                self.run_user_cmd(
+                    "dbus-send",
+                    &[
+                        "--session",
+                        "--type=method_call",
+                        "--dest=org.kde.kglobalaccel",
+                        &format!("/component/{comp}"),
+                        "org.kde.kglobalaccel.Component.invokeShortcut",
+                        &format!("string:{short}"),
+                    ],
                 );
-                self.run_user_cmd(&cmd);
             }
             _ => {}
         }
@@ -547,7 +564,7 @@ impl WaylandContext {
             ActionType::LockScreen => {
                 let self_clone = self.clone();
                 std::thread::spawn(move || {
-                    self_clone.run_shell_cmd("xflock4");
+                    self_clone.run_user_cmd("xflock4", &[]);
                 });
             }
             ActionType::Terminal => self.open_terminal(),
@@ -571,9 +588,9 @@ impl WaylandContext {
         }
     }
 
-    fn control_center_command(&self) -> String {
+    fn control_center_candidates(&self) -> &'static [&'static str] {
         // Sway and Hyprland have no settings app of their own, so use whichever is installed.
-        let candidates: &[&str] = if self.is_sway || self.is_hypr {
+        if self.is_sway || self.is_hypr {
             &["gnome-control-center", "systemsettings", "xfce4-settings-manager"]
         } else if self.is_gnome {
             &["gnome-control-center"]
@@ -581,14 +598,10 @@ impl WaylandContext {
             &["systemsettings"]
         } else {
             &["xfce4-settings-manager"]
-        };
-        format!(
-            "sh -c 'for c in {}; do command -v $c >/dev/null && exec $c; done'",
-            candidates.join(" ")
-        )
+        }
     }
 
-    fn terminal_command(&self) -> String {
+    fn terminal_candidates(&self) -> Vec<&'static str> {
         // Distributions differ in which terminal they ship, and desktops have no reliable shortcut
         // for it. The first choice is the standard way to ask for the user's preferred one.
         let preferred: &[&str] = if self.is_kde {
@@ -601,30 +614,34 @@ impl WaylandContext {
             // A new window, because Ptyxis otherwise only brings an open one forward.
             &["ptyxis --new-window", "kgx", "gnome-terminal"]
         };
-        first_available_command(
-            ["xdg-terminal-exec"]
-                .iter()
-                .chain(preferred)
-                .chain(&["ptyxis --new-window", "kgx", "gnome-terminal", "konsole", "xfce4-terminal", "foot", "kitty", "alacritty", "xterm"]),
-        )
+        ["xdg-terminal-exec"]
+            .iter()
+            .chain(preferred)
+            .chain(&["ptyxis --new-window", "kgx", "gnome-terminal", "konsole", "xfce4-terminal", "foot", "kitty", "alacritty", "xterm"])
+            .copied()
+            .collect()
+    }
+
+    fn run_first_installed(&self, commands: &[&str]) {
+        if let Some(parts) = first_installed(commands, is_installed) {
+            self.run_user_cmd(parts[0], &parts[1..]);
+        }
     }
 
     fn open_terminal(&self) {
-        self.run_user_cmd(&self.terminal_command());
+        self.run_first_installed(&self.terminal_candidates());
     }
 
     fn open_control_center(&self) {
-        self.run_user_cmd(&self.control_center_command());
+        self.run_first_installed(self.control_center_candidates());
     }
 
     fn run_swaymsg(&self, msg: &str) {
-        let cmd = format!("swaymsg {}", msg);
-        self.run_user_cmd(&cmd);
+        self.run_user_cmd("swaymsg", &msg.split_whitespace().collect::<Vec<_>>());
     }
 
     fn run_hyprctl(&self, msg: &str) {
-        let cmd = format!("hyprctl {}", msg);
-        self.run_user_cmd(&cmd);
+        self.run_user_cmd("hyprctl", &msg.split_whitespace().collect::<Vec<_>>());
     }
 
     fn run_gnome_shortcut(&self, key: &str, fallback_keys: &str, uinput_handler: &dyn Fn(&str)) {
@@ -674,8 +691,7 @@ impl WaylandContext {
         if unsafe { libc::getuid() } != 0 && gio_reads_user_settings() {
             return read_gnome_setting(schema, key);
         }
-        let cmd = format!("gsettings get {} {}", schema, key);
-        let output = self.run_user_cmd_output(&cmd)?;
+        let output = self.run_user_cmd_output("gsettings", &["get", schema, key])?;
         let clean = output.trim().to_string();
         if clean.is_empty() {
             None
@@ -685,18 +701,18 @@ impl WaylandContext {
     }
 
     fn gsettings_set(&self, schema: &str, key: &str, value: &str) {
-        let cmd = format!("gsettings set {} {} \"{}\"", schema, key, value);
-        self.run_user_cmd(&cmd);
+        self.run_user_cmd("gsettings", &["set", schema, key, value]);
     }
 
+    // The one place a shell belongs: Run Command takes whatever the user would type in one.
     fn run_shell_cmd(&self, cmd: &str) {
         let _ = Command::new("sh").arg("-c").arg(cmd).status();
     }
 
-    // Runs a command in the user session's DBUS environment
-    fn run_user_cmd(&self, cmd: &str) {
+    // Runs a program in the user session's DBUS environment
+    fn run_user_cmd(&self, program: &str, args: &[&str]) {
         if let Ok(mut child) = self
-            .build_user_command(cmd)
+            .build_user_command(program, args)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -705,8 +721,8 @@ impl WaylandContext {
         }
     }
 
-    fn run_user_cmd_output(&self, cmd: &str) -> Option<String> {
-        let output = self.build_user_command(cmd).output().ok()?;
+    fn run_user_cmd_output(&self, program: &str, args: &[&str]) -> Option<String> {
+        let output = self.build_user_command(program, args).output().ok()?;
         if output.status.success() {
             Some(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
@@ -714,46 +730,31 @@ impl WaylandContext {
         }
     }
 
-    fn build_user_command(&self, cmd: &str) -> Command {
-        let mut command = Command::new("sh");
-        command.arg("-c");
+    /// Arguments stay separate all the way, so nothing in them can be read as shell syntax.
+    fn build_user_command(&self, program: &str, args: &[&str]) -> Command {
+        let dbus_env = (Path::new(&format!("/run/user/{}/bus", self.uid)).exists()
+            && std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err())
+        .then(|| format!("DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{}/bus", self.uid));
 
-        let current_uid = unsafe { libc::getuid() };
-        let mut prefix = String::new();
-
-        let dbus_env = if Path::new(&format!("/run/user/{}/bus", self.uid)).exists()
-            && std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err()
-        {
-            format!(
-                "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{}/bus ",
-                self.uid
-            )
-        } else {
-            String::new()
-        };
-
-        if current_uid == 0 && !self.username.is_empty() {
+        if unsafe { libc::getuid() } == 0 && !self.username.is_empty() {
+            let mut command = Command::new("sudo");
+            command.args(["-u", &self.username, "env"]);
+            command.args(dbus_env);
+            command.arg(format!("XDG_RUNTIME_DIR=/run/user/{}", self.uid));
             if self.is_sway {
-                prefix = format!(
-                    "sudo -u {} env {}XDG_RUNTIME_DIR=/run/user/{} SWAYSOCK={} ",
-                    self.username, dbus_env, self.uid, self.sway_sock
-                );
+                command.arg(format!("SWAYSOCK={}", self.sway_sock));
             } else if self.is_hypr {
-                prefix = format!(
-                    "sudo -u {} env {}XDG_RUNTIME_DIR=/run/user/{} HYPRLAND_INSTANCE_SIGNATURE={} ",
-                    self.username, dbus_env, self.uid, self.hypr_sig
-                );
-            } else {
-                prefix = format!(
-                    "sudo -u {} env {}XDG_RUNTIME_DIR=/run/user/{} ",
-                    self.username, dbus_env, self.uid
-                );
+                command.arg(format!("HYPRLAND_INSTANCE_SIGNATURE={}", self.hypr_sig));
             }
-        } else if !dbus_env.is_empty() {
-            prefix = dbus_env;
+            command.arg(program).args(args);
+            return command;
         }
 
-        command.arg(format!("{}{}", prefix, cmd));
+        let mut command = Command::new(program);
+        command.args(args);
+        if let Some((name, value)) = dbus_env.as_deref().and_then(|env| env.split_once('=')) {
+            command.env(name, value);
+        }
         command
     }
 }
@@ -858,31 +859,37 @@ mod tests {
     }
 
     #[test]
-    fn terminal_command_tries_each_desktops_terminal_first() {
+    fn terminals_try_each_desktops_own_first() {
         let gnome = WaylandContext {
             is_gnome: true,
             ..Default::default()
-        };
-        let command = gnome.terminal_command();
-        let position = |text: &str| command.find(text).unwrap();
-        assert!(position("xdg-terminal-exec") < position("exec ptyxis --new-window"));
-        assert!(position("exec ptyxis") < position("exec konsole"));
+        }
+        .terminal_candidates();
+        let position = |list: &[&str], text: &str| list.iter().position(|c| *c == text).unwrap();
+        assert!(position(&gnome, "xdg-terminal-exec") < position(&gnome, "ptyxis --new-window"));
+        assert!(position(&gnome, "ptyxis --new-window") < position(&gnome, "konsole"));
 
         let kde = WaylandContext {
             is_kde: true,
             ..Default::default()
         }
-        .terminal_command();
-        assert!(kde.find("exec konsole").unwrap() < kde.find("exec ptyxis").unwrap());
+        .terminal_candidates();
+        assert!(position(&kde, "konsole") < position(&kde, "ptyxis --new-window"));
     }
 
     #[test]
-    fn the_first_installed_command_runs_with_its_arguments() {
-        let command = first_available_command(
-            ["gestos-no-such-program", "echo hello"].iter(),
-        );
-        let output = Command::new("sh").arg("-c").arg(command).output().unwrap();
-        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hello");
+    fn the_first_installed_command_keeps_its_arguments() {
+        let found = first_installed(&["missing", "ptyxis --new-window", "kgx"], |program| {
+            program != "missing"
+        });
+        assert_eq!(found.unwrap(), ["ptyxis", "--new-window"]);
+        assert_eq!(first_installed(&["missing"], |_| false), None);
+    }
+
+    #[test]
+    fn programs_are_found_in_path() {
+        assert!(is_installed("sh"));
+        assert!(!is_installed("gestos-no-such-program"));
     }
 
     #[test]
@@ -891,26 +898,21 @@ mod tests {
             is_gnome: true,
             ..Default::default()
         };
-        assert!(gnome.control_center_command().contains("in gnome-control-center;"));
-
+        assert_eq!(gnome.control_center_candidates(), ["gnome-control-center"]);
         let kde = WaylandContext {
             is_kde: true,
             ..Default::default()
         };
-        assert!(kde.control_center_command().contains("in systemsettings;"));
+        assert_eq!(kde.control_center_candidates(), ["systemsettings"]);
     }
 
     #[test]
-    fn control_center_command_runs_a_real_program_or_does_nothing() {
-        let status = Command::new("sh")
-            .arg("-c")
-            .arg(
-                WaylandContext::default()
-                    .control_center_command()
-                    .replace("xfce4-settings-manager", "gestos-no-such-program true"),
-            )
-            .status()
-            .unwrap();
-        assert!(status.success());
+    fn shell_syntax_in_an_argument_stays_plain_text() {
+        let ctx = WaylandContext::default();
+        let marker = std::env::temp_dir().join(format!("gestos-noshell-{}", std::process::id()));
+        let trap = format!("$(touch {})", marker.display());
+        let output = ctx.run_user_cmd_output("echo", &[&trap]).unwrap();
+        assert_eq!(output.trim(), trap);
+        assert!(!marker.exists());
     }
 }
