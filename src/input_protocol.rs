@@ -6,6 +6,9 @@ use crate::modifiers::Modifiers;
 
 pub const SOCKET_PATH: &str = "/run/gestos/input.sock";
 pub const MAX_LINE_LENGTH: usize = 4096;
+/// How long after a gesture the service says which modifiers are held. It's for waiting until
+/// they're released, and a little longer than the daemon waits for that.
+pub const HELD_REPORT_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Request {
@@ -168,6 +171,12 @@ pub fn active_seat_uid(seat_file: &str) -> Option<u32> {
         .and_then(|uid| uid.trim().parse().ok())
 }
 
+/// Whether to say which modifiers are held. Answering at any time would let any program watch the
+/// rhythm of someone's typing, so it needs a gesture that was just drawn with the real mouse.
+pub fn may_report_held(last_gesture: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    last_gesture.is_some_and(|at| now.saturating_duration_since(at) <= HELD_REPORT_WINDOW)
+}
+
 /// The keys a client may press: the keyboard range the virtual device has, and mouse buttons.
 pub fn may_press_key(code: u16) -> bool {
     (1..255).contains(&code) || (0x110..=0x11f).contains(&code)
@@ -269,6 +278,16 @@ mod tests {
         assert_eq!(active_seat_uid("IS_SEAT0=1\nACTIVE=c2\nACTIVE_UID=1000\nCAN_TTY=1\n"), Some(1000));
         assert_eq!(active_seat_uid("IS_SEAT0=1\nACTIVE_UID=\n"), None);
         assert_eq!(active_seat_uid(""), None);
+    }
+
+    #[test]
+    fn held_modifiers_are_only_reported_just_after_a_gesture() {
+        let gesture = std::time::Instant::now();
+        assert!(!may_report_held(None, gesture));
+        assert!(may_report_held(Some(gesture), gesture));
+        assert!(may_report_held(Some(gesture), gesture + HELD_REPORT_WINDOW));
+        let later = gesture + HELD_REPORT_WINDOW + std::time::Duration::from_millis(1);
+        assert!(!may_report_held(Some(gesture), later));
     }
 
     #[test]

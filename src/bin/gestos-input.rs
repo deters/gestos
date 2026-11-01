@@ -30,7 +30,8 @@ mod uinput;
 mod service {
     use crate::gesture::GestureRecognizer;
     use crate::input_protocol::{
-        active_seat_uid, is_event_node, may_press_key, Event, LineBuffer, Request, SOCKET_PATH,
+        active_seat_uid, is_event_node, may_press_key, may_report_held, Event, LineBuffer, Request,
+        SOCKET_PATH,
     };
     use crate::keyboards::{created_event_nodes, is_physical_keyboard, Keyboards};
     use crate::modifiers::Modifiers;
@@ -328,6 +329,7 @@ mod service {
         let mut pending_frame: Vec<evdev::InputEvent> = Vec::new();
         let mut held_at_press = Modifiers::default();
         let mut next_seat_check = Instant::now() + SEAT_CHECK_INTERVAL;
+        let mut last_gesture = None;
 
         loop {
             if !outbox.flush() {
@@ -390,12 +392,23 @@ mod service {
                 while let Some(line) = lines.next_line() {
                     match Request::decode(&line) {
                         Some(Request::Key { code, pressed }) if may_press_key(code) => {
+                            // Keys must not reach another user's session, even for a moment.
+                            if active_uid() != Some(peer) {
+                                return Err(refused(false, "Another user is now active on this seat."));
+                            }
                             if let Some(ref u) = uinput {
                                 u.key(code, pressed);
                             }
                         }
                         Some(Request::SetKeyboards(enabled)) => modifiers.set_enabled(enabled),
-                        Some(Request::QueryHeld) => outbox.send(&Event::Held(modifiers.held())),
+                        Some(Request::QueryHeld) => {
+                            let held = if may_report_held(last_gesture, Instant::now()) {
+                                modifiers.held()
+                            } else {
+                                Modifiers::default()
+                            };
+                            outbox.send(&Event::Held(held));
+                        }
                         _ => return Err(refused(true, "The request was not understood.")),
                     }
                 }
@@ -439,6 +452,7 @@ mod service {
                                 outbox.send(&Event::Point(point.x, point.y));
                             }
                             outbox.send(&Event::Finished(held_at_press));
+                            last_gesture = Some(Instant::now());
                         } else if grabbed {
                             // Click emulation
                             if let Some(ref u) = uinput {

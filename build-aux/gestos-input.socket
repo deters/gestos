@@ -7,6 +7,10 @@ ListenStream=/run/gestos/input.sock
 SocketMode=0666
 Accept=yes
 MaxConnections=16
+# Unwanted connections are refused at once, so another user making many of them must neither use
+# up the connections nor trip the limit that would stop this socket.
+MaxConnectionsPerSource=8
+TriggerLimitIntervalSec=0
 
 [Install]
 WantedBy=sockets.target
