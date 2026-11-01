@@ -214,6 +214,68 @@ enum DaemonSignal {
     ActionExecuted(String, String, String),
 }
 
+#[cfg(target_os = "linux")]
+const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
+#[cfg(target_os = "linux")]
+const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
+#[cfg(target_os = "linux")]
+const GESTURE_NOTIFICATION_DURATION: Duration = Duration::from_secs(1);
+
+/// Shows which gesture ran, replacing the notification `replaces` if it's still up, and returns
+/// its id. Transient, so that it stays out of the desktop's list of notifications.
+#[cfg(target_os = "linux")]
+fn show_gesture_notification(
+    conn: &zbus::blocking::Connection,
+    service: &str,
+    replaces: u32,
+    gesture_name: &str,
+    action_desc: &str,
+    icon_name: &str,
+) -> zbus::Result<u32> {
+    let mut hints = std::collections::HashMap::new();
+    hints.insert("transient", zbus::zvariant::Value::from(true));
+    let reply = conn.call_method(
+        Some(service),
+        NOTIFICATIONS_PATH,
+        Some(NOTIFICATIONS_NAME),
+        "Notify",
+        &(
+            "Gestos",
+            replaces,
+            icon_name,
+            gesture_name,
+            action_desc,
+            Vec::<&str>::new(),
+            hints,
+            GESTURE_NOTIFICATION_DURATION.as_millis() as i32,
+        ),
+    )?;
+    reply.body().deserialize()
+}
+
+/// Closes the notification after its time is up, unless a newer one has replaced it. Desktops
+/// may ignore the time asked for, as GNOME can.
+#[cfg(target_os = "linux")]
+fn close_gesture_notification_later(
+    conn: zbus::blocking::Connection,
+    id: u32,
+    latest: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    shown: u64,
+) {
+    std::thread::spawn(move || {
+        std::thread::sleep(GESTURE_NOTIFICATION_DURATION);
+        if latest.load(Ordering::SeqCst) == shown {
+            let _ = conn.call_method(
+                Some(NOTIFICATIONS_NAME),
+                NOTIFICATIONS_PATH,
+                Some(NOTIFICATIONS_NAME),
+                "CloseNotification",
+                &(id,),
+            );
+        }
+    });
+}
+
 /// Emits D-Bus signals on their own thread, because a stalled bus must never hold up pointer
 /// forwarding. If the queue fills up, the event loop drops signals instead of waiting.
 #[cfg(target_os = "linux")]
@@ -226,7 +288,31 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
         let path = "/io/github/deters/Gestos/Daemon";
         let iface = "io.github.deters.Gestos.Daemon";
         let dest = None::<zbus::names::BusName>;
+        let latest_notification = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let mut notification_id = 0;
         for signal in receiver {
+            if let DaemonSignal::ActionExecuted(name, desc, icon) = &signal {
+                let shown = latest_notification.fetch_add(1, Ordering::SeqCst) + 1;
+                match show_gesture_notification(
+                    &conn,
+                    NOTIFICATIONS_NAME,
+                    notification_id,
+                    name,
+                    desc,
+                    icon,
+                ) {
+                    Ok(id) => {
+                        notification_id = id;
+                        close_gesture_notification_later(
+                            conn.clone(),
+                            id,
+                            std::sync::Arc::clone(&latest_notification),
+                            shown,
+                        );
+                    }
+                    Err(e) => eprintln!("gestosd: Could not show a notification: {}", e),
+                }
+            }
             let _ = match signal {
                 DaemonSignal::GestureStarted(x, y) => {
                     conn.emit_signal(dest.clone(), path, iface, "GestureStarted", &(x, y))
@@ -1164,6 +1250,71 @@ mod tests {
         fn stop(&self) {
             self.stop_calls.fetch_add(1, Ordering::SeqCst);
         }
+    }
+
+    struct FakeNotifications {
+        calls: std::sync::Arc<std::sync::Mutex<Vec<(u32, String, String, String, i32, bool)>>>,
+    }
+
+    #[interface(name = "org.freedesktop.Notifications")]
+    impl FakeNotifications {
+        #[allow(clippy::too_many_arguments)]
+        fn notify(
+            &self,
+            _app: String,
+            replaces: u32,
+            icon: String,
+            summary: String,
+            body: String,
+            _actions: Vec<String>,
+            hints: std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+            timeout: i32,
+        ) -> u32 {
+            let transient = hints
+                .get("transient")
+                .and_then(|value| bool::try_from(value).ok())
+                .unwrap_or(false);
+            self.calls
+                .lock()
+                .unwrap()
+                .push((replaces, icon, summary, body, timeout, transient));
+            replaces + 7
+        }
+    }
+
+    #[test]
+    fn a_gesture_notification_says_what_ran_for_one_second() {
+        let Some(client) = session_bus() else { return };
+        let name = test_name("Notifications");
+        let calls = std::sync::Arc::default();
+        let service = FakeNotifications {
+            calls: std::sync::Arc::clone(&calls),
+        };
+        let _service = zbus::blocking::connection::Builder::session()
+            .and_then(|b| b.name(name.clone()))
+            .and_then(|b| b.serve_at(NOTIFICATIONS_PATH, service))
+            .and_then(|b| b.build())
+            .unwrap();
+
+        let first =
+            show_gesture_notification(&client, &name, 0, "Back", "Press keys: Alt+Left", "go-icon")
+                .unwrap();
+        assert_eq!(first, 7);
+        show_gesture_notification(&client, &name, first, "Close", "Close Window", "x").unwrap();
+
+        let calls = calls.lock().unwrap();
+        assert_eq!(
+            calls[0],
+            (
+                0,
+                "go-icon".to_string(),
+                "Back".to_string(),
+                "Press keys: Alt+Left".to_string(),
+                1000,
+                true
+            )
+        );
+        assert_eq!(calls[1].0, 7, "the newer notification replaces the older one");
     }
 
     fn session_bus() -> Option<zbus::blocking::Connection> {
