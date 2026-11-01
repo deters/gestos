@@ -88,17 +88,13 @@ fn is_listed(option: &EditorActionOption) -> bool {
 }
 
 /// Actions matching the search that no gesture uses yet, best first. With nothing to search
-/// for, that's every action if there are no gestures to show instead, and otherwise nothing.
+/// for, that's every action no gesture uses yet.
 pub fn find_suggestions(
     options: &[EditorActionOption],
     gestures: &[Gesture],
     query: &str,
 ) -> Vec<EditorActionOption> {
     let query = query.trim().to_lowercase();
-    let has_gestures = gestures.iter().any(|gesture| !gesture.is_deleted);
-    if query.is_empty() && has_gestures {
-        return Vec::new();
-    }
 
     let mut matches: Vec<(u8, &EditorActionOption)> = options
         .iter()
@@ -303,9 +299,11 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_search_suggests_nothing_when_there_are_gestures() {
-        let gestures = [gesture(ActionType::Kill)];
-        assert!(find_suggestions(&minimize_options(), &gestures, "   ").is_empty());
+    fn an_empty_search_lists_only_the_actions_not_in_use() {
+        let mut options = minimize_options();
+        options.push(gnome("Volume up", "volume-up"));
+        let gestures = [gesture(ActionType::Iconify)];
+        assert_eq!(names(&find_suggestions(&options, &gestures, "   ")), ["Volume up"]);
     }
 
     #[test]
@@ -320,10 +318,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn deleted_gestures_do_not_count_as_having_gestures() {
-        let mut deleted = gesture(ActionType::Kill);
-        deleted.is_deleted = true;
-        assert_eq!(find_suggestions(&minimize_options(), &[deleted], "").len(), 1);
-    }
 }
