@@ -2,12 +2,17 @@
 
 ## Get started
 
-1. [Install Gestos](#install), then open it from your applications menu, or run `gestos`.
-2. Click **+**, or search for what you want a gesture to do.
-3. Draw the gesture and click **Save**.
-4. Hold the right mouse button anywhere, draw your gesture, and let go.
+[Install Gestos](#install) and open it. Then search for what you want a gesture to do, and choose an action:
 
-![The Gestos main window, listing gestures with the shape that triggers each one](docs/screenshots/main-window.jpg)
+![Searching for "screen" lists matching actions to create a gesture for](docs/screenshots/search-suggestions.jpg)
+
+Draw the gesture and save it. Gestos warns you if your drawing is close to one you already have:
+
+![The gesture editor with a drawn path and the Take Screenshot action](docs/screenshots/gesture-editor.jpg)
+
+That's it. Hold the right mouse button anywhere, draw your gesture, and let go. A short click still works as a normal right click.
+
+To use an action that isn't listed, or one that already has a gesture, click **+** instead. Actions come from your desktop, so the list differs between desktops, and Sway and Hyprland have the built-in actions only.
 
 ## Install
 
@@ -40,23 +45,9 @@ sudo meson install -C build
 
 ## Using Gestos
 
-### Create gestures from the search
-
-Type what you want to do. Actions that match, and that no gesture uses yet, appear under **Create a Gesture For**. Choose one, draw the gesture, and save.
-
-![Searching for "screen" lists matching actions to create a gesture for](docs/screenshots/search-suggestions.jpg)
-
-The action is already chosen when the editor opens, and it warns you if your drawing is close to an existing gesture:
-
-![The gesture editor with a drawn path and the Take Screenshot action](docs/screenshots/gesture-editor.jpg)
-
-Actions come from your desktop, so the list differs between desktops. Sway and Hyprland have the built-in actions only.
-
 ### Choose between similar gestures
 
 When a drawing matches several gestures almost equally, they appear at the pointer. Click the one you meant. Clicking anywhere else, pressing `Esc`, or waiting 15 seconds does nothing.
-
-![A popup offering two similar gestures, Back and Previous Tab](docs/screenshots/similar-gestures.jpg)
 
 ### Start and stop
 
