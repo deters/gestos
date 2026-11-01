@@ -151,7 +151,7 @@ impl ActionType {
         match self {
             ActionType::Execute(_) => "utilities-terminal-symbolic",
             ActionType::Keypress(_) => "input-keyboard-symbolic",
-            ActionType::Gnome(_) => "preferences-system-symbolic",
+            ActionType::Gnome(key) => gnome_icon_name(key),
             ActionType::Kde(_, _) => "preferences-system-symbolic",
             ActionType::Iconify => "window-minimize-symbolic",
             ActionType::Kill => "window-close-symbolic",
@@ -181,7 +181,7 @@ impl ActionType {
             ActionType::Screenshot | ActionType::ScreenshotWindow | ActionType::ScreenshotArea => {
                 "camera-photo-symbolic"
             }
-            _ => "system-run-symbolic",
+            other => other.gnome_key().map_or("system-run-symbolic", gnome_icon_name),
         }
     }
 
@@ -280,6 +280,119 @@ impl std::fmt::Display for ActionType {
             ActionType::Kde(comp, short) => write!(f, "kde {} {}", comp, short),
             ActionType::Abort => write!(f, "abort"),
         }
+    }
+}
+
+/// The icon for a GNOME keybinding key, from the three schemas the editor lists. Directions and
+/// numbers share an icon where the icons have no way to tell them apart.
+fn gnome_icon_name(key: &str) -> &'static str {
+    let key = key.trim_end_matches("-static");
+    match key {
+        // Windows
+        "close" => "window-close-symbolic",
+        "minimize" => "window-minimize-symbolic",
+        "maximize" | "maximize-horizontally" | "maximize-vertically" | "toggle-maximized" => {
+            "window-maximize-symbolic"
+        }
+        "unmaximize" => "window-restore-symbolic",
+        "toggle-fullscreen" => "view-fullscreen-symbolic",
+        "activate-window-menu" => "open-menu-symbolic",
+        "begin-move" => "go-jump-symbolic",
+        "begin-resize" => "zoom-fit-best-symbolic",
+        "always-on-top" | "toggle-above" | "raise" | "raise-or-lower" => "go-top-symbolic",
+        "lower" => "go-bottom-symbolic",
+        "toggle-on-all-workspaces" => "view-pin-symbolic",
+        "show-desktop" => "user-desktop-symbolic",
+        // Moving windows
+        "move-to-side-n" => "go-up-symbolic",
+        "move-to-side-s" => "go-down-symbolic",
+        "move-to-side-e" => "go-next-symbolic",
+        "move-to-side-w" => "go-previous-symbolic",
+        "move-to-center" => "format-justify-center-symbolic",
+        _ if key.starts_with("move-to-corner-") => "go-jump-symbolic",
+        _ if key.starts_with("move-to-monitor-") => "video-joined-displays-symbolic",
+        _ if key.starts_with("move-to-workspace-") => "send-to-symbolic",
+        // Switching
+        "switch-to-workspace-left" => "go-previous-symbolic",
+        "switch-to-workspace-right" => "go-next-symbolic",
+        "switch-to-workspace-up" | "shift-overview-up" => "go-up-symbolic",
+        "switch-to-workspace-down" | "shift-overview-down" => "go-down-symbolic",
+        _ if key.starts_with("switch-to-workspace-") => "preferences-desktop-multitasking-symbolic",
+        _ if key.starts_with("switch-windows") || key.starts_with("cycle-windows") => {
+            "focus-windows-symbolic"
+        }
+        _ if key.starts_with("switch-group") || key.starts_with("cycle-group") => {
+            "focus-windows-symbolic"
+        }
+        _ if key.starts_with("switch-panels") || key.starts_with("cycle-panels") => {
+            "focus-top-bar-symbolic"
+        }
+        _ if key.starts_with("switch-applications") || key.starts_with("switch-to-application-") => {
+            "view-app-grid-symbolic"
+        }
+        _ if key.starts_with("switch-input-source") => "preferences-desktop-locale-symbolic",
+        _ if key.starts_with("open-new-window-application-") => "window-new-symbolic",
+        // Shell
+        "toggle-application-view" => "view-app-grid-symbolic",
+        "toggle-overview" => "view-grid-symbolic",
+        "toggle-quick-settings" => "emblem-system-symbolic",
+        "toggle-message-tray" | "focus-active-notification" => {
+            "preferences-system-notifications-symbolic"
+        }
+        "panel-main-menu" => "start-here-symbolic",
+        "panel-run-dialog" => "system-run-symbolic",
+        "set-spew-mark" => "dialog-information-symbolic",
+        "screenshot" | "screenshot-window" | "window-screenshot" | "area-screenshot"
+        | "show-screenshot-ui" => "camera-photo-symbolic",
+        "show-screen-recording-ui" => "media-record-symbolic",
+        _ if key.starts_with("screen-brightness-") => "display-brightness-symbolic",
+        // Sound and media
+        _ if key.starts_with("volume-up") => "audio-volume-high-symbolic",
+        _ if key.starts_with("volume-down") => "audio-volume-low-symbolic",
+        _ if key.starts_with("volume-mute") => "audio-volume-muted-symbolic",
+        "mic-mute" => "microphone-sensitivity-muted-symbolic",
+        "media" => "multimedia-player-symbolic",
+        "play" => "media-playback-start-symbolic",
+        "pause" => "media-playback-pause-symbolic",
+        "stop" => "media-playback-stop-symbolic",
+        "next" => "media-skip-forward-symbolic",
+        "previous" => "media-skip-backward-symbolic",
+        "playback-forward" => "media-seek-forward-symbolic",
+        "playback-rewind" => "media-seek-backward-symbolic",
+        "playback-random" => "media-playlist-shuffle-symbolic",
+        "playback-repeat" => "media-playlist-repeat-symbolic",
+        "eject" => "media-eject-symbolic",
+        // Session and power
+        "logout" => "system-log-out-symbolic",
+        "screensaver" => "system-lock-screen-symbolic",
+        "power" | "shutdown" => "system-shutdown-symbolic",
+        "reboot" => "system-reboot-symbolic",
+        "suspend" => "weather-clear-night-symbolic",
+        "hibernate" => "drive-harddisk-symbolic",
+        "battery-status" => "battery-level-100-symbolic",
+        // Hardware
+        "rfkill" => "airplane-mode-symbolic",
+        "rfkill-bluetooth" => "bluetooth-active-symbolic",
+        "rotate-video-lock" => "rotation-locked-symbolic",
+        "touchpad-off" => "touchpad-disabled-symbolic",
+        "touchpad-on" | "touchpad-toggle" => "input-touchpad-symbolic",
+        _ if key.starts_with("keyboard-brightness-") => "keyboard-brightness-symbolic",
+        // Accessibility
+        "screenreader" | "toggle-contrast" => "preferences-desktop-accessibility-symbolic",
+        "on-screen-keyboard" => "preferences-desktop-keyboard-symbolic",
+        "increase-text-size" | "decrease-text-size" => "preferences-desktop-font-symbolic",
+        "magnifier" => "zoom-fit-best-symbolic",
+        "magnifier-zoom-in" => "zoom-in-symbolic",
+        "magnifier-zoom-out" => "zoom-out-symbolic",
+        // Applications
+        "terminal" => "utilities-terminal-symbolic",
+        "www" => "web-browser-symbolic",
+        "home" => "user-home-symbolic",
+        "email" => "mail-unread-symbolic",
+        "search" => "system-search-symbolic",
+        "calculator" => "accessories-calculator-symbolic",
+        "help" => "help-browser-symbolic",
+        _ => "preferences-system-symbolic",
     }
 }
 
@@ -930,6 +1043,49 @@ mod tests {
         assert_eq!(ActionType::WorkspaceRight.get_icon_name(), "go-next-symbolic");
         assert_eq!(ActionType::WorkspaceUp.get_icon_name(), "go-up-symbolic");
         assert_eq!(ActionType::WorkspaceDown.get_icon_name(), "go-down-symbolic");
+    }
+
+    #[test]
+    fn gnome_actions_have_icons_that_exist() {
+        let keys = "activate-window-menu always-on-top begin-move begin-resize close cycle-group \
+            cycle-group-backward cycle-panels cycle-panels-backward cycle-windows \
+            cycle-windows-backward lower maximize maximize-horizontally maximize-vertically \
+            minimize move-to-center move-to-corner-ne move-to-monitor-up move-to-side-e \
+            move-to-side-n move-to-side-s move-to-side-w move-to-workspace-1 \
+            move-to-workspace-last panel-main-menu panel-run-dialog raise raise-or-lower \
+            set-spew-mark show-desktop switch-applications switch-group switch-input-source \
+            switch-panels switch-to-workspace-1 switch-to-workspace-last \
+            switch-to-workspace-left switch-windows toggle-above toggle-fullscreen \
+            toggle-maximized toggle-on-all-workspaces unmaximize battery-status calculator \
+            decrease-text-size eject email help hibernate home increase-text-size \
+            keyboard-brightness-up logout magnifier magnifier-zoom-in magnifier-zoom-out media \
+            mic-mute next on-screen-keyboard pause play playback-forward playback-random \
+            playback-repeat playback-rewind power previous reboot rfkill rfkill-bluetooth \
+            rotate-video-lock screenreader screensaver search shutdown stop suspend \
+            toggle-contrast touchpad-off touchpad-on volume-down volume-mute-quiet volume-up \
+            www focus-active-notification open-new-window-application-1 \
+            screen-brightness-cycle screenshot screenshot-window shift-overview-up \
+            show-screen-recording-ui show-screenshot-ui switch-to-application-1 \
+            toggle-application-view toggle-message-tray toggle-overview toggle-quick-settings";
+        let adwaita = Path::new("/usr/share/icons/Adwaita/symbolic");
+        for key in keys.split_whitespace() {
+            let icon = gnome_icon_name(key);
+            assert_ne!(icon, "preferences-system-symbolic", "{key} has no icon of its own");
+            if adwaita.exists() {
+                let exists = fs::read_dir(adwaita)
+                    .unwrap()
+                    .flatten()
+                    .any(|context| context.path().join(format!("{icon}.svg")).exists());
+                assert!(exists, "{key} uses {icon}, which Adwaita doesn't have");
+            }
+        }
+    }
+
+    #[test]
+    fn gnome_icons_ignore_the_static_variants_and_reach_built_in_actions() {
+        assert_eq!(gnome_icon_name("play-static"), gnome_icon_name("play"));
+        assert_eq!(ActionType::ShowDesktop.get_icon_name(), "user-desktop-symbolic");
+        assert_eq!(ActionType::Gnome("eject".to_string()).get_icon_name(), "media-eject-symbolic");
     }
 
     #[test]

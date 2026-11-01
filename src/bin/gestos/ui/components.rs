@@ -87,7 +87,13 @@ pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static 
             "input-keyboard-symbolic",
             "icon-bg-orange",
         ),
-        ActionType::Gnome(_) => ("preferences-system-symbolic", "icon-bg-blue"),
+        ActionType::Gnome(_) => {
+            let icon = action.get_icon_name();
+            let is_media = icon.starts_with("audio-")
+                || icon.starts_with("media-")
+                || icon.starts_with("microphone-");
+            (icon, if is_media { "icon-bg-green" } else { "icon-bg-blue" })
+        }
         ActionType::Kde(_, _) => ("preferences-system-symbolic", "icon-bg-blue"),
         ActionType::Iconify => ("window-minimize-symbolic", "icon-bg-blue"),
         ActionType::Kill => ("window-close-symbolic", "icon-bg-blue"),
@@ -105,7 +111,7 @@ pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static 
         ActionType::MediaPlay | ActionType::MediaNext | ActionType::MediaPrev => {
             ("media-playback-start-symbolic", "icon-bg-green")
         }
-        _ => ("system-run-symbolic", "icon-bg-blue"),
+        _ => (action.get_icon_name(), "icon-bg-blue"),
     }
 }
 pub fn draw_gesture_path(
