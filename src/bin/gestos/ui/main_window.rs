@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use gestos::config::{Configuration, Gesture};
 use crate::state::AppState;
 use crate::actions::{fetch_gnome_action_options, fetch_kde_action_options, get_static_action_options};
-use crate::suggestions::{find_suggestions, SUGGESTIONS_SHOWN};
+use crate::suggestions::find_suggestions;
 use crate::ui::components::get_action_category_icon;
 use crate::ui::editor::{open_gesture_editor, open_gesture_editor_for_action};
 use crate::ui::settings::open_settings_window;
@@ -65,17 +65,11 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
     }
 
     let query = state.search_entry.text().to_string();
-    let mut found = find_suggestions(&state.action_options, &state.config.gestures, &query);
-    let total = found.len();
-    if !state.show_all_suggestions {
-        found.truncate(SUGGESTIONS_SHOWN);
-    }
+    let found = find_suggestions(&state.action_options, &state.config.gestures, &query);
     for option in &found {
         state.suggestion_list.append(&suggestion_row(option));
     }
 
-    state.suggestion_show_all.set_label(&format!("Show All ({total})"));
-    state.suggestion_show_all.set_visible(found.len() < total);
     state
         .suggestion_no_match
         .set_text(&format!("No gestures match \u{201c}{}\u{201d}.", query.trim()));
@@ -241,11 +235,6 @@ pub fn build_ui(app: &gtk::Application) {
     suggestion_list.set_selection_mode(gtk::SelectionMode::None);
     suggestion_box.append(&suggestion_list);
 
-    let suggestion_show_all = gtk::Button::new();
-    suggestion_show_all.add_css_class("flat");
-    suggestion_show_all.set_halign(gtk::Align::Center);
-    suggestion_box.append(&suggestion_show_all);
-
     list_container.append(&suggestion_box);
     scrolled.set_child(Some(&list_container));
 
@@ -272,11 +261,9 @@ pub fn build_ui(app: &gtk::Application) {
         empty_state_box,
         action_options: Vec::new(),
         visible_suggestions: Vec::new(),
-        show_all_suggestions: false,
         suggestion_box,
         suggestion_no_match,
         suggestion_list,
-        suggestion_show_all,
     }));
 
     // Refresh initially
@@ -288,7 +275,6 @@ pub fn build_ui(app: &gtk::Application) {
         .borrow()
         .search_entry
         .connect_search_changed(move |_| {
-            state_clone.borrow_mut().show_all_suggestions = false;
             refresh_gesture_list(&state_clone, None);
         });
 
@@ -306,12 +292,6 @@ pub fn build_ui(app: &gtk::Application) {
                 open_gesture_editor_for_action(&state_suggestion, option);
             }
         });
-
-    let state_show_all = Rc::clone(&state);
-    state.borrow().suggestion_show_all.connect_clicked(move |_| {
-        state_show_all.borrow_mut().show_all_suggestions = true;
-        refresh_gesture_list(&state_show_all, None);
-    });
 
     // Reading the desktop's action lists can be slow, so it doesn't happen on the UI thread.
     let load_options = gtk::gio::spawn_blocking(|| {

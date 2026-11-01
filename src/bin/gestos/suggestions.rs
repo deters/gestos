@@ -2,9 +2,6 @@ use crate::state::EditorActionOption;
 use gestos::config::{ActionType, Gesture};
 use std::collections::{HashMap, HashSet};
 
-/// How many suggestions to show before offering Show All.
-pub const SUGGESTIONS_SHOWN: usize = 5;
-
 /// What an action actually does, so that different entries for one action count as the same:
 /// the built-in Minimize Window runs GNOME's `minimize`, and `volume-up-static` is `volume-up`.
 /// Actions completed by a parameter have no identity of their own, since any number of gestures
