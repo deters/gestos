@@ -71,6 +71,19 @@ fn show_action_parameter(
 }
 
 pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Option<Gesture>) {
+    open_editor(state_rc, target_gesture, None);
+}
+
+/// Opens the editor for a new gesture with its action already chosen.
+pub fn open_gesture_editor_for_action(state_rc: &Rc<RefCell<AppState>>, action: EditorActionOption) {
+    open_editor(state_rc, None, Some(action));
+}
+
+fn open_editor(
+    state_rc: &Rc<RefCell<AppState>>,
+    target_gesture: Option<Gesture>,
+    preset_action: Option<EditorActionOption>,
+) {
     let state = state_rc.borrow();
     let dialog = gtk::Window::new();
     dialog.set_transient_for(Some(&state.window));
@@ -654,8 +667,16 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
             }
         }
     } else {
-        selection_model.set_selected(0);
-        initial_opt = Some(all_options[0].clone());
+        let initial_pos = preset_action
+            .as_ref()
+            .and_then(|preset| {
+                all_options
+                    .iter()
+                    .position(|opt| opt.action_type == preset.action_type)
+            })
+            .unwrap_or(0);
+        selection_model.set_selected(initial_pos as u32);
+        initial_opt = Some(all_options[initial_pos].clone());
         let udn_init = Rc::clone(&update_default_name);
         udn_init();
     }
@@ -672,6 +693,10 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Opt
             &shortcut_display_box,
             &record_btn,
         );
+        // A chosen action is all a new gesture's default name needs.
+        if preset_action.is_some() {
+            update_default_name();
+        }
         action_select_label.set_text(&opt.name);
         let (icon_name, _) = get_action_category_icon(&opt.action_type);
         action_select_icon.set_icon_name(Some(icon_name));

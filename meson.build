@@ -25,6 +25,7 @@ cargo_sources = files(
   'Cargo.toml',
   'Cargo.lock',
   'src/lib.rs',
+  'src/chooser.rs',
   'src/config.rs',
   'src/gesture.rs',
   'src/ipc.rs',
@@ -39,11 +40,13 @@ cargo_sources = files(
   'src/bin/gestos/ui/mod.rs',
   'src/bin/gestos/ui/components.rs',
   'src/bin/gestos/ui/editor.rs',
+  'src/bin/gestos/ui/gesture_chooser.rs',
   'src/bin/gestos/ui/settings.rs',
   'src/bin/gestos/ui/gesture_status.rs',
   'src/bin/gestos/system.rs',
   'src/bin/gestos/daemon.rs',
   'src/bin/gestos/state.rs',
+  'src/bin/gestos/suggestions.rs',
   'src/bin/gestos/main.rs',
 )
 

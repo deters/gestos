@@ -1,3 +1,4 @@
+pub mod chooser;
 pub mod config;
 pub mod gesture;
 pub mod ipc;
