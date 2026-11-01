@@ -182,6 +182,7 @@ fn open_editor(
     let dialog = gtk::Window::new();
     dialog.set_transient_for(Some(&state.window));
     dialog.set_modal(true);
+    dialog.set_destroy_with_parent(true);
     let title_text = if target_gesture.is_some() { "Edit Gesture" } else { "Add Gesture" };
     dialog.set_title(Some(title_text));
     // A little smaller than the main window, so that it reads as being on top of it, without
@@ -211,12 +212,12 @@ fn open_editor(
     dialog_header.set_title_widget(Some(&dialog_title));
     dialog.set_titlebar(Some(&dialog_header));
 
-    let main_box = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    let main_box = gtk::Box::new(gtk::Orientation::Vertical, 18);
     main_box.add_css_class("dialog-content");
-    main_box.set_margin_start(20);
-    main_box.set_margin_end(20);
-    main_box.set_margin_top(16);
-    main_box.set_margin_bottom(16);
+    main_box.set_margin_start(18);
+    main_box.set_margin_end(18);
+    main_box.set_margin_top(18);
+    main_box.set_margin_bottom(18);
     dialog.set_child(Some(&main_box));
 
     // Scrollable area for all inputs
@@ -411,7 +412,6 @@ fn open_editor(
     let modifiers_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     modifiers_row.add_css_class("settings-row");
     let modifiers_label = gtk::Label::new(Some("Modifier Keys"));
-    modifiers_label.add_css_class("status-label");
     modifiers_label.set_halign(gtk::Align::Start);
     modifiers_label.set_hexpand(true);
     modifiers_row.append(&modifiers_label);
@@ -445,7 +445,6 @@ fn open_editor(
 
     let action_details_label = gtk::Label::new(None);
     action_details_label.set_halign(gtk::Align::Start);
-    action_details_label.add_css_class("status-label");
     action_details_row.append(&action_details_label);
 
     let action_details_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -467,7 +466,7 @@ fn open_editor(
     entry_container.append(&shortcut_display_box);
 
     let record_btn = gtk::Button::from_icon_name("media-record-symbolic");
-    record_btn.set_tooltip_text(Some("Record Keybinding"));
+    record_btn.set_tooltip_text(Some("Record keys"));
     entry_container.append(&record_btn);
 
     action_details_row.append(&entry_container);
@@ -760,7 +759,6 @@ fn open_editor(
         let delete_btn = gtk::Button::with_mnemonic("_Delete Gesture");
         delete_btn.add_css_class("destructive-action");
         delete_btn.set_halign(gtk::Align::Center);
-        delete_btn.set_margin_top(8);
 
         let state_clone = Rc::clone(state_rc);
         let target_id = gest.id.clone();

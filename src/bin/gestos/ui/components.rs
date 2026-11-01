@@ -515,7 +515,6 @@ pub fn show_confirm_dialog<W: IsA<gtk::Window>, F: FnOnce() + 'static>(
     // If a custom label isn't using a mnemonic, we could try to add one, but let's just use it as is for now.
     // Assuming confirm_label might have a mnemonic, we use with_mnemonic.
     let confirm_btn = gtk::Button::with_mnemonic(confirm_label);
-    confirm_btn.set_receives_default(true);
     if is_destructive {
         confirm_btn.add_css_class("destructive-action");
     } else {
@@ -532,6 +531,9 @@ pub fn show_confirm_dialog<W: IsA<gtk::Window>, F: FnOnce() + 'static>(
     btn_box.append(&confirm_btn);
 
     main_box.append(&btn_box);
-    dialog.set_default_widget(Some(&confirm_btn));
+    // Enter must never destroy anything, so a destructive confirmation takes a deliberate click.
+    let default_btn = if is_destructive { &cancel_btn } else { &confirm_btn };
+    default_btn.set_receives_default(true);
+    dialog.set_default_widget(Some(default_btn));
     dialog.present();
 }
