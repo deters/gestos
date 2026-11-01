@@ -14,10 +14,11 @@ cargo_script = find_program('build-aux/cargo.sh')
 cargo_target_dir = meson.project_build_root() / 'cargo'
 cargo_manifest = meson.project_source_root() / 'Cargo.toml'
 
-if get_option('buildtype') == 'release'
-  build_type = 'release'
-else
+# Only an explicit debug build skips optimization. Distributions build with 'plain'.
+if get_option('buildtype') == 'debug'
   build_type = 'debug'
+else
+  build_type = 'release'
 endif
 
 # Source files to track for rebuilds
