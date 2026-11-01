@@ -3,6 +3,35 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+// How long GNOME gets to pick up a changed shortcut before it's used, and to act on it before
+// it's restored.
+const TEMPORARY_SHORTCUT_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// The first shortcut in a gsettings value like `['<Alt>F10', 'XF86Foo']`, as keys to press. An
+/// unassigned one reads `['']` or `@as []`.
+fn parse_gnome_shortcut(raw: &str) -> Option<String> {
+    let shortcut = raw.split('\'').skip(1).step_by(2).find(|entry| !entry.is_empty())?;
+    if shortcut == "disabled" {
+        return None;
+    }
+
+    let mut keys = String::new();
+    let mut rest = shortcut;
+    while let Some(after_bracket) = rest.strip_prefix('<') {
+        let (modifier, after) = after_bracket.split_once('>')?;
+        keys.push_str(match modifier {
+            "Alt" => "Alt_L+",
+            "Super" => "Super_L+",
+            "Shift" => "Shift_L+",
+            "Control" | "Ctrl" | "Primary" => "Control_L+",
+            _ => return None,
+        });
+        rest = after;
+    }
+    keys.push_str(rest);
+    Some(keys)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct WaylandContext {
     pub is_gnome: bool,
@@ -511,10 +540,14 @@ impl WaylandContext {
             "org.gnome.shell.keybindings",
         ];
 
-        for schema in &schemas {
-            if let Some(shortcut) = self.get_gnome_shortcut(schema, key) {
-                uinput_handler(&shortcut);
-                return;
+        // An action can be unassigned and still have a fixed key, like www and www-static.
+        let static_key = format!("{key}-static");
+        for candidate in [key, static_key.as_str()] {
+            for schema in &schemas {
+                if let Some(shortcut) = self.get_gnome_shortcut(schema, candidate) {
+                    uinput_handler(&shortcut);
+                    return;
+                }
             }
         }
 
@@ -522,10 +555,10 @@ impl WaylandContext {
         for schema in &schemas {
             if let Some(orig_val) = self.gsettings_get(schema, key) {
                 self.gsettings_set(schema, key, "['<Super><Shift><Control><Alt>F12']");
-                std::thread::sleep(std::time::Duration::from_millis(50));
+                std::thread::sleep(TEMPORARY_SHORTCUT_DELAY);
 
                 uinput_handler("Super_L+Shift_L+Control_L+Alt_L+F12");
-                std::thread::sleep(std::time::Duration::from_millis(50));
+                std::thread::sleep(TEMPORARY_SHORTCUT_DELAY);
 
                 self.gsettings_set(schema, key, &orig_val);
                 return;
@@ -538,51 +571,7 @@ impl WaylandContext {
     }
 
     fn get_gnome_shortcut(&self, schema: &str, key: &str) -> Option<String> {
-        let raw = self.gsettings_get(schema, key)?;
-        if raw.contains("@as []") || raw.contains("[]") || raw.contains("disabled") {
-            return None;
-        }
-
-        // Parse format like "['<Alt>F10']"
-        let start = raw.find('\'')?;
-        let end = raw[start + 1..].find('\'')?;
-        let shortcut = &raw[start + 1..start + 1 + end];
-
-        // Translate shortcuts
-        let mut translated = String::new();
-        let mut p = shortcut;
-        while !p.is_empty() {
-            if p.starts_with("<Alt>") {
-                translated.push_str("Alt_L+");
-                p = &p[5..];
-            } else if p.starts_with("<Super>") {
-                translated.push_str("Super_L+");
-                p = &p[7..];
-            } else if p.starts_with("<Shift>") {
-                translated.push_str("Shift_L+");
-                p = &p[7..];
-            } else if p.starts_with("<Control>") {
-                translated.push_str("Control_L+");
-                p = &p[9..];
-            } else if p.starts_with("<Primary>") {
-                translated.push_str("Control_L+");
-                p = &p[9..];
-            } else if p.starts_with("<Ctrl>") {
-                translated.push_str("Control_L+");
-                p = &p[6..];
-            } else if p.starts_with('>') {
-                p = &p[1..];
-            } else {
-                translated.push(p.chars().next()?);
-                p = &p[p.chars().next()?.len_utf8()..];
-            }
-        }
-
-        if translated.ends_with('+') {
-            translated.pop();
-        }
-
-        Some(translated)
+        parse_gnome_shortcut(&self.gsettings_get(schema, key)?)
     }
 
     fn gsettings_get(&self, schema: &str, key: &str) -> Option<String> {
@@ -684,6 +673,39 @@ fn get_username_from_uid(uid: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unassigned_gnome_shortcut_has_no_keys() {
+        assert_eq!(parse_gnome_shortcut("['']"), None);
+        assert_eq!(parse_gnome_shortcut("@as []"), None);
+        assert_eq!(parse_gnome_shortcut("[]"), None);
+        assert_eq!(parse_gnome_shortcut("['disabled']"), None);
+    }
+
+    #[test]
+    fn gnome_shortcuts_become_keys_to_press() {
+        assert_eq!(parse_gnome_shortcut("['<Super>l']").unwrap(), "Super_L+l");
+        assert_eq!(
+            parse_gnome_shortcut("['<Control><Alt>Delete']").unwrap(),
+            "Control_L+Alt_L+Delete"
+        );
+        assert_eq!(parse_gnome_shortcut("['<Primary>q']").unwrap(), "Control_L+q");
+        assert_eq!(parse_gnome_shortcut("['XF86WWW']").unwrap(), "XF86WWW");
+        assert_eq!(
+            parse_gnome_shortcut("['XF86AudioRaiseVolume', '<Ctrl>XF86AudioRaiseVolume']").unwrap(),
+            "XF86AudioRaiseVolume"
+        );
+    }
+
+    #[test]
+    fn the_first_assigned_shortcut_is_used() {
+        assert_eq!(parse_gnome_shortcut("['', 'F4']").unwrap(), "F4");
+    }
+
+    #[test]
+    fn an_unknown_modifier_is_not_guessed_at() {
+        assert_eq!(parse_gnome_shortcut("['<Hyper>x']"), None);
+    }
 
     #[test]
     fn control_center_uses_the_desktops_own_settings_app() {
