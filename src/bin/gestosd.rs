@@ -325,6 +325,45 @@ fn gesture_templates(
 }
 
 #[cfg(target_os = "linux")]
+const LOGIND_NAME: &str = "org.freedesktop.login1";
+#[cfg(target_os = "linux")]
+const LOGIND_SESSION_PATH: &str = "/org/freedesktop/login1/session/auto";
+#[cfg(target_os = "linux")]
+const LOGIND_SESSION_INTERFACE: &str = "org.freedesktop.login1.Session";
+#[cfg(target_os = "linux")]
+const LOCK_CHECK_TIMEOUT: Duration = Duration::from_millis(300);
+
+#[cfg(target_os = "linux")]
+fn session_is_locked(conn: &zbus::blocking::Connection, service: &str) -> zbus::Result<bool> {
+    let reply = conn.call_method(
+        Some(service),
+        LOGIND_SESSION_PATH,
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &(LOGIND_SESSION_INTERFACE, "LockedHint"),
+    )?;
+    let value: zbus::zvariant::OwnedValue = reply.body().deserialize()?;
+    Ok(bool::try_from(value)?)
+}
+
+/// Whether the desktop has reported its screen as locked. Not every lock screen does, as with
+/// some on Sway, and if there's no telling, gestures keep working rather than stop for good.
+/// Bounded by a timeout, so a hung bus can't hold up the daemon.
+#[cfg(target_os = "linux")]
+fn screen_is_locked() -> bool {
+    static SYSTEM_BUS: OnceLock<Option<zbus::blocking::Connection>> = OnceLock::new();
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let conn = SYSTEM_BUS.get_or_init(|| zbus::blocking::Connection::system().ok());
+        let locked = conn
+            .as_ref()
+            .is_some_and(|conn| session_is_locked(conn, LOGIND_NAME).unwrap_or(false));
+        let _ = done.send(locked);
+    });
+    finished.recv_timeout(LOCK_CHECK_TIMEOUT).unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
 fn dispatch_gesture(
     points: &[gestos::protractor::Point2D],
     config: &Configuration,
@@ -333,6 +372,13 @@ fn dispatch_gesture(
     signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
     wayland_ctx: &WaylandContext,
 ) {
+    // A gesture can run commands and press keys, which nobody at a locked screen should be able
+    // to do with this user's rights.
+    if screen_is_locked() {
+        println!("Ignoring a gesture because the screen is locked.");
+        return;
+    }
+
     let reduce_notifications = config.reduce_notifications;
     let templates = gesture_templates(config, modifiers);
     let candidates: Vec<Gesture> = gestos::protractor::match_gesture_candidates(points, &templates)
@@ -1191,6 +1237,38 @@ mod tests {
             receiver.try_recv(),
             Ok(DaemonSignal::ActionExecuted(name, _, _)) if name == "plain"
         ));
+    }
+
+    struct FakeSession {
+        locked: bool,
+    }
+
+    #[interface(name = "org.freedesktop.login1.Session")]
+    impl FakeSession {
+        #[zbus(property)]
+        fn locked_hint(&self) -> bool {
+            self.locked
+        }
+    }
+
+    #[test]
+    fn the_lock_state_comes_from_the_session() {
+        let Some(client) = session_bus() else { return };
+        for (suffix, locked) in [("Locked", true), ("Unlocked", false)] {
+            let name = test_name(suffix);
+            let _service = zbus::blocking::connection::Builder::session()
+                .and_then(|b| b.name(name.clone()))
+                .and_then(|b| b.serve_at(LOGIND_SESSION_PATH, FakeSession { locked }))
+                .and_then(|b| b.build())
+                .unwrap();
+            assert_eq!(session_is_locked(&client, &name).unwrap(), locked);
+        }
+    }
+
+    #[test]
+    fn a_session_that_cannot_be_asked_is_an_error() {
+        let Some(client) = session_bus() else { return };
+        assert!(session_is_locked(&client, &test_name("NoSession")).is_err());
     }
 
     /// Runs a session against a stand-in for the service, which says these lines and hangs up.
