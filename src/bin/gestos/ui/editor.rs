@@ -49,7 +49,10 @@ fn show_action_parameter(
     shortcut_display: &gtk::Box,
     record_button: &gtk::Button,
 ) {
-    row.set_visible(action_needs_parameter(opt));
+    // The list's own row, because hiding only its content leaves an empty strip.
+    if let Some(list_row) = row.parent() {
+        list_row.set_visible(action_needs_parameter(opt));
+    }
 
     let is_keypress = matches!(&opt.action_type, ActionType::Keypress(_));
     entry.set_visible(!is_keypress);
@@ -682,7 +685,9 @@ fn open_editor(
     }
 
     // Nothing to fill in until an action is known, such as one that's no longer available
-    action_details_row.set_visible(false);
+    if let Some(list_row) = action_details_row.parent() {
+        list_row.set_visible(false);
+    }
     if let Some(opt) = initial_opt {
         *selected_action.borrow_mut() = Some(opt.clone());
         show_action_parameter(
