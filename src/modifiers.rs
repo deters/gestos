@@ -88,6 +88,24 @@ mod tests {
         assert!(Modifiers::parse("").is_empty());
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_codes_are_the_real_modifier_keys() {
+        use evdev::KeyCode;
+        for key in [KeyCode::KEY_LEFTCTRL, KeyCode::KEY_RIGHTCTRL] {
+            assert!(Modifiers::from_key_codes([key.0]).ctrl);
+        }
+        for key in [KeyCode::KEY_LEFTALT, KeyCode::KEY_RIGHTALT] {
+            assert!(Modifiers::from_key_codes([key.0]).alt);
+        }
+        for key in [KeyCode::KEY_LEFTSHIFT, KeyCode::KEY_RIGHTSHIFT] {
+            assert!(Modifiers::from_key_codes([key.0]).shift);
+        }
+        for key in [KeyCode::KEY_LEFTMETA, KeyCode::KEY_RIGHTMETA] {
+            assert!(Modifiers::from_key_codes([key.0]).super_key);
+        }
+    }
+
     #[test]
     fn both_sides_of_the_keyboard_count_and_other_keys_do_not() {
         assert!(Modifiers::from_key_codes([29]).ctrl);

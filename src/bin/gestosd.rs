@@ -34,7 +34,7 @@ const LEGACY_DBUS_PATH: &str = "/org/mygestures/Daemon";
 // Keeps GNOME from treating a released Super as a tap, which opens the Overview. It's F24, which
 // nothing normally uses.
 #[cfg(target_os = "linux")]
-const UNUSED_KEY: u16 = 194;
+const UNUSED_KEY: u16 = evdev::KeyCode::KEY_F24.0;
 #[cfg(target_os = "linux")]
 const MODIFIER_RELEASE_TIMEOUT: Duration = Duration::from_millis(1500);
 #[cfg(target_os = "linux")]
