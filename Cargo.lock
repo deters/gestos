@@ -585,6 +585,7 @@ dependencies = [
  "evdev",
  "futures-channel",
  "futures-util",
+ "gio",
  "gtk4",
  "libc",
  "log",
