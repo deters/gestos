@@ -101,7 +101,8 @@ pub fn name_to_keycode(name: &str) -> Option<u16> {
         "next" | "audionext" | "xf86audionext" => Some(163),
         "prev" | "audioprev" | "xf86audioprev" => Some(165),
         "www" | "xf86www" => Some(150),
-        "explorer" | "xf86explorer" | "homepage" => Some(172),
+        "explorer" | "xf86explorer" => Some(144),
+        "homepage" | "xf86homepage" => Some(172),
         "mail" | "xf86mail" => Some(155),
         "search" | "xf86search" => Some(217),
         "calc" | "xf86calculator" => Some(140),
@@ -282,6 +283,12 @@ mod tests {
         assert_eq!(parse_key_combo("Control_L+Alt_L+t"), Ok(vec![29, 56, 20]));
         assert_eq!(parse_key_combo("control+C"), Ok(vec![29, 46]));
         assert_eq!(parse_key_combo("Shift+minus"), Ok(vec![42, 12]));
+    }
+
+    #[test]
+    fn the_file_manager_and_homepage_keys_are_different() {
+        assert_eq!(parse_key_combo("XF86Explorer"), Ok(vec![144]));
+        assert_eq!(parse_key_combo("XF86HomePage"), Ok(vec![172]));
     }
 
     #[test]
