@@ -371,14 +371,19 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         }
         vbox.append(&row_hbox);
     } else {
-        let action_desc = if !gesture.actions.is_empty() {
+        let action_desc = if let Some(ActionType::Gnome(_) | ActionType::Kde(_, _)) =
+            gesture.actions.first()
+        {
+            // The name picked when creating it, since the action itself is only an internal key.
+            gesture.name.clone()
+        } else if !gesture.actions.is_empty() {
             get_action_human_readable(&gesture.actions[0])
         } else {
             "No Action Configured".to_string()
         };
         let title_label = gtk::Label::new(Some(&action_desc));
         title_label.set_halign(gtk::Align::Start);
-        title_label.set_markup(&format!("<b>{}</b>", action_desc));
+        title_label.set_markup(&format!("<b>{}</b>", gtk::glib::markup_escape_text(&action_desc)));
         vbox.append(&title_label);
     }
 

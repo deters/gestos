@@ -48,6 +48,7 @@ fn entry_button(index: usize, entry: &ChooserEntry) -> gtk::Button {
     let description = gtk::Label::new(Some(&entry.description));
     description.add_css_class("dim-label");
     description.set_xalign(0.0);
+    description.set_visible(!entry.description.is_empty());
     text.append(&description);
     content.append(&text);
 

@@ -489,12 +489,7 @@ fn choose_gesture(mut candidates: Vec<Gesture>) -> Option<Gesture> {
         .iter()
         .map(|gesture| ChooserEntry {
             name: gesture.name.clone(),
-            description: gesture
-                .actions
-                .iter()
-                .map(|action| action.get_description())
-                .collect::<Vec<_>>()
-                .join(", "),
+            description: gesture.action_description(),
             points: gesture.points.clone(),
         })
         .collect();
@@ -540,12 +535,7 @@ fn run_gesture(
 ) {
     println!("Matched gesture: {}", gesture.name);
 
-    let action_desc = gesture
-        .actions
-        .iter()
-        .map(|action| action.get_description())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let action_desc = gesture.action_description();
     let icon_name = gesture
         .actions
         .first()

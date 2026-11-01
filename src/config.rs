@@ -348,6 +348,19 @@ pub struct Gesture {
     pub modifiers: Modifiers,
 }
 
+impl Gesture {
+    /// What the gesture does, for showing below its name. Desktop actions are left out, because
+    /// all there is to say about them is an internal key, and their name already says it.
+    pub fn action_description(&self) -> String {
+        self.actions
+            .iter()
+            .filter(|action| !matches!(action, ActionType::Gnome(_) | ActionType::Kde(_, _)))
+            .map(|action| action.get_description())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Configuration {
     pub gestures: Vec<Gesture>,
@@ -1079,6 +1092,16 @@ mod tests {
         assert_eq!(reloaded.gestures[0].modifiers, with_modifiers.modifiers);
         assert!(reloaded.gestures[1].modifiers.is_empty());
         assert!(reloaded.uses_modifiers());
+    }
+
+    #[test]
+    fn desktop_actions_do_not_show_their_internal_keys() {
+        let gnome = gesture("Move window", vec![ActionType::Gnome("move-to-side-n".to_string())]);
+        assert_eq!(gnome.action_description(), "");
+        let kde = gesture("Overview", vec![ActionType::Kde("kwin".into(), "Overview".into())]);
+        assert_eq!(kde.action_description(), "");
+        let keys = gesture("Back", vec![ActionType::Keypress("Alt+Left".to_string())]);
+        assert_eq!(keys.action_description(), "Press keys: Alt+Left");
     }
 
     #[test]
