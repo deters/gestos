@@ -9,18 +9,6 @@ pub struct EditorActionOption {
     pub tooltip: String,
 }
 
-pub const CATEGORY_NAMES: &[&str] = &[
-    "Input Emulation",
-    "Window Management",
-    "Workspaces & Overview",
-    "Media & Audio",
-    "System & Settings",
-    "Applications",
-    "GNOME Actions (Native)",
-    "Other/Internal",
-    "KDE Actions (Native)",
-];
-
 pub struct AppState {
     pub config: Configuration,
     pub main_list: gtk::ListBox,

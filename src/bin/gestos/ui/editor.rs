@@ -1,5 +1,5 @@
 use gtk::prelude::*;
-use gtk::{gio, glib};
+use gtk::glib;
 use gestos::protractor::match_gesture;
 use gtk4 as gtk;
 use std::rc::Rc;
@@ -7,9 +7,8 @@ use std::cell::{Cell, RefCell};
 use gestos::config::{ActionType, Gesture};
 use gestos::modifiers::Modifiers;
 use gestos::config::generate_unique_id;
-use crate::state::{AppState, EditorActionOption, CATEGORY_NAMES};
-use crate::suggestions::search_matches;
-use crate::actions::{action_needs_parameter, fetch_gnome_action_options, fetch_kde_action_options, get_static_action_options, action_matches};
+use crate::state::{AppState, EditorActionOption};
+use crate::actions::{action_matches, action_needs_parameter};
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
 use crate::ui::components::{draw_gesture_path, get_action_category_icon, show_confirm_dialog};
 use crate::daemon::reload_daemon;
@@ -42,6 +41,36 @@ pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> Strin
         _ => opt.name.clone(),
     }
 }
+/// The action a gesture already has, as the editor describes actions. One no longer listed, like
+/// a desktop shortcut that's gone, is still shown under the gesture's own name.
+fn option_for_gesture(
+    gesture: &Gesture,
+    options: &[EditorActionOption],
+) -> Option<EditorActionOption> {
+    let action = gesture.actions.first()?;
+    options
+        .iter()
+        .find(|option| action_matches(action, option))
+        .cloned()
+        .or_else(|| {
+            Some(EditorActionOption {
+                // The category for Run Command, the one kind whose details depend on it.
+                category: 7,
+                action_type: action.clone(),
+                name: gesture.name.clone(),
+                tooltip: String::new(),
+            })
+        })
+}
+
+/// The editor only shows a gesture's first action, so any others stay as they are.
+fn set_main_action(gesture: &mut Gesture, action: ActionType) {
+    match gesture.actions.first_mut() {
+        Some(first) => *first = action,
+        None => gesture.actions.push(action),
+    }
+}
+
 /// A name no other gesture has, adding a number if needed: "Close Window (2)".
 fn unique_gesture_name(name: &str, gestures: &[Gesture], own_id: Option<&str>) -> String {
     let is_taken = |candidate: &str| {
@@ -142,11 +171,12 @@ fn show_action_parameter(
     }
 }
 
-pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, target_gesture: Option<Gesture>) {
-    open_editor(state_rc, target_gesture, None);
+pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, gesture: Gesture) {
+    open_editor(state_rc, Some(gesture), None);
 }
 
-/// Opens the editor for a new gesture with its action already chosen.
+/// Opens the editor for a new gesture. Its action comes from the main window's search, and the
+/// editor never changes it.
 pub fn open_gesture_editor_for_action(state_rc: &Rc<RefCell<AppState>>, action: EditorActionOption) {
     open_editor(state_rc, None, Some(action));
 }
@@ -423,25 +453,11 @@ fn open_editor(
     action_spacer.set_hexpand(true);
     action_row.append(&action_spacer);
 
-    let action_select_btn = gtk::Button::new();
-    action_select_btn.set_halign(gtk::Align::End);
-    action_select_btn.set_size_request(240, -1);
-    
-    let btn_content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     let action_select_icon = gtk::Image::new();
-    let action_select_label = gtk::Label::new(Some("Select Action…"));
+    action_row.append(&action_select_icon);
+    let action_select_label = gtk::Label::new(None);
     action_select_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    action_select_label.set_hexpand(true);
-    action_select_label.set_halign(gtk::Align::Start);
-    
-    let arrow_icon = gtk::Image::from_icon_name("go-next-symbolic");
-    
-    btn_content.append(&action_select_icon);
-    btn_content.append(&action_select_label);
-    btn_content.append(&arrow_icon);
-    
-    action_select_btn.set_child(Some(&btn_content));
-    action_row.append(&action_select_btn);
+    action_row.append(&action_select_label);
 
     settings_list.append(&action_row);
 
@@ -481,147 +497,6 @@ fn open_editor(
 
     let selected_action: Rc<RefCell<Option<EditorActionOption>>> = Rc::new(RefCell::new(None));
 
-    let action_picker = gtk::Window::new();
-    action_picker.set_transient_for(Some(&dialog));
-    action_picker.set_modal(true);
-    action_picker.set_destroy_with_parent(true);
-    action_picker.set_hide_on_close(true);
-    action_picker.set_title(Some("Choose Action"));
-    action_picker.set_titlebar(Some(&gtk::HeaderBar::new()));
-    action_picker.set_default_size(400, 480);
-
-    let picker_esc_controller = gtk::EventControllerKey::new();
-    let picker_esc_window = action_picker.clone();
-    picker_esc_controller.connect_key_pressed(move |_, keyval, _, _| {
-        if keyval == gtk::gdk::Key::Escape {
-            picker_esc_window.set_visible(false);
-            return glib::Propagation::Stop;
-        }
-        glib::Propagation::Proceed
-    });
-    action_picker.add_controller(picker_esc_controller);
-
-    let picker_vbox = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    picker_vbox.set_margin_top(6);
-    picker_vbox.set_margin_bottom(6);
-    picker_vbox.set_margin_start(6);
-    picker_vbox.set_margin_end(6);
-
-    let search_entry = gtk::SearchEntry::new();
-    search_entry.set_hexpand(true);
-    search_entry.set_placeholder_text(Some("Search actions…"));
-    picker_vbox.append(&search_entry);
-
-    let scrolled_window = gtk::ScrolledWindow::new();
-    scrolled_window.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scrolled_window.set_min_content_height(350);
-    scrolled_window.set_min_content_width(320);
-    picker_vbox.append(&scrolled_window);
-
-    let list_store = gio::ListStore::new::<glib::BoxedAnyObject>();
-
-    let mut all_options = get_static_action_options();
-    all_options.extend(fetch_gnome_action_options());
-    all_options.extend(fetch_kde_action_options());
-    all_options.sort_by(|a, b| {
-        match a.category.cmp(&b.category) {
-            std::cmp::Ordering::Equal => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-            other => other,
-        }
-    });
-
-    for opt in &all_options {
-        list_store.append(&glib::BoxedAnyObject::new(opt.clone()));
-    }
-
-    let filter_text = Rc::new(RefCell::new(String::new()));
-    let custom_filter = gtk::CustomFilter::new({
-        let filter_text = Rc::clone(&filter_text);
-        move |item| {
-            let query = filter_text.borrow();
-            let boxed = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
-            let opt = boxed.borrow::<EditorActionOption>();
-            let category = CATEGORY_NAMES.get(opt.category).unwrap_or(&"");
-            search_matches(&format!("{} {}", category, opt.name), &query)
-        }
-    });
-
-    let search_entry_focus = search_entry.clone();
-    action_picker.connect_map(move |_| {
-        search_entry_focus.grab_focus();
-    });
-
-    let filter_model = gtk::FilterListModel::new(Some(list_store.clone()), Some(custom_filter.clone()));
-    let selection_model = gtk::SingleSelection::new(Some(filter_model.clone()));
-    selection_model.set_autoselect(false); // Don't auto select
-
-    let factory = gtk::SignalListItemFactory::new();
-    factory.connect_setup(|_, list_item| {
-        let box_ = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        box_.set_margin_top(6);
-        box_.set_margin_bottom(6);
-        box_.set_margin_start(6);
-        box_.set_margin_end(6);
-
-        let img = gtk::Image::new();
-        img.set_icon_size(gtk::IconSize::Large);
-        img.set_valign(gtk::Align::Center);
-
-        let text_vbox = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        text_vbox.set_valign(gtk::Align::Center);
-
-        let cat_label = gtk::Label::new(None);
-        cat_label.set_halign(gtk::Align::Start);
-        cat_label.add_css_class("action-label"); // Dimmed subtitle
-
-        let act_label = gtk::Label::new(None);
-        act_label.set_halign(gtk::Align::Start);
-        act_label.add_css_class("status-label");
-        act_label.set_wrap(true);
-        act_label.set_max_width_chars(30);
-
-        text_vbox.append(&cat_label);
-        text_vbox.append(&act_label);
-
-        box_.append(&img);
-        box_.append(&text_vbox);
-        list_item.set_child(Some(&box_));
-    });
-
-    factory.connect_bind(|_, list_item| {
-        let item = list_item.item().unwrap();
-        let boxed = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
-        let opt = boxed.borrow::<EditorActionOption>();
-
-        let child = list_item.child().unwrap();
-        let box_ = child.downcast::<gtk::Box>().unwrap();
-        let img = box_.first_child().unwrap().downcast::<gtk::Image>().unwrap();
-        let text_vbox = img.next_sibling().unwrap().downcast::<gtk::Box>().unwrap();
-        let cat_label = text_vbox.first_child().unwrap().downcast::<gtk::Label>().unwrap();
-        let act_label = cat_label.next_sibling().unwrap().downcast::<gtk::Label>().unwrap();
-
-        let (icon_name, _) = get_action_category_icon(&opt.action_type);
-        img.set_icon_name(Some(icon_name));
-        cat_label.set_text(CATEGORY_NAMES.get(opt.category).unwrap_or(&"Unknown"));
-        act_label.set_text(&opt.name);
-    });
-
-    let list_view = gtk::ListView::new(Some(selection_model.clone()), Some(factory.clone()));
-    list_view.set_single_click_activate(true);
-    list_view.add_css_class("boxed-list");
-    scrolled_window.set_child(Some(&list_view));
-    action_picker.set_child(Some(&picker_vbox));
-    let picker_window = action_picker.clone();
-    action_select_btn.connect_clicked(move |_| picker_window.present());
-
-    let filter_clone = custom_filter.clone();
-    let text_clone = Rc::clone(&filter_text);
-    search_entry.connect_search_changed(move |entry| {
-        *text_clone.borrow_mut() = entry.text().to_string();
-        filter_clone.changed(gtk::FilterChange::Different);
-    });
-
-    // Helper to dynamically update the gesture name if not customized
     let update_default_name = Rc::new({
         let name_entry = name_entry.clone();
         let action_details_entry = action_details_entry.clone();
@@ -695,47 +570,6 @@ fn open_editor(
         })
     };
 
-    let btn_label_clone = action_select_label.clone();
-    let btn_icon_clone = action_select_icon.clone();
-    let row_clone = action_details_row.clone();
-    let entry_clone = action_details_entry.clone();
-    let label_clone = action_details_label.clone();
-    let sdb_clone_act = shortcut_display_box.clone();
-    let record_btn_clone_act = record_btn.clone();
-    let udn_clone = Rc::clone(&update_default_name);
-    let selected_action_clone = Rc::clone(&selected_action);
-
-    let name_follows_action_clone = Rc::clone(&is_name_customized);
-    let picker_activate_clone = action_picker.clone();
-    let selection_model_clone = selection_model.clone();
-    list_view.connect_activate(move |_, position| {
-        picker_activate_clone.set_visible(false);
-        let item = match selection_model_clone.item(position) {
-            Some(i) => i,
-            None => return,
-        };
-        let boxed = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
-        let opt = boxed.borrow::<EditorActionOption>().clone();
-        
-        // A gesture is named after its action, so a new action means a new name.
-        *name_follows_action_clone.borrow_mut() = false;
-        btn_label_clone.set_text(&opt.name);
-        let (icon_name, _) = get_action_category_icon(&opt.action_type);
-        btn_icon_clone.set_icon_name(Some(icon_name));
-        *selected_action_clone.borrow_mut() = Some(opt.clone());
-
-        show_action_parameter(
-            &opt,
-            &row_clone,
-            &label_clone,
-            &entry_clone,
-            &sdb_clone_act,
-            &record_btn_clone_act,
-        );
-
-        udn_clone();
-    });
-
     let udn_clone4 = Rc::clone(&update_default_name);
     let usd_clone_change = Rc::clone(&update_shortcut_display);
     let details_loaded = Rc::new(Cell::new(false));
@@ -750,45 +584,26 @@ fn open_editor(
         usd_clone_change();
     });
 
-    // Find initial matching option
-    let mut initial_opt = None;
-    if let Some(ref g) = target_gesture {
-        if !g.actions.is_empty() {
-            let a = &g.actions[0];
-            if let Some(pos) = all_options.iter().position(|opt| action_matches(a, opt)) {
-                selection_model.set_selected(pos as u32);
-                initial_opt = Some(all_options[pos].clone());
-                
-                match a {
-                    ActionType::Keypress(combo) => action_details_entry.set_text(combo),
-                    ActionType::Execute(cmd) => {
-                        let opt = &all_options[pos];
-                        if opt.category == 7 {
-                            action_details_entry.set_text(cmd);
-                        }
-                    }
-                    ActionType::Click(btn) => {
-                        let btn_str = btn.map(|b| b.to_string()).unwrap_or_default();
-                        action_details_entry.set_text(&btn_str);
-                    }
-                    _ => {}
+    let initial_opt = match &target_gesture {
+        Some(gesture) => {
+            let option = option_for_gesture(gesture, &state_rc.borrow().action_options);
+            match gesture.actions.first() {
+                Some(ActionType::Keypress(combo)) => action_details_entry.set_text(combo),
+                Some(ActionType::Execute(command))
+                    if option.as_ref().is_some_and(action_needs_parameter) =>
+                {
+                    action_details_entry.set_text(command);
                 }
+                Some(ActionType::Click(button)) => {
+                    let button = button.map(|b| b.to_string()).unwrap_or_default();
+                    action_details_entry.set_text(&button);
+                }
+                _ => {}
             }
+            option
         }
-    } else {
-        let initial_pos = preset_action
-            .as_ref()
-            .and_then(|preset| {
-                all_options
-                    .iter()
-                    .position(|opt| opt.action_type == preset.action_type)
-            })
-            .unwrap_or(0);
-        selection_model.set_selected(initial_pos as u32);
-        initial_opt = Some(all_options[initial_pos].clone());
-        let udn_init = Rc::clone(&update_default_name);
-        udn_init();
-    }
+        None => preset_action.clone(),
+    };
 
     // Nothing to fill in until an action is known, such as one that's no longer available
     if let Some(list_row) = action_details_row.parent() {
@@ -909,13 +724,13 @@ fn open_editor(
                     state.config.gestures[pos].name = name.clone();
                     state.config.gestures[pos].raw_movement = raw_movement;
                     state.config.gestures[pos].points = pts.clone();
-                    state.config.gestures[pos].actions = vec![action];
+                    set_main_action(&mut state.config.gestures[pos], action);
                     println!("Gesture renamed successfully: {} -> {}", lookup_name, name);
                 } else {
                     state.config.gestures[pos].modifiers = modifiers;
                     state.config.gestures[pos].raw_movement = raw_movement;
                     state.config.gestures[pos].points = pts.clone();
-                    state.config.gestures[pos].actions = vec![action];
+                    set_main_action(&mut state.config.gestures[pos], action);
                     println!("Gesture modified successfully: {}", name);
                 }
             } else {
@@ -1020,6 +835,53 @@ mod tests {
             is_deleted: false,
             modifiers: Modifiers::default(),
         }
+    }
+
+    fn option(category: usize, action_type: ActionType, name: &str) -> EditorActionOption {
+        EditorActionOption {
+            category,
+            action_type,
+            name: name.to_string(),
+            tooltip: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_gesture_finds_its_action_in_the_list() {
+        let mut close = gesture("a", "My name");
+        close.actions = vec![ActionType::Gnome("close".to_string())];
+        let options = [option(6, ActionType::Gnome("close".to_string()), "Close window")];
+        assert_eq!(option_for_gesture(&close, &options).unwrap().name, "Close window");
+    }
+
+    #[test]
+    fn an_unlisted_action_is_still_shown_under_the_gesture_name() {
+        let mut gone = gesture("a", "My name");
+        gone.actions = vec![ActionType::Gnome("gone".to_string())];
+        let found = option_for_gesture(&gone, &[]).unwrap();
+        assert_eq!(found.name, "My name");
+        assert_eq!(found.action_type, gone.actions[0]);
+        assert!(!action_needs_parameter(&found));
+
+        let mut command = gesture("b", "Editor");
+        command.actions = vec![ActionType::Execute("gedit".to_string())];
+        assert!(action_needs_parameter(&option_for_gesture(&command, &[]).unwrap()));
+    }
+
+    #[test]
+    fn a_gesture_without_actions_has_nothing_to_show() {
+        assert!(option_for_gesture(&gesture("a", "Empty"), &[]).is_none());
+    }
+
+    #[test]
+    fn saving_changes_only_the_first_action() {
+        let mut several = gesture("a", "Several");
+        several.actions = vec![ActionType::Kill, ActionType::Raise];
+        set_main_action(&mut several, ActionType::Keypress("a".to_string()));
+        assert_eq!(
+            several.actions,
+            [ActionType::Keypress("a".to_string()), ActionType::Raise]
+        );
     }
 
     #[test]

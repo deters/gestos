@@ -136,13 +136,7 @@ pub fn build_ui(app: &gtk::Application) {
     let header = gtk::HeaderBar::new();
     window.set_titlebar(Some(&header));
 
-    // 1. Add gesture button (Primary action on the left)
-    let add_gest_btn = gtk::Button::from_icon_name("list-add-symbolic");
-    add_gest_btn.set_tooltip_text(Some("New Gesture"));
-    add_gest_btn.update_property(&[gtk::accessible::Property::Label("New Gesture")]);
-    header.pack_start(&add_gest_btn);
-
-    // 2. Preferences button
+    // Preferences button
     let settings_btn = gtk::Button::from_icon_name("emblem-system-symbolic");
     settings_btn.set_tooltip_text(Some("Preferences"));
     settings_btn.update_property(&[gtk::accessible::Property::Label("Preferences")]);
@@ -196,10 +190,10 @@ pub fn build_ui(app: &gtk::Application) {
     empty_state_box.append(&empty_icon);
 
     let empty_title = gtk::Label::new(None);
-    empty_title.set_markup("<span size='large' weight='bold'>No Gestures</span>");
+    empty_title.set_markup("<span size='large' weight='bold'>Nothing Found</span>");
     empty_state_box.append(&empty_title);
 
-    let empty_subtitle = gtk::Label::new(Some("Search for an action above, or click + to create a gesture."));
+    let empty_subtitle = gtk::Label::new(Some("Try different words."));
     empty_subtitle.set_opacity(0.65);
     empty_state_box.append(&empty_subtitle);
 
@@ -302,11 +296,6 @@ pub fn build_ui(app: &gtk::Application) {
         }
     });
 
-    // Connect Add button
-    let state_clone2 = Rc::clone(&state);
-    add_gest_btn.connect_clicked(move |_| {
-        open_gesture_editor(&state_clone2, None);
-    });
 
     // Connect row activation for editing
     let state_clone3 = Rc::clone(&state);
@@ -322,7 +311,7 @@ pub fn build_ui(app: &gtk::Application) {
             if idx >= 0 && (idx as usize) < visible_gestures.len() {
                 let gesture = visible_gestures[idx as usize].clone();
                 drop(state_borrow);
-                open_gesture_editor(&state_clone3, Some(gesture));
+                open_gesture_editor(&state_clone3, gesture);
             }
         });
 
@@ -340,10 +329,6 @@ pub fn build_ui(app: &gtk::Application) {
         let is_ctrl = state_modifier.contains(gtk::gdk::ModifierType::CONTROL_MASK) 
                    || state_modifier.contains(gtk::gdk::ModifierType::META_MASK); // meta/cmd on mac
         
-        if is_ctrl && keyval == gtk::gdk::Key::n {
-            open_gesture_editor(&state_shortcut_clone, None);
-            return glib::Propagation::Stop;
-        }
         if is_ctrl && keyval == gtk::gdk::Key::f {
             state_shortcut_clone.borrow().search_entry.grab_focus();
             return glib::Propagation::Stop;
