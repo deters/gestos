@@ -184,7 +184,12 @@ fn open_editor(
     dialog.set_modal(true);
     let title_text = if target_gesture.is_some() { "Edit Gesture" } else { "Add Gesture" };
     dialog.set_title(Some(title_text));
-    dialog.set_default_size(700, 560);
+    // A little smaller than the main window, so that it reads as being on top of it, without
+    // growing along with a maximized window.
+    dialog.set_default_size(
+        (state.window.width() - 60).min(640),
+        (state.window.height() - 60).min(560),
+    );
 
     let esc_controller = gtk::EventControllerKey::new();
     let dialog_esc = dialog.clone();
