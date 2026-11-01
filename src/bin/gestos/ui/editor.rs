@@ -10,7 +10,7 @@ use gestos::config::generate_unique_id;
 use crate::state::{AppState, EditorActionOption};
 use crate::actions::{action_matches, action_needs_parameter};
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
-use crate::ui::components::{draw_gesture_path, get_action_category_icon, show_confirm_dialog};
+use crate::ui::components::{draw_gesture_path, show_confirm_dialog};
 use crate::daemon::reload_daemon;
 use crate::ui::main_window::refresh_gesture_list;
 use gestos::protractor::Point2D;
@@ -202,6 +202,7 @@ fn open_editor(
     dialog_header.set_show_title_buttons(false);
     let dialog_title = gtk::Label::new(Some(title_text));
     dialog_title.add_css_class("title");
+    dialog_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     dialog_header.set_title_widget(Some(&dialog_title));
     dialog.set_titlebar(Some(&dialog_header));
 
@@ -420,7 +421,7 @@ fn open_editor(
     scroll_content.append(&modifiers_list);
 
     // --- ACTION SETTINGS SECTION ---
-    let settings_section_label = gtk::Label::new(Some("Action Settings"));
+    let settings_section_label = gtk::Label::new(Some("Details"));
     settings_section_label.set_halign(gtk::Align::Start);
     settings_section_label.add_css_class("section-header");
     scroll_content.append(&settings_section_label);
@@ -432,26 +433,6 @@ fn open_editor(
 
 
 
-    // Row 2: Action Selection
-    let action_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    action_row.add_css_class("settings-row");
-
-    let action_label = gtk::Label::new(Some("Action"));
-    action_label.set_halign(gtk::Align::Start);
-    action_label.add_css_class("status-label");
-    action_row.append(&action_label);
-
-    let action_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    action_spacer.set_hexpand(true);
-    action_row.append(&action_spacer);
-
-    let action_select_icon = gtk::Image::new();
-    action_row.append(&action_select_icon);
-    let action_select_label = gtk::Label::new(None);
-    action_select_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    action_row.append(&action_select_label);
-
-    settings_list.append(&action_row);
 
     // Row 4: Action Details Parameter
     let action_details_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -615,9 +596,12 @@ fn open_editor(
         if preset_action.is_some() {
             update_default_name();
         }
-        action_select_label.set_text(&opt.name);
-        let (icon_name, _) = get_action_category_icon(&opt.action_type);
-        action_select_icon.set_icon_name(Some(icon_name));
+        dialog.set_title(Some(&opt.name));
+        dialog_title.set_text(&opt.name);
+        // Most actions have nothing to fill in, which leaves this section empty.
+        let has_details = action_needs_parameter(&opt);
+        settings_section_label.set_visible(has_details);
+        settings_list.set_visible(has_details);
     }
 
     details_loaded.set(true);
