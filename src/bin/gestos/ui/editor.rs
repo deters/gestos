@@ -364,6 +364,23 @@ fn open_editor(
     scroll_content.append(&canvas_frame);
     scroll_content.append(&conflict_box);
 
+    let modifiers_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    modifiers_row.add_css_class("settings-row");
+    let modifiers_label = gtk::Label::new(Some("Modifier Keys"));
+    modifiers_label.add_css_class("status-label");
+    modifiers_label.set_halign(gtk::Align::Start);
+    modifiers_label.set_hexpand(true);
+    modifiers_row.append(&modifiers_label);
+    for button in modifier_toggles.buttons() {
+        button.set_tooltip_text(Some("Hold this key while drawing the gesture to use it"));
+        modifiers_row.append(button);
+    }
+    let modifiers_list = gtk::ListBox::new();
+    modifiers_list.add_css_class("boxed-list");
+    modifiers_list.set_selection_mode(gtk::SelectionMode::None);
+    modifiers_list.append(&modifiers_row);
+    scroll_content.append(&modifiers_list);
+
     // --- ACTION SETTINGS SECTION ---
     let settings_section_label = gtk::Label::new(Some("Action Settings"));
     settings_section_label.set_halign(gtk::Align::Start);
@@ -445,19 +462,6 @@ fn open_editor(
 
     action_details_row.append(&entry_container);
     settings_list.append(&action_details_row);
-
-    let modifiers_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    modifiers_row.add_css_class("settings-row");
-    let modifiers_label = gtk::Label::new(Some("Modifier Keys"));
-    modifiers_label.add_css_class("status-label");
-    modifiers_label.set_halign(gtk::Align::Start);
-    modifiers_label.set_hexpand(true);
-    modifiers_row.append(&modifiers_label);
-    for button in modifier_toggles.buttons() {
-        button.set_tooltip_text(Some("Hold this key while drawing the gesture to use it"));
-        modifiers_row.append(button);
-    }
-    settings_list.append(&modifiers_row);
 
     let selected_action: Rc<RefCell<Option<EditorActionOption>>> = Rc::new(RefCell::new(None));
 
