@@ -1,4 +1,5 @@
-use gestos::config::{ActionType, Configuration};
+use gestos::chooser::{encode_entries, parse_choice, ChooserEntry};
+use gestos::config::{ActionType, Configuration, Gesture};
 use gestos::ipc::DaemonIpc;
 use gestos::wayland::WaylandContext;
 use std::fs;
@@ -29,6 +30,8 @@ const EXIT_PERMANENT_ERROR: i32 = 2;
 const DBUS_PATH: &str = "/io/github/deters/Gestos/Daemon";
 const LEGACY_DBUS_NAME: &str = "org.mygestures.Daemon";
 const LEGACY_DBUS_PATH: &str = "/org/mygestures/Daemon";
+const CHOOSER_EXIT_CANCELLED: i32 = 1;
+const CHOOSER_FOCUS_RETURN_DELAY: Duration = Duration::from_millis(200);
 const LEGACY_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const GRAB_ATTEMPTS: u32 = 5;
 const GRAB_RETRY_INTERVAL: Duration = Duration::from_millis(100);
@@ -289,13 +292,86 @@ fn dispatch_gesture(
     wayland_ctx: &WaylandContext,
     uinput: &Option<gestos::uinput::UinputDevice>,
 ) {
-    let Some(matched_name) = gestos::protractor::match_gesture(points, templates) else {
-        println!("Gesture failed: did not match any known template.");
-        return;
-    };
-    let Some(gesture) = config.gestures.iter().find(|g| g.name == matched_name) else {
-        return;
-    };
+    let candidates: Vec<Gesture> = gestos::protractor::match_gesture_candidates(points, templates)
+        .iter()
+        .filter_map(|name| config.gestures.iter().find(|g| &g.name == name).cloned())
+        .collect();
+
+    match candidates.len() {
+        0 => println!("Gesture failed: did not match any known template."),
+        1 => run_gesture(&candidates[0], signals, wayland_ctx, uinput),
+        _ => {
+            let signals = signals.clone();
+            let wayland_ctx = wayland_ctx.clone();
+            let uinput = uinput.clone();
+            std::thread::spawn(move || {
+                if let Some(gesture) = choose_gesture(candidates) {
+                    // Actions like closing a window act on the focused one, which only gets
+                    // focus back once the chooser has gone.
+                    std::thread::sleep(CHOOSER_FOCUS_RETURN_DELAY);
+                    run_gesture(&gesture, &signals, &wayland_ctx, &uinput);
+                }
+            });
+        }
+    }
+}
+
+/// Asks the user which of several similar gestures they meant. Nothing means they cancelled. If
+/// the chooser can't run, gestures keep working by taking the closest match.
+#[cfg(target_os = "linux")]
+fn choose_gesture(mut candidates: Vec<Gesture>) -> Option<Gesture> {
+    let entries: Vec<ChooserEntry> = candidates
+        .iter()
+        .map(|gesture| ChooserEntry {
+            name: gesture.name.clone(),
+            description: gesture
+                .actions
+                .iter()
+                .map(|action| action.get_description())
+                .collect::<Vec<_>>()
+                .join(", "),
+            points: gesture.points.clone(),
+        })
+        .collect();
+
+    let app = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("gestos")))
+        .filter(|path| path.exists())
+        .unwrap_or_else(|| "gestos".into());
+    let chooser = Command::new(app)
+        .arg("--choose-gesture")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let output = chooser.and_then(|mut child| {
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(encode_entries(&entries).as_bytes())?;
+        }
+        child.wait_with_output()
+    });
+
+    match output {
+        Ok(output) if output.status.code() == Some(CHOOSER_EXIT_CANCELLED) => None,
+        Ok(output) if output.status.success() => {
+            let choice = parse_choice(&String::from_utf8_lossy(&output.stdout), entries.len())?;
+            Some(candidates.swap_remove(choice))
+        }
+        _ => {
+            eprintln!("gestosd: The gesture chooser failed. Using the closest match.");
+            Some(candidates.swap_remove(0))
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn run_gesture(
+    gesture: &Gesture,
+    signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
+    wayland_ctx: &WaylandContext,
+    uinput: &Option<gestos::uinput::UinputDevice>,
+) {
     println!("Matched gesture: {}", gesture.name);
 
     let action_desc = gesture

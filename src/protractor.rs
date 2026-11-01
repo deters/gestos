@@ -221,12 +221,18 @@ pub fn scale_to_square(points: &mut [Point2D], size: f64) {
     }
 }
 
-pub fn match_gesture(
+/// Scores this close together are too near to tell apart with any confidence.
+const SIMILAR_SCORE_MARGIN: f64 = 0.03;
+const MAX_CANDIDATES: usize = 3;
+
+/// The templates matching a drawn path, best first: only the best one, plus any others close
+/// enough that the drawing could equally have meant them.
+pub fn match_gesture_candidates(
     captured_points: &[Point2D],
     templates: &[(String, Vec<Point2D>)],
-) -> Option<String> {
+) -> Vec<String> {
     if captured_points.len() < 2 {
-        return None;
+        return Vec::new();
     }
     let n = 64;
     let threshold_score = 0.90;
@@ -236,29 +242,36 @@ pub fn match_gesture(
     scale_to_square(&mut input_vector, 250.0);
     vectorize_path(&mut input_vector);
 
-    let mut best_name = None;
-    let mut max_score = -1.0;
+    let mut scored: Vec<(f64, &String)> = templates
+        .iter()
+        .filter(|(_, template_points)| template_points.len() >= 2)
+        .map(|(name, template_points)| {
+            let mut temp_vector = resample_path(template_points, n);
+            scale_to_square(&mut temp_vector, 250.0);
+            vectorize_path(&mut temp_vector);
+            let score = compute_protractor_similarity(&input_vector, &temp_vector, max_angle);
+            (score, name)
+        })
+        .filter(|(score, _)| *score >= threshold_score)
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
 
-    for (name, template_points) in templates {
-        if template_points.len() < 2 {
-            continue;
-        }
-        let mut temp_vector = resample_path(template_points, n);
-        scale_to_square(&mut temp_vector, 250.0);
-        vectorize_path(&mut temp_vector);
+    let best = scored.first().map(|(score, _)| *score).unwrap_or_default();
+    scored
+        .into_iter()
+        .take_while(|(score, _)| best - *score <= SIMILAR_SCORE_MARGIN)
+        .take(MAX_CANDIDATES)
+        .map(|(_, name)| name.clone())
+        .collect()
+}
 
-        let score = compute_protractor_similarity(&input_vector, &temp_vector, max_angle);
-        if score > max_score {
-            max_score = score;
-            best_name = Some(name.clone());
-        }
-    }
-
-    if max_score >= threshold_score {
-        best_name
-    } else {
-        None
-    }
+pub fn match_gesture(
+    captured_points: &[Point2D],
+    templates: &[(String, Vec<Point2D>)],
+) -> Option<String> {
+    match_gesture_candidates(captured_points, templates)
+        .into_iter()
+        .next()
 }
 
 #[cfg(test)]
@@ -308,6 +321,32 @@ mod tests {
         assert_eq!(matched(&[(0.0, 0.0), (80.0, 0.0)]).as_deref(), Some("right"));
         assert_eq!(matched(&[(80.0, 0.0), (0.0, 0.0)]).as_deref(), Some("left"));
         assert_eq!(matched(&[(0.0, 0.0), (0.0, 80.0)]).as_deref(), Some("down"));
+    }
+
+    #[test]
+    fn similar_templates_are_all_candidates_with_the_closest_first() {
+        let similar = vec![
+            ("tilted".to_string(), path(&[(0.0, 50.0), (100.0, 44.0)])),
+            ("flat".to_string(), path(&[(0.0, 50.0), (100.0, 50.0)])),
+            ("down".to_string(), path(&[(50.0, 0.0), (50.0, 100.0)])),
+        ];
+        let drawn = path(&[(0.0, 0.0), (80.0, 0.0)]);
+        assert_eq!(match_gesture_candidates(&drawn, &similar), ["flat", "tilted"]);
+    }
+
+    #[test]
+    fn a_clear_match_has_one_candidate() {
+        let drawn = path(&[(0.0, 0.0), (80.0, 0.0)]);
+        assert_eq!(match_gesture_candidates(&drawn, &templates()), ["right"]);
+    }
+
+    #[test]
+    fn candidates_are_limited() {
+        let many: Vec<_> = (0..6)
+            .map(|i| (format!("t{i}"), path(&[(0.0, 50.0), (100.0, 50.0)])))
+            .collect();
+        let drawn = path(&[(0.0, 0.0), (80.0, 0.0)]);
+        assert_eq!(match_gesture_candidates(&drawn, &many).len(), MAX_CANDIDATES);
     }
 
     #[test]
