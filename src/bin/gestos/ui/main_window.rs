@@ -201,13 +201,9 @@ pub fn build_ui(app: &gtk::Application) {
     empty_title.set_markup("<span size='large' weight='bold'>No Gestures</span>");
     empty_state_box.append(&empty_title);
 
-    let empty_subtitle = gtk::Label::new(Some("Create one, or search above for what you want it to do."));
+    let empty_subtitle = gtk::Label::new(Some("Search for an action above, or click + to create a gesture."));
     empty_subtitle.set_opacity(0.65);
     empty_state_box.append(&empty_subtitle);
-
-    let empty_add_btn = gtk::Button::with_mnemonic("_New Gesture");
-    empty_add_btn.set_halign(gtk::Align::Center);
-    empty_state_box.append(&empty_add_btn);
 
     list_container.append(&empty_state_box);
 
@@ -312,10 +308,6 @@ pub fn build_ui(app: &gtk::Application) {
     let state_clone2 = Rc::clone(&state);
     add_gest_btn.connect_clicked(move |_| {
         open_gesture_editor(&state_clone2, None);
-    });
-    let state_empty_add = Rc::clone(&state);
-    empty_add_btn.connect_clicked(move |_| {
-        open_gesture_editor(&state_empty_add, None);
     });
 
     // Connect row activation for editing
