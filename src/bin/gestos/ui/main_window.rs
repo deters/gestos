@@ -156,35 +156,24 @@ pub fn build_ui(app: &gtk::Application) {
     settings_btn.update_property(&[gtk::accessible::Property::Label("Preferences")]);
     header.pack_end(&settings_btn);
 
-    // 3. Search button
-    let search_toggle_btn = gtk::ToggleButton::new();
-    search_toggle_btn.set_icon_name("system-search-symbolic");
-    search_toggle_btn.set_tooltip_text(Some("Search"));
-    header.pack_start(&search_toggle_btn);
-
     // Content VBox
     let content_vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content_vbox.add_css_class("main-window-content");
     window.set_child(Some(&content_vbox));
 
-    // 5. Search Bar & Entry
-    let search_bar = gtk::SearchBar::new();
-    search_bar.set_key_capture_widget(Some(&window));
-    
+    // The search stays visible, since it's also how new gestures start. Typing anywhere in the
+    // window goes to it.
     let search_entry = gtk::SearchEntry::new();
     search_entry.set_halign(gtk::Align::Center);
-    search_entry.set_width_request(400);
-    search_entry.set_placeholder_text(Some("Search gestures…"));
-    
-    search_bar.set_child(Some(&search_entry));
-    
-    // Bind toggle button to search bar visibility
-    search_bar
-        .bind_property("search-mode-enabled", &search_toggle_btn, "active")
-        .bidirectional()
-        .build();
-    
-    content_vbox.append(&search_bar);
+    search_entry.set_width_request(500);
+    search_entry.set_margin_top(12);
+    search_entry.set_margin_bottom(12);
+    search_entry.set_margin_start(24);
+    search_entry.set_margin_end(24);
+    search_entry.set_placeholder_text(Some("Search gestures and actions…"));
+    search_entry.set_key_capture_widget(Some(&window));
+    search_entry.connect_stop_search(|entry| entry.set_text(""));
+    content_vbox.append(&search_entry);
 
     let scrolled = gtk::ScrolledWindow::new();
     scrolled.set_vexpand(true);
@@ -195,7 +184,7 @@ pub fn build_ui(app: &gtk::Application) {
     let main_list = gtk::ListBox::new();
     main_list.set_halign(gtk::Align::Center);
     main_list.set_width_request(500);
-    main_list.set_margin_top(24);
+    main_list.set_margin_top(0);
     main_list.set_margin_bottom(24);
     main_list.set_margin_start(24);
     main_list.set_margin_end(24);
@@ -266,10 +255,11 @@ pub fn build_ui(app: &gtk::Application) {
     let config = Configuration::load_from_defaults();
     let dbus_conn = zbus::blocking::Connection::session().ok();
 
+    let search_entry_widget = search_entry.clone();
     let gesture_status = GestureStatus::new("Gestures", dbus_conn.clone());
     header.set_title_widget(Some(gesture_status.title()));
     header.pack_end(gesture_status.action_button());
-    content_vbox.insert_child_after(gesture_status.error_area(), Some(&search_bar));
+    content_vbox.insert_child_after(gesture_status.error_area(), Some(&search_entry_widget));
     content_vbox.insert_child_after(gesture_status.notice_area(), Some(gesture_status.error_area()));
 
     let state = Rc::new(RefCell::new(AppState {
@@ -382,6 +372,10 @@ pub fn build_ui(app: &gtk::Application) {
         
         if is_ctrl && keyval == gtk::gdk::Key::n {
             open_gesture_editor(&state_shortcut_clone, None);
+            return glib::Propagation::Stop;
+        }
+        if is_ctrl && keyval == gtk::gdk::Key::f {
+            state_shortcut_clone.borrow().search_entry.grab_focus();
             return glib::Propagation::Stop;
         }
         if is_ctrl && keyval == gtk::gdk::Key::comma {

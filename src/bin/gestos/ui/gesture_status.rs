@@ -76,7 +76,7 @@ impl GestureStatus {
         error_box.add_css_class("warning-box");
         error_box.set_halign(gtk::Align::Center);
         error_box.set_width_request(500);
-        error_box.set_margin_top(12);
+        error_box.set_margin_bottom(12);
         error_box.set_margin_start(24);
         error_box.set_margin_end(24);
         error_box.set_visible(false);
@@ -107,7 +107,7 @@ impl GestureStatus {
         notice_box.add_css_class("notice-box");
         notice_box.set_halign(gtk::Align::Center);
         notice_box.set_width_request(500);
-        notice_box.set_margin_top(12);
+        notice_box.set_margin_bottom(12);
         notice_box.set_margin_start(24);
         notice_box.set_margin_end(24);
         notice_box.set_visible(false);
