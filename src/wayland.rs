@@ -124,7 +124,6 @@ pub struct WaylandContext {
     pub sway_sock: String,
     pub hypr_sig: String,
     pub uid: u32,
-    pub username: String,
 }
 
 impl WaylandContext {
@@ -180,23 +179,7 @@ impl WaylandContext {
             }
         }
 
-        // Resolve target user UID and username (handles running as root/sudo)
-        let sudo_uid = std::env::var("SUDO_UID")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok());
-        let sudo_user = std::env::var("SUDO_USER").ok();
-
-        if let (Some(uid), Some(user)) = (sudo_uid, sudo_user) {
-            ctx.uid = uid;
-            ctx.username = user;
-        } else {
-            ctx.uid = unsafe { libc::getuid() };
-            if ctx.uid > 0 {
-                if let Some(user) = get_username_from_uid(ctx.uid) {
-                    ctx.username = user;
-                }
-            }
-        }
+        ctx.uid = unsafe { libc::getuid() };
 
         // Find Sway socket or Hyprland signature if not already found in env
         if ctx.uid > 0 {
@@ -225,59 +208,6 @@ impl WaylandContext {
                                 ctx.is_hypr = true;
                                 break;
                             }
-                        }
-                    }
-                }
-            }
-        }
-
-        // If still not resolved (running as raw root), look in /run/user for any user session
-        if ctx.uid == 0 || (!ctx.is_sway && !ctx.is_hypr) {
-            if let Ok(entries) = fs::read_dir("/run/user") {
-                for entry in entries.flatten() {
-                    let d_name = entry.file_name().to_string_lossy().into_owned();
-                    if let Ok(d_uid) = d_name.parse::<u32>() {
-                        if d_uid >= 1000 {
-                            let user_run_dir = PathBuf::from(format!("/run/user/{}", d_uid));
-
-                            // Check Sway socket
-                            if let Ok(sub_entries) = fs::read_dir(&user_run_dir) {
-                                for sub_entry in sub_entries.flatten() {
-                                    let name = sub_entry.file_name().to_string_lossy().into_owned();
-                                    if name.contains("sway-ipc") && name.contains(".sock") {
-                                        ctx.sway_sock =
-                                            user_run_dir.join(name).to_string_lossy().into_owned();
-                                        ctx.is_sway = true;
-                                        break;
-                                    }
-                                }
-                            }
-
-                            // Check Hyprland signature
-                            if !ctx.is_sway {
-                                let hypr_dir = user_run_dir.join("hypr");
-                                if hypr_dir.exists() {
-                                    if let Ok(sub_entries) = fs::read_dir(hypr_dir) {
-                                        for sub_entry in sub_entries.flatten() {
-                                            let name = sub_entry
-                                                .file_name()
-                                                .to_string_lossy()
-                                                .into_owned();
-                                            if name.len() >= 40 {
-                                                ctx.hypr_sig = name;
-                                                ctx.is_hypr = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            ctx.uid = d_uid;
-                            if let Some(user) = get_username_from_uid(ctx.uid) {
-                                ctx.username = user;
-                            }
-                            break;
                         }
                     }
                 }
@@ -687,8 +617,7 @@ impl WaylandContext {
     }
 
     fn gsettings_get(&self, schema: &str, key: &str) -> Option<String> {
-        // Running as root, GIO would read root's settings, and only the command can switch users.
-        if unsafe { libc::getuid() } != 0 && gio_reads_user_settings() {
+        if gio_reads_user_settings() {
             return read_gnome_setting(schema, key);
         }
         let output = self.run_user_cmd_output("gsettings", &["get", schema, key])?;
@@ -732,42 +661,24 @@ impl WaylandContext {
 
     /// Arguments stay separate all the way, so nothing in them can be read as shell syntax.
     fn build_user_command(&self, program: &str, args: &[&str]) -> Command {
-        let dbus_env = (Path::new(&format!("/run/user/{}/bus", self.uid)).exists()
-            && std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err())
-        .then(|| format!("DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{}/bus", self.uid));
-
-        if unsafe { libc::getuid() } == 0 && !self.username.is_empty() {
-            let mut command = Command::new("sudo");
-            command.args(["-u", &self.username, "env"]);
-            command.args(dbus_env);
-            command.arg(format!("XDG_RUNTIME_DIR=/run/user/{}", self.uid));
-            if self.is_sway {
-                command.arg(format!("SWAYSOCK={}", self.sway_sock));
-            } else if self.is_hypr {
-                command.arg(format!("HYPRLAND_INSTANCE_SIGNATURE={}", self.hypr_sig));
-            }
-            command.arg(program).args(args);
-            return command;
-        }
-
         let mut command = Command::new(program);
         command.args(args);
-        if let Some((name, value)) = dbus_env.as_deref().and_then(|env| env.split_once('=')) {
-            command.env(name, value);
+        if Path::new(&format!("/run/user/{}/bus", self.uid)).exists()
+            && std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err()
+        {
+            command.env(
+                "DBUS_SESSION_BUS_ADDRESS",
+                format!("unix:path=/run/user/{}/bus", self.uid),
+            );
+        }
+        // These may have been found by looking, rather than in the environment.
+        if self.is_sway {
+            command.env("SWAYSOCK", &self.sway_sock);
+        } else if self.is_hypr {
+            command.env("HYPRLAND_INSTANCE_SIGNATURE", &self.hypr_sig);
         }
         command
     }
-}
-
-fn get_username_from_uid(uid: u32) -> Option<String> {
-    unsafe {
-        let passwd_ptr = libc::getpwuid(uid);
-        if !passwd_ptr.is_null() {
-            let name_c = std::ffi::CStr::from_ptr((*passwd_ptr).pw_name);
-            return Some(name_c.to_string_lossy().into_owned());
-        }
-    }
-    None
 }
 
 #[cfg(test)]

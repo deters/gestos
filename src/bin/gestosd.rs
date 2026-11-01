@@ -930,6 +930,12 @@ fn main() {
         std::process::exit(EXIT_PERMANENT_ERROR);
     }
 
+    // It would run gestures' commands as root, and read root's settings instead of the user's.
+    if nix::unistd::getuid().is_root() {
+        eprintln!("ERROR: gestosd must run as your own user, not as root.");
+        std::process::exit(EXIT_PERMANENT_ERROR);
+    }
+
     migrate_legacy_files();
 
     let config_path = custom_config
