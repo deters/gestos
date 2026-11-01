@@ -7,9 +7,19 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::OnceLock;
 
-// How long GNOME gets to pick up a changed shortcut before it's used, and to act on it before
-// it's restored.
-const TEMPORARY_SHORTCUT_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+// How long GNOME gets to pick up a changed shortcut before it's used. The action can't start
+// until this is over, so it's as short as seems safe.
+const TEMPORARY_SHORTCUT_PICKUP_DELAY_MILLIS: u64 = 100;
+// How long GNOME gets to act on the shortcut before it's restored. Nothing waits for this.
+const TEMPORARY_SHORTCUT_RESTORE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Experimental: GESTOS_SHORTCUT_DELAY_MS overrides the wait, to find what a desktop needs.
+fn temporary_shortcut_pickup_delay(setting: Option<&str>) -> std::time::Duration {
+    let millis = setting
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(TEMPORARY_SHORTCUT_PICKUP_DELAY_MILLIS);
+    std::time::Duration::from_millis(millis)
+}
 
 type GnomeSchema = (gio::Settings, gio::SettingsSchema);
 type GnomeSettingRequest = (String, String, Sender<Option<String>>);
@@ -639,10 +649,11 @@ impl WaylandContext {
         for schema in &schemas {
             if let Some(orig_val) = self.gsettings_get(schema, key) {
                 self.gsettings_set(schema, key, "['<Super><Shift><Control><Alt>F12']");
-                std::thread::sleep(TEMPORARY_SHORTCUT_DELAY);
+                let setting = std::env::var("GESTOS_SHORTCUT_DELAY_MS").ok();
+                std::thread::sleep(temporary_shortcut_pickup_delay(setting.as_deref()));
 
                 uinput_handler("Super_L+Shift_L+Control_L+Alt_L+F12");
-                std::thread::sleep(TEMPORARY_SHORTCUT_DELAY);
+                std::thread::sleep(TEMPORARY_SHORTCUT_RESTORE_DELAY);
 
                 self.gsettings_set(schema, key, &orig_val);
                 return;
@@ -803,6 +814,14 @@ mod tests {
 
         assert_eq!(changed.as_deref(), Some("['<Super><Alt>F11']"));
         assert_eq!(read_gnome_setting(schema, key).unwrap(), original);
+    }
+
+    #[test]
+    fn the_temporary_shortcut_wait_can_be_overridden() {
+        let millis = std::time::Duration::from_millis;
+        assert_eq!(temporary_shortcut_pickup_delay(None), millis(100));
+        assert_eq!(temporary_shortcut_pickup_delay(Some("250")), millis(250));
+        assert_eq!(temporary_shortcut_pickup_delay(Some("soon")), millis(100));
     }
 
     #[test]
