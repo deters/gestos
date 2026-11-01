@@ -31,7 +31,7 @@ const DBUS_PATH: &str = "/io/github/deters/Gestos/Daemon";
 const LEGACY_DBUS_NAME: &str = "org.mygestures.Daemon";
 const LEGACY_DBUS_PATH: &str = "/org/mygestures/Daemon";
 const CHOOSER_EXIT_CANCELLED: i32 = 1;
-const CHOOSER_FOCUS_RETURN_DELAY: Duration = Duration::from_millis(200);
+const CHOOSER_FOCUS_RETURN_DELAY_MILLIS: u64 = 400;
 const LEGACY_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const GRAB_ATTEMPTS: u32 = 5;
 const GRAB_RETRY_INTERVAL: Duration = Duration::from_millis(100);
@@ -308,12 +308,23 @@ fn dispatch_gesture(
                 if let Some(gesture) = choose_gesture(candidates) {
                     // Actions like closing a window act on the focused one, which only gets
                     // focus back once the chooser has gone.
-                    std::thread::sleep(CHOOSER_FOCUS_RETURN_DELAY);
+                    let delay = chooser_focus_return_delay();
+                    println!("Waiting {} ms for focus to return.", delay.as_millis());
+                    std::thread::sleep(delay);
                     run_gesture(&gesture, &signals, &wayland_ctx, &uinput);
                 }
             });
         }
     }
+}
+
+/// Experimental: GESTOS_CHOOSER_DELAY_MS overrides the wait, to find what a desktop needs.
+fn chooser_focus_return_delay() -> Duration {
+    let millis = std::env::var("GESTOS_CHOOSER_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(CHOOSER_FOCUS_RETURN_DELAY_MILLIS);
+    Duration::from_millis(millis)
 }
 
 /// Asks the user which of several similar gestures they meant. Nothing means they cancelled. If
