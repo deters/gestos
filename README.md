@@ -1,5 +1,7 @@
 # Gestos
 
+Formerly known as MyGestures. Your MyGestures config and autostart entry are carried over the first time Gestos runs.
+
 ## Get started
 
 Search some action and create a gesture:
