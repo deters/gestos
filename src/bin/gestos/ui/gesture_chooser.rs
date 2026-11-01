@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 const CANCEL_AFTER_SECS: u32 = 15;
 const CARD_MARGIN: f64 = 12.0;
+const POINTER_WAIT_MILLIS: u64 = 150;
 
 const EXIT_CANCELLED: i32 = 1;
 
@@ -66,7 +67,8 @@ pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
 
     let provider = gtk::CssProvider::new();
     provider.load_from_data(
-        "window.gesture-chooser { background: rgba(0, 0, 0, 0.12); }\n\
+        "window.gesture-chooser { background: transparent; }\n\
+         window.gesture-chooser.revealed { background: rgba(0, 0, 0, 0.12); }\n\
          .chooser-card { background-color: @theme_bg_color; color: @theme_fg_color; border: 1px solid alpha(currentColor, 0.2); border-radius: 12px; padding: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); }\n"
     );
     if let Some(display) = gdk::Display::default() {
@@ -89,6 +91,17 @@ pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
     layer.set_vexpand(true);
     window.set_child(Some(&layer));
 
+    // Nothing shows until the card is where it belongs, so it's never seen moving there.
+    card.set_opacity(0.0);
+    let reveal = {
+        let window = window.clone();
+        let card = card.clone();
+        move || {
+            card.set_opacity(1.0);
+            window.add_css_class("revealed");
+        }
+    };
+
     // Placed once, where the pointer is when the layer appears, so the options don't move away.
     let placed = Rc::new(Cell::new(false));
     let motion = gtk::EventControllerMotion::new();
@@ -97,6 +110,7 @@ pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
         let layer = layer.clone();
         let card = card.clone();
         let placed = Rc::clone(&placed);
+        let reveal = reveal.clone();
         move |x: f64, y: f64| {
             if placed.replace(true) {
                 return;
@@ -108,6 +122,7 @@ pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
                 card_position(x, natural as f64, window.width() as f64),
                 card_position(y, natural_height as f64, window.height() as f64),
             );
+            reveal();
         }
     };
     let place_on_enter = place.clone();
@@ -130,8 +145,9 @@ pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
     click_away.connect_released(|_, _, _, _| cancel());
     window.add_controller(click_away);
 
-    // Until the pointer is reported, which needs it to be over this window, start centered.
-    glib::timeout_add_local_once(std::time::Duration::from_millis(100), {
+    // The pointer is only reported while it's over this window, and might not be, such as on
+    // the top bar. Rather than stay hidden, show centered, and move once it's reported.
+    glib::timeout_add_local_once(std::time::Duration::from_millis(POINTER_WAIT_MILLIS), {
         let window = window.clone();
         let layer = layer.clone();
         let card = card.clone();
@@ -145,6 +161,7 @@ pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
                     (window.width() - natural).max(0) as f64 / 2.0,
                     (window.height() - natural_height).max(0) as f64 / 2.0,
                 );
+                reveal();
             }
         }
     });
