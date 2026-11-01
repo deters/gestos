@@ -1,4 +1,4 @@
-# Unreleased
+# Gestos 6.0.0
 
 The first release under the name Gestos, formerly MyGestures. Your MyGestures config and autostart entry are carried over the first time it runs.
 
@@ -8,7 +8,7 @@ The first release under the name Gestos, formerly MyGestures. Your MyGestures co
 
 - **Packages:** the upgrade should take care of this.
 - **From source:** run `sudo meson install -C build` or `sudo make install` again. Until then, gestures can't start.
-- **Without systemd:** the service needs elogind. On Alpine, start it with `rc-service gestos-input start`, and add it with `rc-update add gestos-input` to start it at boot.
+- **Without systemd:** the service needs elogind. On Alpine, start it with `rc-service gestos-input start`, and add it with `rc-update add gestos-input` to start it at boot. The Alpine package is experimental: its service setup is new, runs without the systemd sandbox, and has not been tested.
 
 Some setups that worked before now stop with an error:
 
@@ -19,7 +19,7 @@ Being in the `input` group no longer has any effect on Gestos, so you can leave 
 
 ## New
 
-- **Security:** see the [README](README.md#security) for what each part can access. In short, `gestosd` has no special rights and can't read what you type.
+- **Security:** see the [README](https://github.com/deters/gestos#security) for what each part can access. In short, `gestosd` has no special rights and can't read what you type.
 - **Modifier keys:** a gesture can require Ctrl, Alt, Shift or Super to be held.
 - **Standard shortcuts:** the GNOME shortcuts, such as Copy (Ctrl+C) and Zoom In (Ctrl++), are now actions of their own.
 - **Search first:** gestures are created from the search box, which suggests every action no gesture uses yet.

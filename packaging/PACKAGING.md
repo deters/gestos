@@ -24,9 +24,9 @@ To automatically compile and publish a new release:
    make minor   # Bumps minor version (e.g. 4.0.0 -> 4.1.0)
    # Or for a specific version: make version VERSION=4.1.0
    ```
-2. Push the commit and the tag to GitHub, to `deters/gestos`. Here that remote is called `gestos`, because `origin` can still be the old `deters/mygestures`:
+2. Push the commit and the tag to GitHub, to `deters/gestos`. Here that remote is called `gestos`, because `origin` can still be the old `deters/mygestures`. Push only the new tag: every `v*` tag starts a release, so `--tags` would publish old versions too:
    ```bash
-   git push gestos master --tags
+   git push gestos master vX.Y.Z
    ```
 3. The workflow will trigger, compile the `.rpm`, `.deb`, and `.apk` packages, create a new GitHub Release page, and attach all the package binaries as downloadable release assets automatically.
 
