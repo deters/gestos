@@ -250,7 +250,7 @@ fn open_editor(
     });
 
     // --- GESTURE PATH SECTION ---
-    let path_section_label = gtk::Label::new(Some("Gesture Path"));
+    let path_section_label = gtk::Label::new(Some("Trigger"));
     path_section_label.set_halign(gtk::Align::Start);
     path_section_label.add_css_class("section-header");
     scroll_content.append(&path_section_label);
@@ -404,11 +404,6 @@ fn open_editor(
         }
     });
 
-    canvas.add_controller(drag);
-    canvas_frame.set_child(Some(&canvas));
-    scroll_content.append(&canvas_frame);
-    scroll_content.append(&conflict_box);
-
     let modifiers_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     modifiers_row.add_css_class("settings-row");
     let modifiers_label = gtk::Label::new(Some("Modifier Keys"));
@@ -424,6 +419,11 @@ fn open_editor(
     modifiers_list.set_selection_mode(gtk::SelectionMode::None);
     modifiers_list.append(&modifiers_row);
     scroll_content.append(&modifiers_list);
+
+    canvas.add_controller(drag);
+    canvas_frame.set_child(Some(&canvas));
+    scroll_content.append(&canvas_frame);
+    scroll_content.append(&conflict_box);
 
     // --- ACTION SETTINGS SECTION ---
     let settings_section_label = gtk::Label::new(Some("Details"));
