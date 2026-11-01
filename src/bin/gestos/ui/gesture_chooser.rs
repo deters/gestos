@@ -81,8 +81,11 @@ pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
 
     let card = gtk::Box::new(gtk::Orientation::Vertical, 4);
     card.add_css_class("chooser-card");
+    let mut buttons = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
-        card.append(&entry_button(index, entry));
+        let button = entry_button(index, entry);
+        card.append(&button);
+        buttons.push(button);
     }
 
     let layer = gtk::Fixed::new();
@@ -139,10 +142,23 @@ pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
     });
     window.add_controller(keys);
 
-    // Clicking anywhere but an option cancels, with any button.
+    // A left click on an option picks it. Any other click cancels. This checks where the click
+    // landed itself, so that a click on an option can never count as clicking away.
     let click_away = gtk::GestureClick::new();
     click_away.set_button(0);
-    click_away.connect_released(|_, _, _, _| cancel());
+    let click_window = window.clone();
+    click_away.connect_released(move |gesture, _, x, y| {
+        let point = gtk::graphene::Point::new(x as f32, y as f32);
+        let clicked_option = buttons.iter().position(|button| {
+            button
+                .compute_bounds(&click_window)
+                .is_some_and(|bounds| bounds.contains_point(&point))
+        });
+        match clicked_option {
+            Some(index) if gesture.current_button() == gdk::BUTTON_PRIMARY => pick(index),
+            _ => cancel(),
+        }
+    });
     window.add_controller(click_away);
 
     // The pointer is only reported while it's over this window, and might not be, such as on
