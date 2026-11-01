@@ -8,6 +8,7 @@ use gestos::config::{ActionType, Gesture};
 use gestos::modifiers::Modifiers;
 use gestos::config::generate_unique_id;
 use crate::state::{AppState, EditorActionOption, CATEGORY_NAMES};
+use crate::suggestions::search_matches;
 use crate::actions::{action_needs_parameter, fetch_gnome_action_options, fetch_kde_action_options, get_static_action_options, action_matches};
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
 use crate::ui::components::{draw_gesture_path, get_action_category_icon, show_confirm_dialog};
@@ -517,17 +518,11 @@ fn open_editor(
     let custom_filter = gtk::CustomFilter::new({
         let filter_text = Rc::clone(&filter_text);
         move |item| {
-            let query = filter_text.borrow().to_lowercase();
-            if query.is_empty() { return true; }
+            let query = filter_text.borrow();
             let boxed = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
             let opt = boxed.borrow::<EditorActionOption>();
-            let cat_name = CATEGORY_NAMES.get(opt.category).unwrap_or(&"").to_lowercase();
-            let act_name = opt.name.to_lowercase();
-            
-            // Allow matching multiple words in any order across category and action names
-            query.split_whitespace().all(|token| {
-                cat_name.contains(token) || act_name.contains(token)
-            })
+            let category = CATEGORY_NAMES.get(opt.category).unwrap_or(&"");
+            search_matches(&format!("{} {}", category, opt.name), &query)
         }
     });
 

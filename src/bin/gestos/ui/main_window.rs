@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use gestos::config::{Configuration, Gesture};
 use crate::state::AppState;
 use crate::actions::{fetch_gnome_action_options, fetch_kde_action_options, get_static_action_options};
-use crate::suggestions::find_suggestions;
+use crate::suggestions::{find_suggestions, search_matches};
 use crate::ui::components::get_action_category_icon;
 use crate::ui::editor::{open_gesture_editor, open_gesture_editor_for_action};
 use crate::ui::settings::open_settings_window;
@@ -15,7 +15,7 @@ use crate::ui::components::create_gesture_row;
 use crate::ui::gesture_status::GestureStatus;
 
 pub fn get_visible_gestures(state: &AppState) -> Vec<Gesture> {
-    let filter = state.search_entry.text().to_lowercase();
+    let filter = state.search_entry.text().to_string();
 
     let gestures: Vec<Gesture> = state
         .config
@@ -23,13 +23,9 @@ pub fn get_visible_gestures(state: &AppState) -> Vec<Gesture> {
         .iter()
         .filter(|g| !g.is_deleted)
         .filter(|g| {
-            if filter.is_empty() {
-                true
-            } else {
-                g.name.to_lowercase().contains(&filter) || (
-                    !g.actions.is_empty() && get_action_human_readable(&g.actions[0]).to_lowercase().contains(&filter)
-                )
-            }
+            search_matches(&g.name, &filter)
+                || (!g.actions.is_empty()
+                    && search_matches(&get_action_human_readable(&g.actions[0]), &filter))
         })
         .cloned()
         .collect();

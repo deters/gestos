@@ -30,21 +30,39 @@ fn is_in_use(option: &EditorActionOption, gestures: &[Gesture]) -> bool {
         .any(|action| action_identity(action).as_ref() == Some(&identity))
 }
 
-fn text_rank(text: &str, query: &str) -> Option<u8> {
+/// Whether a search matches some text, ignoring case. A space works like the regular expression
+/// `.*`: the words must appear in that order, with anything between them.
+pub fn search_matches(text: &str, query: &str) -> bool {
     let text = text.to_lowercase();
+    let query = query.to_lowercase();
+    let mut remaining = text.as_str();
+    for word in query.split_whitespace() {
+        match remaining.find(word) {
+            Some(position) => remaining = &remaining[position + word.len()..],
+            None => return false,
+        }
+    }
+    true
+}
+
+fn text_rank(text: &str, query: &str) -> Option<u8> {
+    if !search_matches(text, query) {
+        return None;
+    }
+    let text = text.to_lowercase();
+    // With several words, how well the first one fits decides.
+    let first_word = query.split_whitespace().next().unwrap_or(query);
     if text == query {
         Some(0)
-    } else if text.starts_with(query) {
+    } else if text.starts_with(first_word) {
         Some(1)
     } else if text
         .split(|c: char| !c.is_alphanumeric())
-        .any(|word| word.starts_with(query))
+        .any(|word| word.starts_with(first_word))
     {
         Some(2)
-    } else if text.contains(query) {
-        Some(3)
     } else {
-        None
+        Some(3)
     }
 }
 
@@ -247,6 +265,41 @@ mod tests {
         let other = [gesture(ActionType::Execute("gedit".to_string()))];
         assert!(find_suggestions(&options, &same, "browser").is_empty());
         assert_eq!(find_suggestions(&options, &other, "browser").len(), 1);
+    }
+
+    #[test]
+    fn spaces_match_anything_between_words_in_order() {
+        assert!(search_matches("Take a screenshot of a window", "take window"));
+        assert!(search_matches("Take a screenshot of a window", "SCREEN WIN"));
+        assert!(!search_matches("Take a screenshot of a window", "window take"));
+        assert!(!search_matches("Take a screenshot", "take window"));
+        assert!(search_matches("anything", "   "));
+    }
+
+    #[test]
+    fn a_repeated_word_must_appear_twice() {
+        assert!(search_matches("a window, another window", "window window"));
+        assert!(!search_matches("one window", "window window"));
+    }
+
+    #[test]
+    fn regular_expression_characters_are_literal() {
+        assert!(!search_matches("Close window", "c.ose"));
+        assert!(search_matches("Press (Alt)", "(alt)"));
+    }
+
+    #[test]
+    fn suggestions_match_words_in_order_in_a_name_or_key() {
+        let options = vec![
+            gnome("Move window one workspace to the left", "move-to-workspace-left"),
+            gnome("Switch to workspace on the left", "switch-to-workspace-left"),
+        ];
+        assert_eq!(
+            names(&find_suggestions(&options, &[], "move left")),
+            ["Move window one workspace to the left"]
+        );
+        assert_eq!(find_suggestions(&options, &[], "to left").len(), 2);
+        assert!(find_suggestions(&options, &[], "left move").is_empty());
     }
 
     #[test]
