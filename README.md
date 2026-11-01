@@ -4,13 +4,17 @@
 
 Search some action and create a gesture:
 
-![Searching for "screen" lists matching actions to create a gesture for](docs/screenshots/search-suggestions.jpg)
+![Searching for "screen" lists matching actions to create a gesture for](docs/screenshots/search-suggestions.png)
 
 Draw the gesture and save it:
 
-![The gesture editor with a drawn path and the Take Screenshot action](docs/screenshots/gesture-editor.jpg)
+![The gesture editor with a drawn path and the Take Screenshot action](docs/screenshots/gesture-editor.png)
 
 That's it. Hold the right mouse button anywhere, draw your gesture, and let go. A short click still works as a normal right click.
+
+Here it is from the start, with an upward gesture that maximizes a window and an S-shaped one that saves:
+
+![Creating a gesture that draws up to toggle maximize, and one that draws an S to save with Ctrl+S](docs/screenshots/first-gestures.gif)
 
 ## Install
 
