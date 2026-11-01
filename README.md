@@ -12,8 +12,6 @@ Draw the gesture and save it. Gestos warns you if your drawing is close to one y
 
 That's it. Hold the right mouse button anywhere, draw your gesture, and let go. A short click still works as a normal right click.
 
-To use an action that isn't listed, or one that already has a gesture, click **+** instead. Actions come from your desktop, so the list differs between desktops, and Sway and Hyprland have the built-in actions only.
-
 ## Install
 
 Packages for Fedora, Debian, and Alpine are on the [releases page](https://github.com/deters/gestos/releases).
