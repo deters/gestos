@@ -248,14 +248,14 @@ mod tests {
     fn parameter_actions_stay_available_however_often_they_are_used() {
         let options = vec![
             option("Run Command (Execute)", ActionType::Execute(String::new())),
-            option("Keypress Shortcut", ActionType::Keypress(String::new())),
+            option("Keyboard Shortcut", ActionType::Keypress(String::new())),
         ];
         let gestures = [
             gesture(ActionType::Execute("firefox".to_string())),
             gesture(ActionType::Keypress("Alt+Left".to_string())),
         ];
         assert_eq!(find_suggestions(&options, &gestures, "run").len(), 1);
-        assert_eq!(find_suggestions(&options, &gestures, "keypress").len(), 1);
+        assert_eq!(find_suggestions(&options, &gestures, "keyboard").len(), 1);
     }
 
     #[test]

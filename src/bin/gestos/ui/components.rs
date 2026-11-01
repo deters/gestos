@@ -236,9 +236,9 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
         ActionType::ToggleMaximized => "Toggle Maximized".to_string(),
         ActionType::Keypress(keys) => {
             if keys.is_empty() {
-                "Keypress Shortcut".to_string()
+                "Keyboard Shortcut".to_string()
             } else {
-                format!("Keypress Shortcut ({})", keys)
+                format!("Keyboard Shortcut ({})", keys)
             }
         }
         ActionType::Execute(cmd) => {

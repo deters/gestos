@@ -45,7 +45,7 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
         EditorActionOption {
             category: 0,
             action_type: ActionType::Keypress(String::new()),
-            name: "Keypress Shortcut".to_string(),
+            name: "Keyboard Shortcut".to_string(),
             tooltip: "Simulate keys like Control_L+Alt_L+t".to_string(),
         },
         // Window Management (1)
