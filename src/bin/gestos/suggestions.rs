@@ -69,21 +69,29 @@ fn is_listed(option: &EditorActionOption) -> bool {
     }
 }
 
-/// Actions matching the search that no gesture uses yet, best first.
+/// Actions matching the search that no gesture uses yet, best first. With nothing to search
+/// for, that's every action if there are no gestures to show instead, and otherwise nothing.
 pub fn find_suggestions(
     options: &[EditorActionOption],
     gestures: &[Gesture],
     query: &str,
 ) -> Vec<EditorActionOption> {
     let query = query.trim().to_lowercase();
-    if query.is_empty() {
+    let has_gestures = gestures.iter().any(|gesture| !gesture.is_deleted);
+    if query.is_empty() && has_gestures {
         return Vec::new();
     }
 
     let mut matches: Vec<(u8, &EditorActionOption)> = options
         .iter()
         .filter(|option| is_listed(option) && !is_in_use(option, gestures))
-        .filter_map(|option| match_rank(option, &query).map(|rank| (rank, option)))
+        .filter_map(|option| {
+            if query.is_empty() {
+                Some((0, option))
+            } else {
+                match_rank(option, &query).map(|rank| (rank, option))
+            }
+        })
         .collect();
     // Entries for one action share their best rank, so that the friendlier built-in name is the
     // one kept even if only GNOME's key matched exactly.
@@ -242,7 +250,27 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_search_suggests_nothing() {
-        assert!(find_suggestions(&minimize_options(), &[], "   ").is_empty());
+    fn an_empty_search_suggests_nothing_when_there_are_gestures() {
+        let gestures = [gesture(ActionType::Kill)];
+        assert!(find_suggestions(&minimize_options(), &gestures, "   ").is_empty());
+    }
+
+    #[test]
+    fn with_no_gestures_an_empty_search_lists_every_action_once() {
+        let mut options = minimize_options();
+        options.push(gnome("Volume up", "volume-up"));
+        options.push(gnome("Volume up", "volume-up-static"));
+        options.push(option("Abort Gesture", ActionType::Abort));
+        assert_eq!(
+            names(&find_suggestions(&options, &[], "  ")),
+            ["Minimize Window", "Volume up"]
+        );
+    }
+
+    #[test]
+    fn deleted_gestures_do_not_count_as_having_gestures() {
+        let mut deleted = gesture(ActionType::Kill);
+        deleted.is_deleted = true;
+        assert_eq!(find_suggestions(&minimize_options(), &[deleted], "").len(), 1);
     }
 }

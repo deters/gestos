@@ -73,7 +73,9 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
     state
         .suggestion_no_match
         .set_text(&format!("No gestures match \u{201c}{}\u{201d}.", query.trim()));
-    state.suggestion_no_match.set_visible(no_gestures_shown);
+    state
+        .suggestion_no_match
+        .set_visible(no_gestures_shown && !query.trim().is_empty());
     state.suggestion_box.set_visible(!found.is_empty());
     if no_gestures_shown && !found.is_empty() {
         state.empty_state_box.set_visible(false);
@@ -398,4 +400,5 @@ pub fn build_ui(app: &gtk::Application) {
     }
 
     state.borrow().window.present();
+    state.borrow().search_entry.grab_focus();
 }
