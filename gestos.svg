@@ -1,46 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
-  <defs>
-    <!-- Background Gradient -->
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1e1e2e"/>
-      <stop offset="100%" stop-color="#11111b"/>
-    </linearGradient>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Trail: front edge of each dot -->
+  <g fill="#1a5fb4">
+    <circle cx="17" cy="16" r="7"/>
+    <circle cx="14" cy="39" r="8"/>
+    <circle cx="21" cy="62" r="9"/>
+    <circle cx="46" cy="67" r="10"/>
+  </g>
 
-    <!-- Path Gradient -->
-    <linearGradient id="pathGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#cba6f7"/> <!-- Purple/Lavender -->
-      <stop offset="50%" stop-color="#89b4fa"/> <!-- Blue -->
-      <stop offset="100%" stop-color="#89dceb"/> <!-- Cyan -->
-    </linearGradient>
-  </defs>
+  <!-- Trail: dots grow towards the pointer's tip -->
+  <g fill="#3584e4">
+    <circle cx="17" cy="14" r="7"/>
+    <circle cx="14" cy="37" r="8"/>
+    <circle cx="21" cy="60" r="9"/>
+    <circle cx="46" cy="65" r="10"/>
+  </g>
 
-  <!-- Base Squircle Background -->
-  <rect x="32" y="32" width="448" height="448" rx="112" fill="url(#bgGrad)" stroke="#313244" stroke-width="6"/>
-
-  <!-- Vector Glow Layers for the Cursor-Shaped Draw Path (No Filters) -->
-  <!-- Outer Glow -->
-  <path d="M 190 100 v 260 l 70 -60 l 60 120 l 40 -20 l -60 -120 h 70 Z" 
-        fill="none" 
-        stroke="url(#pathGrad)" 
-        stroke-width="36" 
-        stroke-linejoin="round"
-        stroke-linecap="round"
-        stroke-opacity="0.1"/>
-
-  <!-- Mid Glow -->
-  <path d="M 190 100 v 260 l 70 -60 l 60 120 l 40 -20 l -60 -120 h 70 Z" 
-        fill="none" 
-        stroke="url(#pathGrad)" 
-        stroke-width="26" 
-        stroke-linejoin="round"
-        stroke-linecap="round"
-        stroke-opacity="0.25"/>
-
-  <!-- Core Sharp Stroke -->
-  <path d="M 190 100 v 260 l 70 -60 l 60 120 l 40 -20 l -60 -120 h 70 Z" 
-        fill="none" 
-        stroke="url(#pathGrad)" 
-        stroke-width="14" 
-        stroke-linejoin="round"
-        stroke-linecap="round"/>
+  <!-- Pointer: dark outline, then white fill -->
+  <path d="M64 46V108L80 94L91 120L103 114L92 90H110Z" fill="#241f31" stroke="#241f31" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M64 46V108L80 94L91 120L103 114L92 90H110Z" fill="#ffffff"/>
 </svg>
