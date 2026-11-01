@@ -29,4 +29,11 @@ pub struct AppState {
     pub newly_added_gestures: Vec<String>,
     pub dbus_conn: Option<zbus::blocking::Connection>,
     pub empty_state_box: gtk::Box,
+    pub action_options: Vec<EditorActionOption>,
+    pub visible_suggestions: Vec<EditorActionOption>,
+    pub show_all_suggestions: bool,
+    pub suggestion_box: gtk::Box,
+    pub suggestion_no_match: gtk::Label,
+    pub suggestion_list: gtk::ListBox,
+    pub suggestion_show_all: gtk::Button,
 }

@@ -58,6 +58,11 @@ Usage:
 
 **To use gestures:** Hold the trigger button (default: right-click / button 3) and move the mouse to draw a gesture. Release the button to execute.
 
+Creating gestures:
+------------------
+
+Click **+** to create a gesture, or search for what you want it to do. If an action matches your search and no gesture uses it yet, it's listed under **Create a Gesture For**. Choose it, draw the gesture, and save.
+
 Starting automatically:
 -----------------------
 

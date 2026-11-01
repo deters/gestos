@@ -44,6 +44,7 @@ cargo_sources = files(
   'src/bin/gestos/system.rs',
   'src/bin/gestos/daemon.rs',
   'src/bin/gestos/state.rs',
+  'src/bin/gestos/suggestions.rs',
   'src/bin/gestos/main.rs',
 )
 

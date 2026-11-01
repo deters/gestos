@@ -1,4 +1,5 @@
 mod state;
+mod suggestions;
 mod actions;
 mod daemon;
 mod system;

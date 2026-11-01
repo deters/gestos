@@ -109,6 +109,43 @@ impl ActionType {
         }
     }
 
+    /// The GNOME shortcut key a built-in action runs on GNOME, if it has one.
+    pub fn gnome_key(&self) -> Option<&'static str> {
+        match self {
+            ActionType::Iconify => Some("minimize"),
+            ActionType::Kill => Some("close"),
+            ActionType::Maximize => Some("maximize"),
+            ActionType::Restore => Some("unmaximize"),
+            ActionType::ToggleMaximized => Some("toggle-maximized"),
+            ActionType::ToggleFullscreen => Some("toggle-fullscreen"),
+            ActionType::WorkspaceLeft => Some("switch-to-workspace-left"),
+            ActionType::WorkspaceRight => Some("switch-to-workspace-right"),
+            ActionType::WorkspaceUp => Some("switch-to-workspace-up"),
+            ActionType::WorkspaceDown => Some("switch-to-workspace-down"),
+            ActionType::ShowOverview => Some("toggle-overview"),
+            ActionType::ShowAppGrid => Some("toggle-application-view"),
+            ActionType::ShowDesktop => Some("show-desktop"),
+            ActionType::LockScreen => Some("screensaver"),
+            ActionType::Terminal => Some("terminal"),
+            ActionType::VolumeUp => Some("volume-up"),
+            ActionType::VolumeDown => Some("volume-down"),
+            ActionType::VolumeMute => Some("volume-mute"),
+            ActionType::MediaPlay => Some("play"),
+            ActionType::MediaNext => Some("next"),
+            ActionType::MediaPrev => Some("previous"),
+            ActionType::Www => Some("www"),
+            ActionType::Home => Some("home"),
+            ActionType::Email => Some("email"),
+            ActionType::Search => Some("search"),
+            ActionType::Calculator => Some("calculator"),
+            ActionType::Logout => Some("logout"),
+            ActionType::Screenshot => Some("screenshot"),
+            ActionType::ScreenshotWindow => Some("window-screenshot"),
+            ActionType::ScreenshotArea => Some("area-screenshot"),
+            _ => None,
+        }
+    }
+
     pub fn get_icon_name(&self) -> &'static str {
         match self {
             ActionType::Execute(_) => "utilities-terminal-symbolic",

@@ -6,7 +6,10 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use gestos::config::{Configuration, Gesture};
 use crate::state::AppState;
-use crate::ui::editor::open_gesture_editor;
+use crate::actions::{fetch_gnome_action_options, fetch_kde_action_options, get_static_action_options};
+use crate::suggestions::{find_suggestions, SUGGESTIONS_SHOWN};
+use crate::ui::components::get_action_category_icon;
+use crate::ui::editor::{open_gesture_editor, open_gesture_editor_for_action};
 use crate::ui::settings::open_settings_window;
 use crate::ui::components::create_gesture_row;
 use crate::ui::gesture_status::GestureStatus;
@@ -33,7 +36,63 @@ pub fn get_visible_gestures(state: &AppState) -> Vec<Gesture> {
 
     gestures
 }
+fn suggestion_row(option: &crate::state::EditorActionOption) -> gtk::ListBoxRow {
+    let row = gtk::ListBoxRow::new();
+    let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row_box.set_margin_start(16);
+    row_box.set_margin_end(16);
+    row_box.set_margin_top(12);
+    row_box.set_margin_bottom(12);
+
+    let (icon_name, _) = get_action_category_icon(&option.action_type);
+    row_box.append(&gtk::Image::from_icon_name(icon_name));
+    let name = gtk::Label::new(Some(&option.name));
+    name.set_hexpand(true);
+    name.set_xalign(0.0);
+    name.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    row_box.append(&name);
+    row_box.append(&gtk::Image::from_icon_name("go-next-symbolic"));
+
+    row.set_child(Some(&row_box));
+    row
+}
+
+/// Below the search results, offers actions that match the search but no gesture uses yet.
+fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool) {
+    let mut state = state_rc.borrow_mut();
+    while let Some(child) = state.suggestion_list.first_child() {
+        state.suggestion_list.remove(&child);
+    }
+
+    let query = state.search_entry.text().to_string();
+    let mut found = find_suggestions(&state.action_options, &state.config.gestures, &query);
+    let total = found.len();
+    if !state.show_all_suggestions {
+        found.truncate(SUGGESTIONS_SHOWN);
+    }
+    for option in &found {
+        state.suggestion_list.append(&suggestion_row(option));
+    }
+
+    state.suggestion_show_all.set_label(&format!("Show All ({total})"));
+    state.suggestion_show_all.set_visible(found.len() < total);
+    state
+        .suggestion_no_match
+        .set_text(&format!("No gestures match \u{201c}{}\u{201d}.", query.trim()));
+    state.suggestion_no_match.set_visible(no_gestures_shown);
+    state.suggestion_box.set_visible(!found.is_empty());
+    if no_gestures_shown && !found.is_empty() {
+        state.empty_state_box.set_visible(false);
+    }
+    state.visible_suggestions = found;
+}
+
 pub fn refresh_gesture_list(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) {
+    let no_gestures_shown = show_gestures(state_rc, select_name);
+    refresh_suggestions(state_rc, no_gestures_shown);
+}
+
+fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) -> bool {
     let state = state_rc.borrow();
 
     // Clear list
@@ -61,6 +120,7 @@ pub fn refresh_gesture_list(state_rc: &Rc<RefCell<AppState>>, select_name: Optio
             }
         }
     }
+    visible.is_empty()
 }
 pub fn show_about_dialog<W: IsA<gtk::Window>>(parent: &W) {
     let dialog = gtk::AboutDialog::new();
@@ -167,6 +227,37 @@ pub fn build_ui(app: &gtk::Application) {
     empty_state_box.append(&empty_add_btn);
 
     list_container.append(&empty_state_box);
+
+    let suggestion_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    suggestion_box.set_halign(gtk::Align::Center);
+    suggestion_box.set_width_request(500);
+    suggestion_box.set_margin_start(24);
+    suggestion_box.set_margin_end(24);
+    suggestion_box.set_margin_bottom(24);
+    suggestion_box.set_visible(false);
+
+    let suggestion_no_match = gtk::Label::new(None);
+    suggestion_no_match.set_xalign(0.0);
+    suggestion_no_match.set_margin_top(24);
+    suggestion_no_match.set_margin_bottom(8);
+    suggestion_box.append(&suggestion_no_match);
+
+    let suggestion_heading = gtk::Label::new(Some("Create a Gesture For"));
+    suggestion_heading.add_css_class("section-header");
+    suggestion_heading.set_xalign(0.0);
+    suggestion_box.append(&suggestion_heading);
+
+    let suggestion_list = gtk::ListBox::new();
+    suggestion_list.add_css_class("boxed-list");
+    suggestion_list.set_selection_mode(gtk::SelectionMode::None);
+    suggestion_box.append(&suggestion_list);
+
+    let suggestion_show_all = gtk::Button::new();
+    suggestion_show_all.add_css_class("flat");
+    suggestion_show_all.set_halign(gtk::Align::Center);
+    suggestion_box.append(&suggestion_show_all);
+
+    list_container.append(&suggestion_box);
     scrolled.set_child(Some(&list_container));
 
     if let Err(e) = gestos::config::initialize_user_config_if_missing() {
@@ -189,6 +280,13 @@ pub fn build_ui(app: &gtk::Application) {
         newly_added_gestures: Vec::new(),
         dbus_conn,
         empty_state_box,
+        action_options: Vec::new(),
+        visible_suggestions: Vec::new(),
+        show_all_suggestions: false,
+        suggestion_box,
+        suggestion_no_match,
+        suggestion_list,
+        suggestion_show_all,
     }));
 
     // Refresh initially
@@ -200,8 +298,45 @@ pub fn build_ui(app: &gtk::Application) {
         .borrow()
         .search_entry
         .connect_search_changed(move |_| {
+            state_clone.borrow_mut().show_all_suggestions = false;
             refresh_gesture_list(&state_clone, None);
         });
+
+    let state_suggestion = Rc::clone(&state);
+    state
+        .borrow()
+        .suggestion_list
+        .connect_row_activated(move |_, row| {
+            let option = state_suggestion
+                .borrow()
+                .visible_suggestions
+                .get(row.index() as usize)
+                .cloned();
+            if let Some(option) = option {
+                open_gesture_editor_for_action(&state_suggestion, option);
+            }
+        });
+
+    let state_show_all = Rc::clone(&state);
+    state.borrow().suggestion_show_all.connect_clicked(move |_| {
+        state_show_all.borrow_mut().show_all_suggestions = true;
+        refresh_gesture_list(&state_show_all, None);
+    });
+
+    // Reading the desktop's action lists can be slow, so it doesn't happen on the UI thread.
+    let load_options = gtk::gio::spawn_blocking(|| {
+        let mut options = get_static_action_options();
+        options.extend(fetch_gnome_action_options());
+        options.extend(fetch_kde_action_options());
+        options
+    });
+    let state_options = Rc::clone(&state);
+    glib::spawn_future_local(async move {
+        if let Ok(options) = load_options.await {
+            state_options.borrow_mut().action_options = options;
+            refresh_gesture_list(&state_options, None);
+        }
+    });
 
     // Connect Add button
     let state_clone2 = Rc::clone(&state);
