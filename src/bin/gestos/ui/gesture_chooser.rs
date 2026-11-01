@@ -57,8 +57,8 @@ fn entry_button(index: usize, entry: &ChooserEntry) -> gtk::Button {
     button
 }
 
-/// A transparent layer over the screen with the candidates under the pointer. It covers the
-/// screen because that's the only way to place something at the pointer on Wayland.
+/// A transparent layer over the desktop with the candidates under the pointer. It's this large
+/// because that's the only way to place something at the pointer on Wayland.
 pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
     let window = gtk::ApplicationWindow::new(app);
     window.set_decorated(false);
@@ -151,7 +151,9 @@ pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
 
     glib::timeout_add_seconds_local(CANCEL_AFTER_SECS, || cancel());
 
-    // Covers the monitor even where a desktop doesn't honor fullscreen.
+    // Maximized rather than fullscreen, because a compositor doesn't draw what's behind a
+    // fullscreen window, which would show as black through the transparent background. The size
+    // covers desktops that don't maximize it.
     if let Some(monitor) = gdk::Display::default()
         .and_then(|display| display.monitors().item(0))
         .and_then(|monitor| monitor.downcast::<gdk::Monitor>().ok())
@@ -159,7 +161,7 @@ pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
         let geometry = monitor.geometry();
         window.set_default_size(geometry.width(), geometry.height());
     }
-    window.fullscreen();
+    window.maximize();
     window.present();
 }
 
