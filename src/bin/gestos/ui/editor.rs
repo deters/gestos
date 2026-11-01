@@ -17,8 +17,9 @@ use gestos::protractor::Point2D;
 
 pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> String {
     match &opt.action_type {
-        ActionType::Keypress(_) => {
-            if detail.trim().is_empty() {
+        ActionType::Keypress(keys) => {
+            // A standard shortcut's keys are fixed, and say nothing its name doesn't.
+            if detail.trim().is_empty() || detail.trim() == keys {
                 opt.name.clone()
             } else {
                 format!("{} ({})", opt.name, detail.trim())
@@ -663,7 +664,7 @@ fn open_editor(
         let detail = action_details_entry.text().to_string();
 
         let action = match &opt.action_type {
-            ActionType::Keypress(_) => ActionType::Keypress(detail),
+            ActionType::Keypress(keys) if keys.is_empty() => ActionType::Keypress(detail),
             ActionType::Execute(_) if opt.category == 7 => ActionType::Execute(detail),
             ActionType::Click(_) => {
                 let btn = if detail.trim().is_empty() {

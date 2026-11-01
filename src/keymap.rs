@@ -27,7 +27,7 @@ pub struct LayoutName {
 }
 
 impl LayoutName {
-    fn new(layout: &str, variant: &str) -> Self {
+    pub fn new(layout: &str, variant: &str) -> Self {
         LayoutName {
             layout: layout.to_string(),
             variant: variant.to_string(),

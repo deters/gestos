@@ -1,3 +1,4 @@
+use crate::actions::standard_shortcut_name;
 use gtk::prelude::*;
 use gtk::{cairo, gdk, glib};
 use gtk4 as gtk;
@@ -83,7 +84,7 @@ pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static 
     match action {
         ActionType::Execute(_) => ("utilities-terminal-symbolic", "icon-bg-purple"),
         ActionType::Keypress(_) => (
-            "preferences-desktop-keyboard-shortcuts-symbolic",
+            "input-keyboard-symbolic",
             "icon-bg-orange",
         ),
         ActionType::Gnome(_) => ("preferences-system-symbolic", "icon-bg-blue"),
@@ -236,9 +237,11 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
         ActionType::ToggleMaximized => "Toggle Maximized".to_string(),
         ActionType::Keypress(keys) => {
             if keys.is_empty() {
-                "Keyboard Shortcut".to_string()
+                "Custom Keyboard Shortcut".to_string()
+            } else if let Some(name) = standard_shortcut_name(keys) {
+                name.to_string()
             } else {
-                format!("Keyboard Shortcut ({})", keys)
+                format!("Custom Keyboard Shortcut ({})", keys)
             }
         }
         ActionType::Execute(cmd) => {
@@ -312,8 +315,9 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     main_hbox.append(&drag_handle);
 
     let has_keypress = if !gesture.actions.is_empty() {
+        // A standard shortcut shows its name, like the other actions.
         if let ActionType::Keypress(ref keys) = gesture.actions[0] {
-            Some(keys)
+            standard_shortcut_name(keys).is_none().then_some(keys)
         } else {
             None
         }

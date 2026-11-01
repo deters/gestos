@@ -17,17 +17,22 @@ pub fn action_matches(a: &ActionType, opt: &EditorActionOption) -> bool {
                 opt.category == 7
             }
         }
-        (ActionType::Keypress(_), ActionType::Keypress(_)) => opt.category == 0,
+        // The generic Keyboard Shortcut has no keys of its own, so it matches any.
+        (ActionType::Keypress(k1), ActionType::Keypress(k2)) => {
+            opt.category == 0 && (k2.is_empty() || k1 == k2)
+        }
         (ActionType::Click(_), ActionType::Click(_)) => opt.category == 0,
         (at1, at2) => at1 == at2,
     }
 }
 
-/// Whether an action needs a value from the user. Most don't: GNOME and KDE actions and custom
-/// GNOME shortcuts are complete as they are, and only the generic Run Command takes a command.
+/// Whether an action needs a value from the user. Most don't: GNOME and KDE actions, custom
+/// GNOME shortcuts and standard shortcuts are complete as they are. Only the generic Keyboard
+/// Shortcut takes keys, and only the generic Run Command takes a command.
 pub fn action_needs_parameter(opt: &EditorActionOption) -> bool {
     match &opt.action_type {
-        ActionType::Keypress(_) | ActionType::Click(_) => true,
+        ActionType::Keypress(keys) => keys.is_empty(),
+        ActionType::Click(_) => true,
         ActionType::Execute(_) => opt.category == 7,
         _ => false,
     }
@@ -39,13 +44,111 @@ fn is_gnome_action_key(key: &str, holds_string_list: bool) -> bool {
     holds_string_list && key != "custom-keybindings"
 }
 
+/// The standard shortcuts apps share, from https://developer.gnome.org/hig/reference/keyboard.html
+/// as name, keys and description. Left out are Duplicate, whose Ctrl+U is also Underline, and the
+/// reserved system shortcuts, which aren't app actions.
+const STANDARD_SHORTCUTS: &[(&str, &str, &str)] = &[
+    // Basic
+    ("Close", "Control+W", "Close the current tab or window"),
+    ("Quit", "Control+Q", "Close the app and all its windows"),
+    ("Help", "F1", "Open the app's help"),
+    ("Side Pane", "F9", "Show or hide the side pane"),
+    ("Menu", "F10", "Open the app's menu"),
+    ("Keyboard Shortcuts", "Control+question", "Open the keyboard shortcuts dialog"),
+    ("Preferences", "Control+comma", "Open the preferences window"),
+    // Content & Files
+    ("New", "Control+N", "Create a new item"),
+    ("Open", "Control+O", "Open an existing item"),
+    ("Save", "Control+S", "Save the current item"),
+    ("Save As", "Shift+Control+S", "Save the current item under a new name"),
+    ("Print", "Control+P", "Print the current item"),
+    ("Print Preview", "Shift+Control+P", "Show a print preview of the current item"),
+    ("Send", "Control+M", "Send or share the current item"),
+    ("Properties", "Alt+Return", "Show the properties of the current item"),
+    // Editing
+    ("Undo", "Control+Z", "Reverse the last action"),
+    ("Redo", "Shift+Control+Z", "Reapply the last action that was undone"),
+    ("Cut", "Control+X", "Remove the selection and copy it to the clipboard"),
+    ("Copy", "Control+C", "Copy the selection to the clipboard"),
+    ("Paste", "Control+V", "Insert the clipboard contents"),
+    ("Paste Special", "Shift+Control+V", "Insert another version of the clipboard contents"),
+    ("Select All", "Control+A", "Select all content"),
+    ("Deselect All", "Shift+Control+A", "Deselect all content"),
+    ("Find", "Control+F", "Show the find bar"),
+    ("Find Next", "Control+G", "Select the next search result"),
+    ("Find Previous", "Shift+Control+G", "Select the previous search result"),
+    ("Replace", "Control+H", "Show find and replace"),
+    // View
+    ("Zoom In", "Control+plus", "Enlarge the content"),
+    ("Zoom Out", "Control+minus", "Reduce the content"),
+    ("Normal Size", "Control+0", "Reset the zoom"),
+    ("Reload", "Control+R", "Reload the current view or item"),
+    // Formatting
+    ("Bold", "Control+B", "Toggle bold for the selected text"),
+    ("Italic", "Control+I", "Toggle italics for the selected text"),
+    ("Underline", "Control+U", "Toggle underlining for the selected text"),
+    // Bookmarks
+    ("Add Bookmark", "Control+D", "Bookmark the current location"),
+    ("Edit Bookmarks", "Control+Alt+D", "Open the list of bookmarks"),
+    // Navigation
+    ("Back", "Alt+Left", "Go to the previous location"),
+    ("Forward", "Alt+Right", "Go to the next location"),
+    ("Up", "Alt+Up", "Go to the parent location"),
+    ("Home", "Alt+Home", "Go to the starting location"),
+    ("Enter Location", "Control+L", "Type an address"),
+    ("Previous Page", "Page_Up", "Go to the previous page"),
+    ("Next Page", "Page_Down", "Go to the next page"),
+    ("First Page", "Control+Home", "Go to the first page"),
+    ("Last Page", "Control+End", "Go to the last page"),
+];
+
+/// A standard shortcut's name with its keys as the GNOME guidelines write them: "Copy (Ctrl+C)".
+fn labelled_shortcut_name(name: &str, keys: &str) -> String {
+    let label = keys
+        .split('+')
+        .map(|key| match key {
+            "Control" => "Ctrl",
+            "question" => "?",
+            "comma" => ",",
+            "plus" => "+",
+            "minus" => "-",
+            "Left" => "←",
+            "Right" => "→",
+            "Up" => "↑",
+            "Page_Up" => "PageUp",
+            "Page_Down" => "PageDown",
+            other => other,
+        })
+        .collect::<Vec<_>>()
+        .join("+");
+    format!("{name} ({label})")
+}
+
+/// The name of the standard shortcut with these keys, if they are one.
+pub fn standard_shortcut_name(keys: &str) -> Option<String> {
+    STANDARD_SHORTCUTS
+        .iter()
+        .find(|(_, shortcut_keys, _)| *shortcut_keys == keys)
+        .map(|(name, keys, _)| labelled_shortcut_name(name, keys))
+}
+
 pub fn get_static_action_options() -> Vec<EditorActionOption> {
-    vec![
+    // Before the generic Keyboard Shortcut, so that a gesture with these keys finds its own name.
+    let mut options: Vec<EditorActionOption> = STANDARD_SHORTCUTS
+        .iter()
+        .map(|(name, keys, tooltip)| EditorActionOption {
+            category: 0,
+            action_type: ActionType::Keypress(keys.to_string()),
+            name: labelled_shortcut_name(name, keys),
+            tooltip: tooltip.to_string(),
+        })
+        .collect();
+    options.extend([
         // Input Emulation (0)
         EditorActionOption {
             category: 0,
             action_type: ActionType::Keypress(String::new()),
-            name: "Keyboard Shortcut".to_string(),
+            name: "Custom Keyboard Shortcut".to_string(),
             tooltip: "Simulate keys like Control_L+Alt_L+t".to_string(),
         },
         // Window Management (1)
@@ -264,7 +367,8 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
             name: "Abort Gesture".to_string(),
             tooltip: "Ignore gesture matching".to_string(),
         },
-    ]
+    ]);
+    options
 }
 
 pub fn fetch_kde_action_options() -> Vec<EditorActionOption> {
@@ -473,7 +577,55 @@ mod tests {
         )));
         assert!(!action_needs_parameter(&option(6, ActionType::Execute("firefox".to_string()))));
         assert!(!action_needs_parameter(&option(1, ActionType::Kill)));
+        assert!(!action_needs_parameter(&option(0, ActionType::Keypress("Control+C".to_string()))));
         assert!(!action_needs_parameter(&option(7, ActionType::Abort)));
+    }
+
+    #[test]
+    fn a_gesture_finds_its_standard_shortcut_before_the_generic_one() {
+        let options = get_static_action_options();
+        let find = |keys: &str| {
+            let action = ActionType::Keypress(keys.to_string());
+            options.iter().find(|opt| action_matches(&action, opt)).unwrap().name.clone()
+        };
+        assert_eq!(find("Control+C"), "Copy (Ctrl+C)");
+        assert_eq!(find("Control+Alt+T"), "Custom Keyboard Shortcut");
+    }
+
+    #[test]
+    fn standard_shortcuts_are_known_by_their_keys() {
+        assert_eq!(standard_shortcut_name("Control+C").as_deref(), Some("Copy (Ctrl+C)"));
+        assert_eq!(standard_shortcut_name("Control+Alt+T"), None);
+    }
+
+    #[test]
+    fn shortcut_names_write_keys_as_the_guidelines_do() {
+        for (keys, expected) in [
+            ("Shift+Control+S", "X (Shift+Ctrl+S)"),
+            ("Control+plus", "X (Ctrl++)"),
+            ("Control+minus", "X (Ctrl+-)"),
+            ("Control+question", "X (Ctrl+?)"),
+            ("Control+comma", "X (Ctrl+,)"),
+            ("Alt+Left", "X (Alt+←)"),
+            ("Alt+Return", "X (Alt+Return)"),
+            ("Page_Down", "X (PageDown)"),
+            ("F1", "X (F1)"),
+        ] {
+            assert_eq!(labelled_shortcut_name("X", keys), expected);
+        }
+    }
+
+    #[test]
+    fn standard_shortcuts_are_distinct_and_can_be_pressed() {
+        let mut seen = std::collections::HashSet::new();
+        let us = gestos::keymap::LayoutKeys::compile(&gestos::keymap::LayoutName::new("us", ""));
+        for (name, keys, _) in STANDARD_SHORTCUTS {
+            assert!(seen.insert(*keys), "{name} repeats {keys}");
+            assert!(gestos::uinput::parse_key_combo(keys).is_ok(), "{keys}");
+            if let Some(us) = &us {
+                assert!(gestos::uinput::parse_key_combo_on(keys, Some(us)).is_ok(), "{keys}");
+            }
+        }
     }
 
     #[test]

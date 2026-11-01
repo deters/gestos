@@ -8,7 +8,9 @@ use std::collections::{HashMap, HashSet};
 /// can use them with different values.
 fn action_identity(action: &ActionType) -> Option<String> {
     match action {
-        ActionType::Keypress(_) | ActionType::Click(_) => None,
+        ActionType::Keypress(keys) if keys.is_empty() => None,
+        ActionType::Keypress(keys) => Some(format!("keypress:{keys}")),
+        ActionType::Click(_) => None,
         ActionType::Execute(command) if command.is_empty() => None,
         ActionType::Execute(command) => Some(format!("execute:{command}")),
         ActionType::Gnome(key) => Some(format!("gnome:{}", key.trim_end_matches("-static"))),
@@ -120,9 +122,16 @@ pub fn find_suggestions(
         let shared_rank = action_identity(&option.action_type)
             .and_then(|identity| best_ranks.get(&identity).copied())
             .unwrap_or(*rank);
+        // Keyboard shortcuts stay together after the other actions, with the generic one first.
+        let (is_shortcut, is_named_shortcut) = match &option.action_type {
+            ActionType::Keypress(keys) => (true, !keys.is_empty()),
+            _ => (false, false),
+        };
         (
+            is_shortcut,
             shared_rank,
             matches!(option.action_type, ActionType::Gnome(_)),
+            is_named_shortcut,
             option.name.to_lowercase(),
         )
     });
@@ -318,4 +327,38 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn keyboard_shortcuts_stay_together_after_the_other_actions() {
+        let keys = |keys: &str| ActionType::Keypress(keys.to_string());
+        let options = [
+            option("Copy", keys("Control+C")),
+            option("Keyboard Shortcut", keys("")),
+            option("Zoom In", keys("Control+plus")),
+            option("Close Window", ActionType::Kill),
+            gnome("Volume up", "volume-up"),
+        ];
+        assert_eq!(
+            names(&find_suggestions(&options, &[], "")),
+            ["Close Window", "Volume up", "Keyboard Shortcut", "Copy", "Zoom In"]
+        );
+
+        let close = [
+            option("Close (Ctrl+W)", keys("Control+W")),
+            option("Maybe Close", ActionType::Kill),
+        ];
+        assert_eq!(
+            names(&find_suggestions(&close, &[], "close")),
+            ["Maybe Close", "Close (Ctrl+W)"]
+        );
+    }
+
+    #[test]
+    fn a_standard_shortcut_in_use_is_no_longer_suggested() {
+        let copy = option("Copy", ActionType::Keypress("Control+C".to_string()));
+        let used = [gesture(ActionType::Keypress("Control+C".to_string()))];
+        let other = [gesture(ActionType::Keypress("Control+V".to_string()))];
+        assert!(find_suggestions(std::slice::from_ref(&copy), &used, "copy").is_empty());
+        assert_eq!(find_suggestions(&[copy], &other, "copy").len(), 1);
+    }
 }

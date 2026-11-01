@@ -150,7 +150,7 @@ impl ActionType {
     pub fn get_icon_name(&self) -> &'static str {
         match self {
             ActionType::Execute(_) => "utilities-terminal-symbolic",
-            ActionType::Keypress(_) => "preferences-desktop-keyboard-shortcuts-symbolic",
+            ActionType::Keypress(_) => "input-keyboard-symbolic",
             ActionType::Gnome(_) => "preferences-system-symbolic",
             ActionType::Kde(_, _) => "preferences-system-symbolic",
             ActionType::Iconify => "window-minimize-symbolic",
