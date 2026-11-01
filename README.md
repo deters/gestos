@@ -1,15 +1,14 @@
 # Gestos
 
-Mouse gestures for Linux. Hold the right mouse button, draw a shape, and let go to close a window, switch workspace, send a keyboard shortcut, or run a command.
+## Get started
 
-Gestos supports GNOME, KDE Plasma, XFCE, Sway, and Hyprland. It was previously called MyGestures, so see [Upgrading from MyGestures](#upgrading-from-mygestures) if you're coming from there.
+1. [Install Gestos](#install), then open it from your applications menu, or run `gestos`.
+2. Click **+**, or search for what you want a gesture to do.
+3. Draw the gesture and click **Save**.
+4. Click **Start**. The first time, gestures are also set to start when you log in, and a note lets you undo that.
+5. Hold the right mouse button anywhere, draw your gesture, and let go.
 
 ![The Gestos main window, listing gestures with the shape that triggers each one](docs/screenshots/main-window.jpg)
-
-- **Start from your own gestures.** Gestos comes with none, so the ones you have are the ones you chose.
-- **Search to create.** Type what you want to do, and Gestos offers the matching actions.
-- **Choose between similar gestures.** If a drawing could mean more than one gesture, you pick at the pointer.
-- **Your right click still works.** A short click is passed through as a normal click.
 
 ## Install
 
@@ -39,14 +38,6 @@ meson setup build --buildtype=release
 meson compile -C build
 sudo meson install -C build
 ```
-
-## Get started
-
-1. Open **Gestos** from your applications menu, or run `gestos`.
-2. Click **+**, or search for what you want a gesture to do.
-3. Draw the gesture and click **Save**.
-4. Click **Start**. The first time, gestures are also set to start when you log in, and a note lets you undo that.
-5. Hold the right mouse button anywhere, draw your gesture, and let go.
 
 ## Using Gestos
 
