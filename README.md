@@ -2,7 +2,7 @@
 
 ## Get started
 
-[Install Gestos](#install) and open it. Then search for what you want a gesture to do, and choose an action:
+Search some action and create a gesture:
 
 ![Searching for "screen" lists matching actions to create a gesture for](docs/screenshots/search-suggestions.jpg)
 
