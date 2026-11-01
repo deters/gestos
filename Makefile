@@ -24,7 +24,10 @@ install:
 
 uninstall:
 	@if [ -d "$(BUILDDIR)" ]; then \
+		systemctl disable --now gestos-input.socket 2>/dev/null || true; \
+		systemctl stop 'gestos-input@*.service' 2>/dev/null || true; \
 		ninja -C $(BUILDDIR) uninstall; \
+		systemctl daemon-reload 2>/dev/null || true; \
 	else \
 		echo "Build directory not found, cannot uninstall automatically."; \
 	fi

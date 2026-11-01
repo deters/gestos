@@ -69,9 +69,6 @@ jobs:
           apt-get update
           apt-get install -y build-essential devscripts debhelper libevdev-dev libgtk-4-dev libc6-dev pkg-config git curl
           
-          # Ensure 'input' group exists in the build container (required for chgrp during packaging)
-          getent group input >/dev/null || groupadd -r input
-          
           # Set CARGO_HOME to a workspace-relative directory so it can be cached
           export CARGO_HOME=$GITHUB_WORKSPACE/.cargo
           
