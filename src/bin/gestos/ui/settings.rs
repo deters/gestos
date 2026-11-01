@@ -414,7 +414,10 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
                                 false,
                                 move || {
                                     let default_path = gestos::config::get_default_config_path();
-                                    if let Err(e) = std::fs::copy(&path, &default_path) {
+                                    let imported = std::fs::copy(&path, &default_path).and_then(|_| {
+                                        gestos::config::remove_write_access_for_others(&default_path)
+                                    });
+                                    if let Err(e) = imported {
                                         show_error_dialog(&parent_confirm, &format!("Failed to copy config file: {}", e));
                                     } else {
                                         new_config.user_config_path = default_path;

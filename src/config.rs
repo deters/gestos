@@ -705,12 +705,12 @@ pub fn initialize_user_config_if_missing() -> std::io::Result<PathBuf> {
 }
 
 /// Why a config file can't be trusted, if so. Its gestures can run commands as this user, so
-/// nobody else may be able to change it, or replace it through its folder. The system's own
-/// account owning it is fine, since that account could do anything anyway.
+/// nobody else may be able to change it, or replace it through a folder on the way to it. The
+/// system's own account owning something is fine, since that account could do anything anyway.
 fn config_permission_problem(
     path: &Path,
     file: &fs::Metadata,
-    folder: Option<&fs::Metadata>,
+    folders: &[fs::Metadata],
     uid: u32,
 ) -> Option<String> {
     use std::os::unix::fs::MetadataExt;
@@ -723,13 +723,34 @@ fn config_permission_problem(
             "Refusing to use {display}: other users can change it. To fix this, run: chmod go-w {display}"
         ));
     }
-    // The sticky bit keeps others from replacing a file they don't own, as in /tmp.
-    if folder.is_some_and(|folder| folder.mode() & 0o002 != 0 && folder.mode() & 0o1000 == 0) {
-        return Some(format!(
-            "Refusing to use {display}: any user can change the folder it's in."
-        ));
+    for folder in folders {
+        if folder.uid() != uid && folder.uid() != 0 {
+            return Some(format!(
+                "Refusing to use {display}: a folder on the way to it belongs to another user."
+            ));
+        }
+        // The sticky bit keeps others from replacing a file they don't own, as in /tmp.
+        if folder.mode() & 0o002 != 0 && folder.mode() & 0o1000 == 0 {
+            return Some(format!(
+                "Refusing to use {display}: any user can change a folder on the way to it."
+            ));
+        }
     }
     None
+}
+
+/// Every folder on the way to a config: through the name it was given, which can be a symlink,
+/// and to the file itself.
+fn folders_leading_to(path: &Path, target: &Path) -> Vec<fs::Metadata> {
+    let given = std::env::current_dir()
+        .map(|current| current.join(path))
+        .unwrap_or_else(|_| path.to_path_buf());
+    given
+        .ancestors()
+        .skip(1)
+        .chain(target.ancestors().skip(1))
+        .filter_map(|folder| fs::metadata(folder).ok())
+        .collect()
 }
 
 /// Gives `file` the permissions of `source`, without letting others write to it, which would make
@@ -740,6 +761,11 @@ fn keep_private_from_other_users(source: &Path, file: &Path) -> std::io::Result<
     fs::set_permissions(file, fs::Permissions::from_mode(mode & !0o022))
 }
 
+/// For a config that arrived from elsewhere, such as an import, whose permissions came with it.
+pub fn remove_write_access_for_others(path: &Path) -> std::io::Result<()> {
+    keep_private_from_other_users(path, path)
+}
+
 impl Configuration {
     /// Loads a config whose gestures are going to run, which needs it to be safe from other users.
     pub fn load_trusted<P: AsRef<Path>>(path: P) -> Result<Self, String> {
@@ -747,9 +773,9 @@ impl Configuration {
         let unreadable = |e: std::io::Error| format!("Could not read {}: {}", path.display(), e);
         let target = fs::canonicalize(path).map_err(unreadable)?;
         let file = fs::metadata(&target).map_err(unreadable)?;
-        let folder = target.parent().and_then(|parent| fs::metadata(parent).ok());
+        let folders = folders_leading_to(path, &target);
         let uid = unsafe { libc::getuid() };
-        if let Some(problem) = config_permission_problem(path, &file, folder.as_ref(), uid) {
+        if let Some(problem) = config_permission_problem(path, &file, &folders, uid) {
             return Err(problem);
         }
         Self::load_from_file(path)
@@ -1325,19 +1351,69 @@ mod tests {
         set_mode(&file.0, 0o644);
         let metadata = fs::metadata(&file.0).unwrap();
         let mine = unsafe { libc::getuid() };
-        assert!(config_permission_problem(&file.0, &metadata, None, mine).is_none());
-        let problem = config_permission_problem(&file.0, &metadata, None, mine + 1);
+        assert!(config_permission_problem(&file.0, &metadata, &[], mine).is_none());
         if mine != 0 {
+            let problem = config_permission_problem(&file.0, &metadata, &[], mine + 1);
             assert!(problem.unwrap().contains("another user"));
         }
 
         let dir = TempDir::new("trust-folder");
         set_mode(&dir.0, 0o777);
         let open = fs::metadata(&dir.0).unwrap();
-        assert!(config_permission_problem(&file.0, &metadata, Some(&open), mine).is_some());
+        assert!(config_permission_problem(&file.0, &metadata, &[open], mine).is_some());
         set_mode(&dir.0, 0o1777);
         let sticky = fs::metadata(&dir.0).unwrap();
-        assert!(config_permission_problem(&file.0, &metadata, Some(&sticky), mine).is_none());
+        assert!(config_permission_problem(&file.0, &metadata, &[sticky], mine).is_none());
+        if mine != 0 {
+            set_mode(&dir.0, 0o755);
+            let owned = fs::metadata(&dir.0).unwrap();
+            let problem = config_permission_problem(&file.0, &metadata, &[owned], mine + 1);
+            assert!(problem.unwrap().contains("another user"));
+        }
+    }
+
+    #[test]
+    fn an_open_folder_anywhere_on_the_way_is_refused() {
+        let dir = TempDir::new("trust-chain");
+        let inner = dir.0.join("private");
+        fs::create_dir_all(&inner).unwrap();
+        let config = inner.join("gestos.yaml");
+        fs::write(&config, "global:\n").unwrap();
+        set_mode(&config, 0o644);
+        set_mode(&inner, 0o755);
+        set_mode(&dir.0, 0o755);
+        assert!(Configuration::load_trusted(&config).is_ok());
+        set_mode(&dir.0, 0o777);
+        let problem = Configuration::load_trusted(&config).unwrap_err();
+        assert!(problem.contains("any user"), "{problem}");
+    }
+
+    #[test]
+    fn a_symlink_in_an_open_folder_is_refused() {
+        let dir = TempDir::new("trust-link");
+        let real = dir.0.join("real");
+        let open = dir.0.join("open");
+        fs::create_dir_all(&real).unwrap();
+        fs::create_dir_all(&open).unwrap();
+        let config = real.join("gestos.yaml");
+        fs::write(&config, "global:\n").unwrap();
+        set_mode(&config, 0o644);
+        set_mode(&real, 0o755);
+        set_mode(&open, 0o777);
+        set_mode(&dir.0, 0o755);
+        let link = open.join("gestos.yaml");
+        std::os::unix::fs::symlink(&config, &link).unwrap();
+        assert!(Configuration::load_trusted(&config).is_ok());
+        assert!(Configuration::load_trusted(&link).is_err());
+    }
+
+    #[test]
+    fn an_imported_config_loses_write_access_for_others() {
+        let file = TempConfig::new("import", "global:\n");
+        set_mode(&file.0, 0o666);
+        assert!(Configuration::load_trusted(&file.0).is_err());
+        remove_write_access_for_others(&file.0).unwrap();
+        assert!(Configuration::load_trusted(&file.0).is_ok());
     }
 
     #[test]
