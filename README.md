@@ -51,18 +51,11 @@ If you're updating an older install, run the install step again. It removes the 
 
 ## Security
 
-Reading a mouse and pressing keys for you normally takes broad access to your input devices, so that access is kept apart from everything else:
+Mouse gestures need access to your input devices, so Gestos keeps that access in a small, sandboxed system service, apart from everything else. The rest of the app runs as you, with no special rights.
 
-- **`gestos-input`** is a small system service, and the only part that can reach input devices. It holds the mouse, forwards the pointer, records gesture paths, and sends keys. It's sandboxed by systemd, runs only while gestures are on, and only serves the user active on the seat.
-- **`gestosd`** runs as you, with no special rights, and can't run as root. It reads your config, matches gestures, and runs their actions.
+The service never passes on what you type, and only works for the user at the screen. Gestures are ignored while the screen is locked, on desktops that report it.
 
-The service never reads key events. It only asks a keyboard which modifiers are down, only if a gesture uses them, and reports them only around a gesture you just drew.
-
-Some limits to know about:
-
-- Any non-sandboxed program running as you can use the service while you're the active user. It could send keys or see gesture paths, though not read what you type.
-- Gestures can run commands, so `gestosd` refuses a config that other users could change.
-- Gestures are ignored while the screen is locked, on desktops that report being locked to logind. GNOME does. Some lock screens on Sway don't.
+Programs you run can still ask the service to press keys, so it protects you from other users and from keylogging, not from software you already run.
 
 ## Development
 
