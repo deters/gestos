@@ -1,12 +1,13 @@
 use gestos::chooser::{encode_entries, parse_choice, ChooserEntry};
 use gestos::config::{ActionType, Configuration, Gesture};
+use gestos::modifiers::Modifiers;
 use gestos::ipc::DaemonIpc;
 use gestos::wayland::WaylandContext;
 use std::fs;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::os::unix::process::ExitStatusExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,6 +31,18 @@ const EXIT_PERMANENT_ERROR: i32 = 2;
 const DBUS_PATH: &str = "/io/github/deters/Gestos/Daemon";
 const LEGACY_DBUS_NAME: &str = "org.mygestures.Daemon";
 const LEGACY_DBUS_PATH: &str = "/org/mygestures/Daemon";
+// Keeps GNOME from treating a released Super as a tap, which opens the Overview. It's F24, which
+// nothing normally uses.
+#[cfg(target_os = "linux")]
+const UNUSED_KEY: u16 = 194;
+#[cfg(target_os = "linux")]
+const MODIFIER_RELEASE_TIMEOUT: Duration = Duration::from_millis(1500);
+#[cfg(target_os = "linux")]
+const MODIFIER_RELEASE_POLL: Duration = Duration::from_millis(20);
+// Gives udev time to set a new device's permissions.
+#[cfg(target_os = "linux")]
+const KEYBOARD_SETTLE_DELAY: Duration = Duration::from_millis(500);
+
 const CHOOSER_EXIT_CANCELLED: i32 = 1;
 const CHOOSER_FOCUS_RETURN_DELAY_MILLIS: u64 = 400;
 const LEGACY_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -236,12 +249,61 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
 /// Runs a gesture's actions in order on their own thread, because they can sleep or wait on a
 /// child process (`swaylock` runs until the screen is unlocked).
 #[cfg(target_os = "linux")]
+type SharedKeyboards = std::sync::Arc<std::sync::Mutex<gestos::keyboards::Keyboards>>;
+
+#[cfg(target_os = "linux")]
+fn held_modifiers(keyboards: &Option<SharedKeyboards>) -> Modifiers {
+    keyboards
+        .as_ref()
+        .and_then(|keyboards| keyboards.lock().ok().map(|keyboards| keyboards.held()))
+        .unwrap_or_default()
+}
+
+/// A shortcut sent while a modifier is still held would combine with it and mean something else.
+#[cfg(target_os = "linux")]
+fn wait_for_modifier_release(keyboards: &Option<SharedKeyboards>) {
+    let deadline = Instant::now() + MODIFIER_RELEASE_TIMEOUT;
+    while !held_modifiers(keyboards).is_empty() && Instant::now() < deadline {
+        std::thread::sleep(MODIFIER_RELEASE_POLL);
+    }
+}
+
+/// Runs this program again, which regains its rights just long enough to open keyboards. Rights
+/// are dropped for good after startup, so this is the only way to open one that appears later.
+#[cfg(target_os = "linux")]
+fn restart_daemon() -> ! {
+    std::thread::sleep(KEYBOARD_SETTLE_DELAY);
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let error = std::env::current_exe()
+        .map(|exe| Command::new(exe).args(&args).exec())
+        .unwrap_or_else(|e| e);
+    eprintln!("gestosd: Could not restart: {}", error);
+    std::process::exit(1);
+}
+
+/// Watches for new input devices, without needing any rights.
+#[cfg(target_os = "linux")]
+fn watch_input_devices() -> Option<fs::File> {
+    let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+    if fd < 0 {
+        return None;
+    }
+    let file = unsafe { <fs::File as std::os::fd::FromRawFd>::from_raw_fd(fd) };
+    let watched = unsafe {
+        libc::inotify_add_watch(fd, c"/dev/input".as_ptr(), libc::IN_CREATE)
+    };
+    (watched >= 0).then_some(file)
+}
+
+#[cfg(target_os = "linux")]
 fn spawn_gesture_actions(
     actions: Vec<ActionType>,
     wayland_ctx: WaylandContext,
     uinput: Option<gestos::uinput::UinputDevice>,
+    wait_for_release: Option<SharedKeyboards>,
 ) {
     std::thread::spawn(move || {
+        wait_for_modifier_release(&wait_for_release);
         for action in &actions {
             if let ActionType::Click(btn) = action {
                 if let Some(ref u) = uinput {
@@ -274,11 +336,14 @@ fn grab_device(dev: &mut evdev::Device) -> std::io::Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn gesture_templates(config: &Configuration) -> Vec<(String, Vec<gestos::protractor::Point2D>)> {
+fn gesture_templates(
+    config: &Configuration,
+    modifiers: Modifiers,
+) -> Vec<(String, Vec<gestos::protractor::Point2D>)> {
     config
         .gestures
         .iter()
-        .filter(|g| !g.is_deleted)
+        .filter(|g| !g.is_deleted && g.modifiers == modifiers)
         .map(|g| (g.name.clone(), g.points.clone()))
         .collect()
 }
@@ -287,23 +352,26 @@ fn gesture_templates(config: &Configuration) -> Vec<(String, Vec<gestos::protrac
 fn dispatch_gesture(
     points: &[gestos::protractor::Point2D],
     config: &Configuration,
-    templates: &[(String, Vec<gestos::protractor::Point2D>)],
+    modifiers: Modifiers,
+    keyboards: &Option<SharedKeyboards>,
     signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
     wayland_ctx: &WaylandContext,
     uinput: &Option<gestos::uinput::UinputDevice>,
 ) {
-    let candidates: Vec<Gesture> = gestos::protractor::match_gesture_candidates(points, templates)
+    let templates = gesture_templates(config, modifiers);
+    let candidates: Vec<Gesture> = gestos::protractor::match_gesture_candidates(points, &templates)
         .iter()
         .filter_map(|name| config.gestures.iter().find(|g| &g.name == name).cloned())
         .collect();
 
     match candidates.len() {
         0 => println!("Gesture failed: did not match any known template."),
-        1 => run_gesture(&candidates[0], signals, wayland_ctx, uinput),
+        1 => run_gesture(&candidates[0], keyboards, signals, wayland_ctx, uinput),
         _ => {
             let signals = signals.clone();
             let wayland_ctx = wayland_ctx.clone();
             let uinput = uinput.clone();
+            let keyboards = keyboards.clone();
             std::thread::spawn(move || {
                 if let Some(gesture) = choose_gesture(candidates) {
                     // Actions like closing a window act on the focused one, which only gets
@@ -311,7 +379,7 @@ fn dispatch_gesture(
                     let delay = chooser_focus_return_delay();
                     println!("Waiting {} ms for focus to return.", delay.as_millis());
                     std::thread::sleep(delay);
-                    run_gesture(&gesture, &signals, &wayland_ctx, &uinput);
+                    run_gesture(&gesture, &keyboards, &signals, &wayland_ctx, &uinput);
                 }
             });
         }
@@ -379,6 +447,7 @@ fn choose_gesture(mut candidates: Vec<Gesture>) -> Option<Gesture> {
 #[cfg(target_os = "linux")]
 fn run_gesture(
     gesture: &Gesture,
+    keyboards: &Option<SharedKeyboards>,
     signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
     wayland_ctx: &WaylandContext,
     uinput: &Option<gestos::uinput::UinputDevice>,
@@ -402,7 +471,17 @@ fn run_gesture(
         icon_name,
     ));
 
-    spawn_gesture_actions(gesture.actions.clone(), wayland_ctx.clone(), uinput.clone());
+    let wait_for_release = if gesture.modifiers.is_empty() {
+        None
+    } else {
+        keyboards.clone()
+    };
+    spawn_gesture_actions(
+        gesture.actions.clone(),
+        wayland_ctx.clone(),
+        uinput.clone(),
+        wait_for_release,
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -492,6 +571,13 @@ fn run_grabber(
         }
     }
 
+    // Opened now, while there are rights to, and only if a gesture needs them.
+    let keyboards: Option<SharedKeyboards> = config.uses_modifiers().then(|| {
+        let keyboards = gestos::keyboards::Keyboards::open();
+        println!("Reading modifier state from {} keyboards.", keyboards.count());
+        std::sync::Arc::new(std::sync::Mutex::new(keyboards))
+    });
+
     // Drop the elevated GID for good, including the saved GID that setegid would leave behind
     let rgid = nix::unistd::getgid();
     let egid = nix::unistd::getegid();
@@ -516,7 +602,9 @@ fn run_grabber(
 
     let mut recognizer = GestureRecognizer::new(threshold / 10.0, min_path_length);
     let mut pending_frame: Vec<evdev::InputEvent> = Vec::new();
-    let mut templates = gesture_templates(&config);
+    let mut held_at_press = Modifiers::default();
+    let mut restart_requested = false;
+    let mut input_watch = keyboards.as_ref().and_then(|_| watch_input_devices());
 
     // Event loop
     loop {
@@ -524,7 +612,7 @@ fn run_grabber(
             println!("gestosd: Reloading configuration dynamically...");
             if let Some(new_config) = Configuration::load_from_file(&config.user_config_path) {
                 config = new_config;
-                templates = gesture_templates(&config);
+                restart_requested |= keyboards.is_none() && config.uses_modifiers();
                 println!("gestosd: Configuration reloaded successfully.");
             } else {
                 eprintln!(
@@ -532,6 +620,11 @@ fn run_grabber(
                     config.user_config_path.display()
                 );
             }
+        }
+
+        if restart_requested && !recognizer.is_drawing() {
+            println!("gestosd: Restarting to open keyboards.");
+            restart_daemon();
         }
 
         let mut poll_fds = [
@@ -542,6 +635,12 @@ fn run_grabber(
             },
             libc::pollfd {
                 fd: wake_reader.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            // A negative descriptor is ignored.
+            libc::pollfd {
+                fd: input_watch.as_ref().map_or(-1, |watch| watch.as_raw_fd()),
                 events: libc::POLLIN,
                 revents: 0,
             },
@@ -556,6 +655,16 @@ fn run_grabber(
         if poll_fds[1].revents != 0 {
             let mut drained = [0u8; 64];
             let _ = wake_reader.read(&mut drained);
+        }
+        if poll_fds[2].revents != 0 {
+            if let Some(watch) = input_watch.as_mut() {
+                let mut buffer = [0u8; 4096];
+                if let Ok(length) = watch.read(&mut buffer) {
+                    restart_requested |= gestos::keyboards::created_event_nodes(&buffer[..length])
+                        .iter()
+                        .any(|node| gestos::keyboards::is_physical_keyboard(node));
+                }
+            }
         }
         if poll_fds[0].revents == 0 {
             continue;
@@ -574,6 +683,7 @@ fn run_grabber(
 
             if ev_type == EventType::KEY && ev_code == target_button.0 {
                 if ev_value == 1 {
+                    held_at_press = held_modifiers(&keyboards);
                     let start = recognizer.press();
                     println!("Gesture drawing started at ({:.1}, {:.1})", start.x, start.y);
                     let _ = signals.try_send(DaemonSignal::GestureStarted(start.x, start.y));
@@ -583,8 +693,19 @@ fn run_grabber(
 
                     if let Some(points) = path {
                         println!("Gesture drawing finished. Path points: {}", points.len());
+                        if held_at_press.super_key {
+                            if let Some(ref u) = uinput {
+                                u.tap_key(UNUSED_KEY);
+                            }
+                        }
                         dispatch_gesture(
-                            &points, &config, &templates, &signals, &wayland_ctx, &uinput,
+                            &points,
+                            &config,
+                            held_at_press,
+                            &keyboards,
+                            &signals,
+                            &wayland_ctx,
+                            &uinput,
                         );
                     } else {
                         println!("Gesture failed: path too short or too few points.");
@@ -1105,6 +1226,43 @@ mod tests {
         let body = reply.body();
         let version: zbus::zvariant::Value = body.deserialize().unwrap();
         assert_eq!(version, zbus::zvariant::Value::from(env!("CARGO_PKG_VERSION")));
+    }
+
+    fn sample_gesture(name: &str, modifiers: &str) -> Gesture {
+        Gesture {
+            id: name.to_string(),
+            name: name.to_string(),
+            raw_movement: String::new(),
+            points: Vec::new(),
+            actions: Vec::new(),
+            is_custom: true,
+            is_modified: false,
+            is_deleted: false,
+            modifiers: Modifiers::parse(modifiers),
+        }
+    }
+
+    #[test]
+    fn only_gestures_with_exactly_the_held_modifiers_can_match() {
+        let config = Configuration {
+            gestures: vec![
+                sample_gesture("plain", ""),
+                sample_gesture("ctrl", "ctrl"),
+                sample_gesture("ctrl-alt", "ctrl+alt"),
+            ],
+            apps: Vec::new(),
+            user_config_path: PathBuf::new(),
+        };
+        let names = |modifiers: &str| -> Vec<String> {
+            gesture_templates(&config, Modifiers::parse(modifiers))
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        };
+        assert_eq!(names(""), ["plain"]);
+        assert_eq!(names("ctrl"), ["ctrl"]);
+        assert_eq!(names("ctrl+alt"), ["ctrl-alt"]);
+        assert!(names("shift").is_empty());
     }
 
     #[test]

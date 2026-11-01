@@ -247,6 +247,12 @@ impl UinputDevice {
         }
     }
 
+    /// Presses and releases a single key.
+    pub fn tap_key(&self, code: u16) {
+        self.emit(&[evdev::InputEvent::new(evdev::EventType::KEY.0, code, 1)]);
+        self.emit(&[evdev::InputEvent::new(evdev::EventType::KEY.0, code, 0)]);
+    }
+
     /// Forwards one input frame, without its SYN_REPORT.
     pub fn forward_frame(&self, events: &[evdev::InputEvent]) {
         self.emit(events);

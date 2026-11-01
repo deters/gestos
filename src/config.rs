@@ -1,3 +1,4 @@
+use crate::modifiers::Modifiers;
 use crate::protractor::Point2D;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -304,6 +305,8 @@ impl ActionsVecOrString {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GestureConfig {
     pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modifiers: Option<String>,
     #[serde(rename = "move")]
     pub movement_expr: Option<String>,
     #[serde(rename = "do")]
@@ -342,6 +345,7 @@ pub struct Gesture {
     pub is_custom: bool,
     pub is_modified: bool,
     pub is_deleted: bool,
+    pub modifiers: Modifiers,
 }
 
 #[derive(Debug, Clone)]
@@ -624,6 +628,11 @@ impl Configuration {
                     .movement_expr
                     .unwrap_or_else(|| "0,0 0,0".to_string());
                 let points = parse_points(&raw_movement);
+                let modifiers = gest_cfg
+                    .modifiers
+                    .as_deref()
+                    .map(Modifiers::parse)
+                    .unwrap_or_default();
 
                 let matched_pos = if let Some(ref id) = gest_cfg.id {
                     self.gestures.iter().position(|g| &g.id == id)
@@ -644,6 +653,7 @@ impl Configuration {
                     existing.points = points;
                     existing.actions = actions;
                     existing.is_deleted = is_abort;
+                    existing.modifiers = modifiers;
                 } else {
                     let id = gest_cfg.id.clone().unwrap_or_else(|| {
                         if is_user {
@@ -661,6 +671,7 @@ impl Configuration {
                         is_custom: is_user,
                         is_modified: false,
                         is_deleted: is_abort,
+                        modifiers,
                     });
                 }
             }
@@ -671,6 +682,13 @@ impl Configuration {
         }
 
         true
+    }
+
+    /// Whether any gesture needs a modifier held, which is the only reason to open keyboards.
+    pub fn uses_modifiers(&self) -> bool {
+        self.gestures
+            .iter()
+            .any(|gesture| !gesture.is_deleted && !gesture.modifiers.is_empty())
     }
 
     fn to_yaml(&self) -> Result<String, serde_yaml::Error> {
@@ -684,6 +702,7 @@ impl Configuration {
             };
             let entry = GestureConfig {
                 id: Some(g.id.clone()),
+                modifiers: (!g.modifiers.is_empty()).then(|| g.modifiers.to_string()),
                 movement_expr: Some(g.raw_movement.clone()),
                 action_expr,
             };
@@ -954,6 +973,7 @@ mod tests {
             is_custom: true,
             is_modified: false,
             is_deleted: false,
+            modifiers: Modifiers::default(),
         }
     }
 
@@ -1046,6 +1066,25 @@ mod tests {
         fs::remove_file(&link).unwrap();
         assert!(is_link);
         assert!(saved.contains("One"));
+    }
+
+    #[test]
+    fn saving_keeps_a_gestures_modifiers() {
+        let mut with_modifiers = gesture("Held", vec![ActionType::Kill]);
+        with_modifiers.modifiers = Modifiers::parse("ctrl+super");
+        let reloaded = save_and_reload(
+            "modifiers",
+            vec![with_modifiers.clone(), gesture("Plain", vec![ActionType::Raise])],
+        );
+        assert_eq!(reloaded.gestures[0].modifiers, with_modifiers.modifiers);
+        assert!(reloaded.gestures[1].modifiers.is_empty());
+        assert!(reloaded.uses_modifiers());
+    }
+
+    #[test]
+    fn a_config_without_modifiers_does_not_use_them() {
+        let plain = save_and_reload("plain", vec![gesture("Plain", vec![ActionType::Raise])]);
+        assert!(!plain.uses_modifiers());
     }
 
     #[test]

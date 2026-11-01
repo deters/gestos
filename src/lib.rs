@@ -2,6 +2,8 @@ pub mod chooser;
 pub mod config;
 pub mod gesture;
 pub mod ipc;
+pub mod keyboards;
+pub mod modifiers;
 pub mod protractor;
 pub mod uinput;
 pub mod wayland;

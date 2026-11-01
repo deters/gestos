@@ -30,6 +30,8 @@ cargo_sources = files(
   'src/config.rs',
   'src/gesture.rs',
   'src/ipc.rs',
+  'src/keyboards.rs',
+  'src/modifiers.rs',
   'src/protractor.rs',
   'src/uinput.rs',
   'src/wayland.rs',

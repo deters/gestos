@@ -27,6 +27,10 @@ impl GestureRecognizer {
         }
     }
 
+    pub fn is_drawing(&self) -> bool {
+        self.drawing
+    }
+
     pub fn move_by(&mut self, dx: f64, dy: f64) {
         self.x += dx;
         self.y += dy;

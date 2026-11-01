@@ -5,6 +5,7 @@ use gtk4 as gtk;
 use std::rc::Rc;
 use std::cell::RefCell;
 use gestos::config::{ActionType, Gesture};
+use gestos::modifiers::Modifiers;
 use gestos::config::generate_unique_id;
 use crate::state::{AppState, EditorActionOption, CATEGORY_NAMES};
 use crate::actions::{action_needs_parameter, fetch_gnome_action_options, fetch_kde_action_options, get_static_action_options, action_matches};
@@ -40,6 +41,57 @@ pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> Strin
         _ => opt.name.clone(),
     }
 }
+/// The modifier keys a gesture needs. Holding them while drawing sets them too.
+#[derive(Clone)]
+struct ModifierToggles {
+    ctrl: gtk::ToggleButton,
+    alt: gtk::ToggleButton,
+    shift: gtk::ToggleButton,
+    super_key: gtk::ToggleButton,
+}
+
+impl ModifierToggles {
+    fn new(initial: Modifiers) -> Self {
+        let toggles = ModifierToggles {
+            ctrl: gtk::ToggleButton::with_label("Ctrl"),
+            alt: gtk::ToggleButton::with_label("Alt"),
+            shift: gtk::ToggleButton::with_label("Shift"),
+            super_key: gtk::ToggleButton::with_label("Super"),
+        };
+        toggles.set(initial);
+        toggles
+    }
+
+    fn set(&self, modifiers: Modifiers) {
+        self.ctrl.set_active(modifiers.ctrl);
+        self.alt.set_active(modifiers.alt);
+        self.shift.set_active(modifiers.shift);
+        self.super_key.set_active(modifiers.super_key);
+    }
+
+    fn get(&self) -> Modifiers {
+        Modifiers {
+            ctrl: self.ctrl.is_active(),
+            alt: self.alt.is_active(),
+            shift: self.shift.is_active(),
+            super_key: self.super_key.is_active(),
+        }
+    }
+
+    fn buttons(&self) -> [&gtk::ToggleButton; 4] {
+        [&self.ctrl, &self.alt, &self.shift, &self.super_key]
+    }
+}
+
+fn held_modifiers(state: gtk::gdk::ModifierType) -> Modifiers {
+    Modifiers {
+        ctrl: state.contains(gtk::gdk::ModifierType::CONTROL_MASK),
+        alt: state.contains(gtk::gdk::ModifierType::ALT_MASK),
+        shift: state.contains(gtk::gdk::ModifierType::SHIFT_MASK),
+        super_key: state.contains(gtk::gdk::ModifierType::SUPER_MASK),
+    }
+}
+
 /// Shows the parameter row only for an action that takes one, in the form that action uses.
 fn show_action_parameter(
     opt: &EditorActionOption,
@@ -93,7 +145,7 @@ fn open_editor(
     dialog.set_modal(true);
     let title_text = if target_gesture.is_some() { "Edit Gesture" } else { "Add Gesture" };
     dialog.set_title(Some(title_text));
-    dialog.set_default_size(700, 500);
+    dialog.set_default_size(700, 560);
 
     let esc_controller = gtk::EventControllerKey::new();
     let dialog_esc = dialog.clone();
@@ -198,12 +250,25 @@ fn open_editor(
     conflict_label.set_wrap(true);
     conflict_box.append(&conflict_label);
 
+    let modifier_toggles = ModifierToggles::new(
+        target_gesture
+            .as_ref()
+            .map(|gesture| gesture.modifiers)
+            .unwrap_or_default(),
+    );
+
     let canvas_clone = canvas.clone();
     let pts_drag = Rc::clone(&recorded_points);
     let rec_drag = Rc::clone(&is_recording);
     let conflict_box_begin = conflict_box.clone();
-    drag.connect_drag_begin(move |_, start_x, start_y| {
+    let toggles_begin = modifier_toggles.clone();
+    drag.connect_drag_begin(move |gesture, start_x, start_y| {
         *rec_drag.borrow_mut() = true;
+        // Nothing held keeps what the toggles say, so they can be set before drawing.
+        let held = held_modifiers(gesture.current_event_state());
+        if !held.is_empty() {
+            toggles_begin.set(held);
+        }
         let mut pts = pts_drag.borrow_mut();
         pts.clear();
         pts.push(Point2D {
@@ -253,6 +318,7 @@ fn open_editor(
     let edited_gesture_name = target_gesture.as_ref().map(|g| g.name.clone());
     let conflict_box_end = conflict_box.clone();
     let conflict_label_end = conflict_label.clone();
+    let toggles_end = modifier_toggles.clone();
     drag.connect_drag_end(move |_, _, _| {
         *rec_drag3.borrow_mut() = false;
         canvas_clone3.queue_draw();
@@ -261,11 +327,13 @@ fn open_editor(
         let pts = pts_drag_end.borrow();
         if pts.len() >= 2 {
             let state = state_clone_drag.borrow();
+            let drawn_modifiers = toggles_end.get();
             let templates: Vec<(String, Vec<Point2D>)> = state
                 .config
                 .gestures
                 .iter()
                 .filter(|g| !g.is_deleted)
+                .filter(|g| g.modifiers == drawn_modifiers)
                 .filter(|g| {
                     if let Some(ref name) = edited_gesture_name {
                         g.name != *name
@@ -376,6 +444,19 @@ fn open_editor(
 
     action_details_row.append(&entry_container);
     settings_list.append(&action_details_row);
+
+    let modifiers_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    modifiers_row.add_css_class("settings-row");
+    let modifiers_label = gtk::Label::new(Some("Modifier Keys"));
+    modifiers_label.add_css_class("status-label");
+    modifiers_label.set_halign(gtk::Align::Start);
+    modifiers_label.set_hexpand(true);
+    modifiers_row.append(&modifiers_label);
+    for button in modifier_toggles.buttons() {
+        button.set_tooltip_text(Some("Hold this key while drawing the gesture to use it"));
+        modifiers_row.append(button);
+    }
+    settings_list.append(&modifiers_row);
 
     let selected_action: Rc<RefCell<Option<EditorActionOption>>> = Rc::new(RefCell::new(None));
 
@@ -728,7 +809,9 @@ fn open_editor(
     let dialog_clone2 = dialog.clone();
     let selected_action_save = Rc::clone(&selected_action);
 
+    let toggles_save = modifier_toggles.clone();
     save_btn.connect_clicked(move |_| {
+        let modifiers = toggles_save.get();
         let name = name_entry.text().to_string();
         if name.trim().is_empty() {
             println!("Gesture save failed: Name is empty.");
@@ -788,12 +871,14 @@ fn open_editor(
                         );
                         return;
                     }
+                    state.config.gestures[pos].modifiers = modifiers;
                     state.config.gestures[pos].name = name.clone();
                     state.config.gestures[pos].raw_movement = raw_movement;
                     state.config.gestures[pos].points = pts.clone();
                     state.config.gestures[pos].actions = vec![action];
                     println!("Gesture renamed successfully: {} -> {}", lookup_name, name);
                 } else {
+                    state.config.gestures[pos].modifiers = modifiers;
                     state.config.gestures[pos].raw_movement = raw_movement;
                     state.config.gestures[pos].points = pts.clone();
                     state.config.gestures[pos].actions = vec![action];
@@ -825,6 +910,7 @@ fn open_editor(
                 is_custom: true,
                 is_modified: false,
                 is_deleted: false,
+                modifiers,
             });
             state.newly_added_gestures.push(name.clone());
         }

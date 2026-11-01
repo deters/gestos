@@ -397,6 +397,17 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         draw_gesture_path(cr, &pts_clone, width as f64, height as f64, true, true);
     });
     preview_frame.set_child(Some(&preview_canvas));
+    for label in gesture.modifiers.labels() {
+        let keycap = gtk::Label::new(Some(label));
+        keycap.add_css_class("keycap");
+        keycap.set_valign(gtk::Align::Center);
+        main_hbox.append(&keycap);
+    }
+    if !gesture.modifiers.is_empty() {
+        let plus = gtk::Label::new(Some("+"));
+        plus.add_css_class("dim-label");
+        main_hbox.append(&plus);
+    }
     main_hbox.append(&preview_frame);
     row.set_child(Some(&main_hbox));
 

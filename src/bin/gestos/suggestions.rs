@@ -146,6 +146,7 @@ mod tests {
             is_custom: true,
             is_modified: false,
             is_deleted: false,
+            modifiers: Default::default(),
         }
     }
 
