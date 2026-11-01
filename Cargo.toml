@@ -33,3 +33,4 @@ futures-channel = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.13"
+xkbcommon-dl = "0.4"

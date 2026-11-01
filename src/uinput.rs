@@ -137,15 +137,42 @@ pub fn name_to_keycode(name: &str) -> Option<u16> {
     }
 }
 
-/// Resolves a shortcut like `Control_L+Alt_L+t` to its key codes. A shortcut with an unknown
-/// key is rejected as a whole, because pressing only the known part would be a different
-/// shortcut. Keys are physical positions on a US layout, not the characters a layout produces.
+/// Resolves a shortcut like `Control_L+Alt_L+t` to the keys to press on a layout. A symbol that
+/// needs Shift or AltGr on it brings that key along. Anything the layout doesn't know falls back
+/// to the fixed table. A shortcut with an unknown key is rejected as a whole, because pressing
+/// only the known part would be a different shortcut.
+#[cfg(target_os = "linux")]
+pub fn parse_key_combo_on(
+    keys: &str,
+    layout: Option<&crate::keymap::LayoutKeys>,
+) -> Result<Vec<u16>, String> {
+    let mut codes = Vec::new();
+    let mut add = |code: u16| {
+        if !codes.contains(&code) {
+            codes.push(code);
+        }
+    };
+    for token in keys.split(['+', ' ']).filter(|token| !token.is_empty()) {
+        match layout.and_then(|layout| layout.lookup(token)) {
+            Some((key, shift, altgr)) => {
+                if shift {
+                    add(KeyCode::KEY_LEFTSHIFT.0);
+                }
+                if altgr {
+                    add(KeyCode::KEY_RIGHTALT.0);
+                }
+                add(key);
+            }
+            None => add(name_to_keycode(token).ok_or_else(|| token.to_string())?),
+        }
+    }
+    Ok(codes)
+}
+
+/// The same, using physical positions on a US layout.
 #[cfg(target_os = "linux")]
 pub fn parse_key_combo(keys: &str) -> Result<Vec<u16>, String> {
-    keys.split(['+', ' '])
-        .filter(|token| !token.is_empty())
-        .map(|token| name_to_keycode(token).ok_or_else(|| token.to_string()))
-        .collect()
+    parse_key_combo_on(keys, None)
 }
 
 /// Shared handle to the virtual device. The lock is held only for each write, so an action
@@ -227,7 +254,8 @@ impl UinputDevice {
     }
 
     pub fn keypress_string(&self, keys: &str) {
-        let codes = match parse_key_combo(keys) {
+        let layout = crate::keymap::current_layout_keys();
+        let codes = match parse_key_combo_on(keys, layout.as_deref()) {
             Ok(codes) => codes,
             Err(unknown) => {
                 eprintln!("gestos: Ignoring shortcut '{}': unknown key '{}'", keys, unknown);
@@ -293,6 +321,37 @@ mod tests {
     fn the_file_manager_and_homepage_keys_are_different() {
         assert_eq!(parse_key_combo("XF86Explorer"), Ok(vec![144]));
         assert_eq!(parse_key_combo("XF86HomePage"), Ok(vec![172]));
+    }
+
+    #[test]
+    fn shortcuts_follow_the_layout_and_add_what_a_symbol_needs() {
+        use crate::keymap::{LayoutKeys, LayoutName};
+        let compile = |layout: &str| {
+            LayoutKeys::compile(&LayoutName {
+                layout: layout.to_string(),
+                ..Default::default()
+            })
+        };
+        let Some(french) = compile("fr") else { return };
+        assert_eq!(
+            parse_key_combo_on("Control+Z", Some(&french)),
+            Ok(vec![KeyCode::KEY_LEFTCTRL.0, KeyCode::KEY_W.0])
+        );
+        let Some(us) = compile("us") else { return };
+        // Shift is only pressed once, however many ask for it.
+        assert_eq!(
+            parse_key_combo_on("Shift+exclam", Some(&us)),
+            Ok(vec![KeyCode::KEY_LEFTSHIFT.0, KeyCode::KEY_1.0])
+        );
+        // The table still covers names the layout doesn't use.
+        assert_eq!(
+            parse_key_combo_on("escape", Some(&us)),
+            Ok(vec![KeyCode::KEY_ESC.0])
+        );
+        assert_eq!(
+            parse_key_combo_on("Control+NoSuchKey", Some(&us)),
+            Err("NoSuchKey".to_string())
+        );
     }
 
     #[test]

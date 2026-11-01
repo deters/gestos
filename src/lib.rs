@@ -3,6 +3,8 @@ pub mod config;
 pub mod gesture;
 pub mod ipc;
 pub mod keyboards;
+#[cfg(target_os = "linux")]
+pub mod keymap;
 pub mod modifiers;
 pub mod protractor;
 pub mod uinput;
