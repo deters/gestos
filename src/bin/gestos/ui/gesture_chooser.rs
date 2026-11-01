@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 const CANCEL_AFTER_SECS: u32 = 15;
 const CARD_MARGIN: f64 = 12.0;
-const POINTER_WAIT_MILLIS: u64 = 150;
+const POINTER_WAIT_MILLIS: u64 = 500;
 
 const EXIT_CANCELLED: i32 = 1;
 
@@ -115,9 +115,11 @@ pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
         let placed = Rc::clone(&placed);
         let reveal = reveal.clone();
         move |x: f64, y: f64| {
-            if placed.replace(true) {
+            // Without its size, the window can't say where the card fits. A later event places it.
+            if placed.get() || window.width() <= 0 || window.height() <= 0 {
                 return;
             }
+            placed.set(true);
             let (_, natural, _, _) = card.measure(gtk::Orientation::Horizontal, -1);
             let (_, natural_height, _, _) = card.measure(gtk::Orientation::Vertical, -1);
             layer.move_(
@@ -162,14 +164,15 @@ pub fn build_chooser_ui(app: &gtk::Application, entries: &[ChooserEntry]) {
     window.add_controller(click_away);
 
     // The pointer is only reported while it's over this window, and might not be, such as on
-    // the top bar. Rather than stay hidden, show centered, and move once it's reported.
+    // the top bar. Rather than stay hidden, show centered. It then stays there, because a card
+    // that's visible must never be seen moving.
     glib::timeout_add_local_once(std::time::Duration::from_millis(POINTER_WAIT_MILLIS), {
         let window = window.clone();
         let layer = layer.clone();
         let card = card.clone();
         let placed = Rc::clone(&placed);
         move || {
-            if !placed.get() {
+            if !placed.replace(true) {
                 let (_, natural, _, _) = card.measure(gtk::Orientation::Horizontal, -1);
                 let (_, natural_height, _, _) = card.measure(gtk::Orientation::Vertical, -1);
                 layer.move_(
