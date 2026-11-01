@@ -32,6 +32,17 @@ fn parse_gnome_shortcut(raw: &str) -> Option<String> {
     Some(keys)
 }
 
+/// A command that runs the first of these that's installed.
+fn first_available_command<'a>(commands: impl Iterator<Item = &'a &'a str>) -> String {
+    let attempts: Vec<String> = commands
+        .map(|command| {
+            let program = command.split_whitespace().next().unwrap_or(command);
+            format!("command -v {program} >/dev/null && exec {command}")
+        })
+        .collect();
+    format!("sh -c '{}'", attempts.join("; "))
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct WaylandContext {
     pub is_gnome: bool,
@@ -255,7 +266,7 @@ impl WaylandContext {
             ActionType::LockScreen => {
                 self.run_user_cmd("swaylock");
             }
-            ActionType::Terminal => uinput_handler("Control_L+Alt_L+t"),
+            ActionType::Terminal => self.open_terminal(),
             ActionType::VolumeUp => uinput_handler("XF86AudioRaiseVolume"),
             ActionType::VolumeDown => uinput_handler("XF86AudioLowerVolume"),
             ActionType::VolumeMute => uinput_handler("XF86AudioMute"),
@@ -298,7 +309,7 @@ impl WaylandContext {
             ActionType::LockScreen => {
                 self.run_user_cmd("hyprlock");
             }
-            ActionType::Terminal => uinput_handler("Control_L+Alt_L+t"),
+            ActionType::Terminal => self.open_terminal(),
             ActionType::VolumeUp => uinput_handler("XF86AudioRaiseVolume"),
             ActionType::VolumeDown => uinput_handler("XF86AudioLowerVolume"),
             ActionType::VolumeMute => uinput_handler("XF86AudioMute"),
@@ -368,9 +379,7 @@ impl WaylandContext {
             ActionType::LockScreen => {
                 self.run_gnome_shortcut("screensaver", "Super_L+l", uinput_handler)
             }
-            ActionType::Terminal => {
-                self.run_gnome_shortcut("terminal", "Control_L+Alt_L+t", uinput_handler)
-            }
+            ActionType::Terminal => self.open_terminal(),
             ActionType::VolumeUp => {
                 self.run_gnome_shortcut("volume-up", "XF86AudioRaiseVolume", uinput_handler)
             }
@@ -432,7 +441,7 @@ impl WaylandContext {
             ActionType::ToggleFullscreen => uinput_handler("F11"),
             ActionType::ShowDesktop => uinput_handler("Super_L+d"),
             ActionType::LockScreen => uinput_handler("Super_L+l"),
-            ActionType::Terminal => uinput_handler("Control_L+Alt_L+t"),
+            ActionType::Terminal => self.open_terminal(),
             ActionType::VolumeUp => uinput_handler("XF86AudioRaiseVolume"),
             ActionType::VolumeDown => uinput_handler("XF86AudioLowerVolume"),
             ActionType::VolumeMute => uinput_handler("XF86AudioMute"),
@@ -481,7 +490,7 @@ impl WaylandContext {
                     self_clone.run_shell_cmd("xflock4");
                 });
             }
-            ActionType::Terminal => uinput_handler("Control_L+Alt_L+t"),
+            ActionType::Terminal => self.open_terminal(),
             ActionType::VolumeUp => uinput_handler("XF86AudioRaiseVolume"),
             ActionType::VolumeDown => uinput_handler("XF86AudioLowerVolume"),
             ActionType::VolumeMute => uinput_handler("XF86AudioMute"),
@@ -517,6 +526,31 @@ impl WaylandContext {
             "sh -c 'for c in {}; do command -v $c >/dev/null && exec $c; done'",
             candidates.join(" ")
         )
+    }
+
+    fn terminal_command(&self) -> String {
+        // Distributions differ in which terminal they ship, and desktops have no reliable shortcut
+        // for it. The first choice is the standard way to ask for the user's preferred one.
+        let preferred: &[&str] = if self.is_kde {
+            &["konsole"]
+        } else if self.is_xfce {
+            &["xfce4-terminal"]
+        } else if self.is_sway || self.is_hypr {
+            &["foot", "kitty", "alacritty"]
+        } else {
+            // A new window, because Ptyxis otherwise only brings an open one forward.
+            &["ptyxis --new-window", "kgx", "gnome-terminal"]
+        };
+        first_available_command(
+            ["xdg-terminal-exec"]
+                .iter()
+                .chain(preferred)
+                .chain(&["ptyxis --new-window", "kgx", "gnome-terminal", "konsole", "xfce4-terminal", "foot", "kitty", "alacritty", "xterm"]),
+        )
+    }
+
+    fn open_terminal(&self) {
+        self.run_user_cmd(&self.terminal_command());
     }
 
     fn open_control_center(&self) {
@@ -705,6 +739,34 @@ mod tests {
     #[test]
     fn an_unknown_modifier_is_not_guessed_at() {
         assert_eq!(parse_gnome_shortcut("['<Hyper>x']"), None);
+    }
+
+    #[test]
+    fn terminal_command_tries_each_desktops_terminal_first() {
+        let gnome = WaylandContext {
+            is_gnome: true,
+            ..Default::default()
+        };
+        let command = gnome.terminal_command();
+        let position = |text: &str| command.find(text).unwrap();
+        assert!(position("xdg-terminal-exec") < position("exec ptyxis --new-window"));
+        assert!(position("exec ptyxis") < position("exec konsole"));
+
+        let kde = WaylandContext {
+            is_kde: true,
+            ..Default::default()
+        }
+        .terminal_command();
+        assert!(kde.find("exec konsole").unwrap() < kde.find("exec ptyxis").unwrap());
+    }
+
+    #[test]
+    fn the_first_installed_command_runs_with_its_arguments() {
+        let command = first_available_command(
+            ["gestos-no-such-program", "echo hello"].iter(),
+        );
+        let output = Command::new("sh").arg("-c").arg(command).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hello");
     }
 
     #[test]
