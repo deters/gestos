@@ -8,6 +8,7 @@ BUILD_TYPE="$3"
 OUTPUT_DIR="$4"
 BIN1="$5"
 BIN2="$6"
+BIN3="$7"
 
 if [ "$BUILD_TYPE" = "release" ]; then
     CARGO_ARGS="--release"
@@ -30,3 +31,4 @@ mkdir -p "$OUTPUT_DIR"
 # Copy output binaries to target build directory
 cp "$CARGO_TARGET_DIR/$TARGET_SUBDIR/$BIN1" "$OUTPUT_DIR/$BIN1"
 cp "$CARGO_TARGET_DIR/$TARGET_SUBDIR/$BIN2" "$OUTPUT_DIR/$BIN2"
+cp "$CARGO_TARGET_DIR/$TARGET_SUBDIR/$BIN3" "$OUTPUT_DIR/$BIN3"

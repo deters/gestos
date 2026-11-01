@@ -14,6 +14,10 @@ name = "gestosd"
 path = "src/bin/gestosd.rs"
 
 [[bin]]
+name = "gestos-input"
+path = "src/bin/gestos-input.rs"
+
+[[bin]]
 name = "gestos"
 path = "src/bin/gestos/main.rs"
 

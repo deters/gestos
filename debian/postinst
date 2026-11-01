@@ -15,6 +15,12 @@ case "$1" in
             udevadm control --reload-rules || true
             udevadm trigger --attr-match=subsystem=misc || true
         fi
+
+        # Start the input service, the only part with access to input devices
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+            systemctl enable --now gestos-input.socket || true
+        fi
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)

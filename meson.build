@@ -6,6 +6,7 @@ project('gestos',
 # Install directories
 prefix = get_option('prefix')
 bindir = prefix / get_option('bindir')
+libexecdir = prefix / get_option('libexecdir')
 
 # Dependencies & Programs
 cargo = find_program('cargo', required: true)
@@ -29,14 +30,18 @@ cargo_sources = files(
   'src/chooser.rs',
   'src/config.rs',
   'src/gesture.rs',
+  'src/input_client.rs',
+  'src/input_protocol.rs',
   'src/ipc.rs',
   'src/keyboards.rs',
   'src/keymap.rs',
+  'src/keys.rs',
   'src/modifiers.rs',
   'src/protractor.rs',
   'src/uinput.rs',
   'src/wayland.rs',
   'src/bin/gestosd.rs',
+  'src/bin/gestos-input.rs',
   'src/bin/gestos/actions.rs',
   'src/bin/gestos/ui/shortcut_recorder.rs',
   'src/bin/gestos/ui/overlay.rs',
@@ -59,10 +64,10 @@ cargo_build = custom_target(
   'cargo-build',
   build_by_default: true,
   input: cargo_sources,
-  output: ['gestosd', 'gestos'],
+  output: ['gestosd', 'gestos', 'gestos-input'],
   console: true,
   install: true,
-  install_dir: bindir,
+  install_dir: [bindir, bindir, libexecdir],
   command: [
     cargo_script,
     cargo_target_dir,
@@ -70,7 +75,8 @@ cargo_build = custom_target(
     build_type,
     meson.project_build_root(),
     'gestosd',
-    'gestos'
+    'gestos',
+    'gestos-input'
   ]
 )
 
@@ -102,6 +108,7 @@ endif
 
 conf_data = configuration_data()
 conf_data.set('bindir', bindir)
+conf_data.set('libexecdir', libexecdir)
 
 configure_file(
   input: 'build-aux/io.github.deters.Gestos.Daemon.service.in',
@@ -120,6 +127,19 @@ configure_file(
   output: 'gestosd.service',
   configuration: conf_data,
   install_dir: systemd_user_dir
+)
+
+# The input service: the only part with access to input devices
+systemd_system_dir = get_option('systemdsystemunitdir')
+if systemd_system_dir == ''
+  systemd_system_dir = prefix / 'lib' / 'systemd' / 'system'
+endif
+install_data('build-aux/gestos-input.socket', install_dir: systemd_system_dir)
+configure_file(
+  input: 'build-aux/gestos-input@.service.in',
+  output: 'gestos-input@.service',
+  configuration: conf_data,
+  install_dir: systemd_system_dir
 )
 
 # Keeps old autostart entries and scripts working after the rename from MyGestures

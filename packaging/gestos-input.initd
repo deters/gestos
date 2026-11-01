@@ -1,0 +1,14 @@
+#!/sbin/openrc-run
+# For systems without systemd. The active user is read from /run/systemd/seats, which elogind
+# also provides, so one of them is required.
+
+name="Gestos input service"
+command="/usr/libexec/gestos-input"
+command_args="--listen /run/gestos/input.sock"
+command_user="gestos-input:input"
+command_background=true
+pidfile="/run/gestos/input.pid"
+
+start_pre() {
+	checkpath --directory --owner gestos-input:input --mode 0755 /run/gestos
+}

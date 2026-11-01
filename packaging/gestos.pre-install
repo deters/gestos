@@ -4,4 +4,7 @@
 # Ensure the 'input' group exists
 getent group input >/dev/null || addgroup -S input 2>/dev/null || addgroup input 2>/dev/null || true
 
+# The account the input service runs as
+getent passwd gestos-input >/dev/null || adduser -S -D -H -G input -s /sbin/nologin gestos-input 2>/dev/null || true
+
 exit 0

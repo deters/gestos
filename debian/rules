@@ -10,6 +10,12 @@ override_dh_auto_install:
 	# Install binaries
 	install -D -m 755 target/release/gestosd debian/gestos/usr/bin/gestosd
 	install -D -m 755 target/release/gestos debian/gestos/usr/bin/gestos
+	install -D -m 755 target/release/gestos-input debian/gestos/usr/libexec/gestos-input
+
+	# Install the input service
+	install -D -m 644 build-aux/gestos-input.socket debian/gestos/lib/systemd/system/gestos-input.socket
+	install -d debian/gestos/lib/systemd/system
+	sed 's,@libexecdir@,/usr/libexec,' build-aux/gestos-input@.service.in > debian/gestos/lib/systemd/system/gestos-input@.service
 
 	# Keep old autostart entries and scripts working after the rename from MyGestures
 	sed 's,@bindir@,/usr/bin,' build-aux/mygestures-compat.sh.in > debian/gestos/usr/bin/mygestures
@@ -26,8 +32,3 @@ override_dh_auto_install:
 	install -D -m 644 gestos.svg debian/gestos/usr/share/icons/hicolor/scalable/apps/gestos.svg
 	install -D -m 644 gestos.yaml debian/gestos/usr/share/gestos/gestos.yaml
 
-override_dh_fixperms:
-	dh_fixperms
-	# Set Set-Group-ID (SGID) permission on gestosd binary
-	chgrp input debian/gestos/usr/bin/gestosd
-	chmod 2755 debian/gestos/usr/bin/gestosd

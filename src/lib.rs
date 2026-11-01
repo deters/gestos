@@ -1,10 +1,15 @@
 pub mod chooser;
 pub mod config;
 pub mod gesture;
+#[cfg(target_os = "linux")]
+pub mod input_client;
+pub mod input_protocol;
 pub mod ipc;
 pub mod keyboards;
 #[cfg(target_os = "linux")]
 pub mod keymap;
+#[cfg(target_os = "linux")]
+pub mod keys;
 pub mod modifiers;
 pub mod protractor;
 pub mod uinput;

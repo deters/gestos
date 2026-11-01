@@ -1,0 +1,12 @@
+[Unit]
+Description=Gestos input service socket
+
+[Socket]
+ListenStream=/run/gestos/input.sock
+# Anyone may connect. The service only serves the user active on the seat.
+SocketMode=0666
+Accept=yes
+MaxConnections=16
+
+[Install]
+WantedBy=sockets.target

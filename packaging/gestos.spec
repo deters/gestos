@@ -42,15 +42,20 @@ getent group input >/dev/null || groupadd -r input
 
 %post
 %udev_rules_update
+%systemd_post gestos-input.socket
+
+%preun
+%systemd_preun gestos-input.socket
 
 %postun
 %udev_rules_update
+%systemd_postun_with_restart gestos-input.socket
 
 %files
 %license COPYING
 %doc README.md
-# Set secure Set-Group-ID (SGID) permission on gestosd binary
-%attr(2755, root, input) %{_bindir}/gestosd
+%{_bindir}/gestosd
+%{_libexecdir}/gestos-input
 %{_bindir}/mygestures
 %{_bindir}/gestos
 %{_udevrulesdir}/99-gestos.rules
@@ -59,6 +64,8 @@ getent group input >/dev/null || groupadd -r input
 %{_datadir}/icons/hicolor/scalable/apps/gestos.svg
 %{_datadir}/gestos/gestos.yaml
 /usr/lib/systemd/user/gestosd.service
+%{_unitdir}/gestos-input.socket
+%{_unitdir}/gestos-input@.service
 /usr/share/dbus-1/services/io.github.deters.Gestos.Daemon.service
 
 %changelog

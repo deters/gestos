@@ -2,3 +2,4 @@ option('udevdir', type: 'string', value: '', description: 'Directory for udev ru
 option('modulesloaddir', type: 'string', value: '', description: 'Directory for systemd modules-load configuration')
 option('dbusservicedir', type: 'string', value: '', description: 'Directory for D-Bus services')
 option('systemduserunitdir', type: 'string', value: '', description: 'Directory for systemd user services')
+option('systemdsystemunitdir', type: 'string', value: '', description: 'Directory for systemd system units')

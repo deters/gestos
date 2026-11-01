@@ -621,9 +621,9 @@ mod tests {
         let us = gestos::keymap::LayoutKeys::compile(&gestos::keymap::LayoutName::new("us", ""));
         for (name, keys, _) in STANDARD_SHORTCUTS {
             assert!(seen.insert(*keys), "{name} repeats {keys}");
-            assert!(gestos::uinput::parse_key_combo(keys).is_ok(), "{keys}");
+            assert!(gestos::keys::parse_key_combo(keys).is_ok(), "{keys}");
             if let Some(us) = &us {
-                assert!(gestos::uinput::parse_key_combo_on(keys, Some(us)).is_ok(), "{keys}");
+                assert!(gestos::keys::parse_key_combo_on(keys, Some(us)).is_ok(), "{keys}");
             }
         }
     }

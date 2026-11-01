@@ -1,5 +1,7 @@
 use gestos::chooser::{encode_entries, parse_choice, ChooserEntry};
 use gestos::config::{ActionType, Configuration, Gesture};
+#[cfg(target_os = "linux")]
+use gestos::input_client::InputClient;
 use gestos::modifiers::Modifiers;
 use gestos::ipc::DaemonIpc;
 use gestos::wayland::WaylandContext;
@@ -7,7 +9,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,23 +33,17 @@ const EXIT_PERMANENT_ERROR: i32 = 2;
 const DBUS_PATH: &str = "/io/github/deters/Gestos/Daemon";
 const LEGACY_DBUS_NAME: &str = "org.mygestures.Daemon";
 const LEGACY_DBUS_PATH: &str = "/org/mygestures/Daemon";
-// Keeps GNOME from treating a released Super as a tap, which opens the Overview. It's F24, which
-// nothing normally uses.
-#[cfg(target_os = "linux")]
-const UNUSED_KEY: u16 = evdev::KeyCode::KEY_F24.0;
 #[cfg(target_os = "linux")]
 const MODIFIER_RELEASE_TIMEOUT: Duration = Duration::from_millis(1500);
 #[cfg(target_os = "linux")]
 const MODIFIER_RELEASE_POLL: Duration = Duration::from_millis(20);
-// Gives udev time to set a new device's permissions.
+// How often to try the input service again after losing it, such as when switching users.
 #[cfg(target_os = "linux")]
-const KEYBOARD_SETTLE_DELAY: Duration = Duration::from_millis(500);
+const INPUT_RECONNECT_INTERVAL: Duration = Duration::from_secs(2);
 
 const CHOOSER_EXIT_CANCELLED: i32 = 1;
 const CHOOSER_FOCUS_RETURN_DELAY_MILLIS: u64 = 400;
 const LEGACY_STOP_TIMEOUT: Duration = Duration::from_secs(2);
-const GRAB_ATTEMPTS: u32 = 5;
-const GRAB_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 const DBUS_NAME_ATTEMPTS: u32 = 15;
 const DBUS_NAME_RETRY_INTERVAL: Duration = Duration::from_millis(200);
@@ -140,70 +136,21 @@ fn find_mouse_device() -> Option<PathBuf> {
     fallback
 }
 
-fn check_permissions(device: &str) -> bool {
-    let mut uinput_ok = false;
-    if let Ok(file) = std::fs::OpenOptions::new().write(true).open("/dev/uinput") {
-        uinput_ok = true;
-        drop(file);
-    } else if let Ok(file) = std::fs::OpenOptions::new()
-        .write(true)
-        .open("/dev/misc/uinput")
-    {
-        uinput_ok = true;
-        drop(file);
+/// Everything that touches input devices happens in the gestos-input service. Its socket is
+/// there whenever it's set up, and systemd starts the service for each connection.
+fn input_service_is_set_up() -> bool {
+    if Path::new(gestos::input_protocol::SOCKET_PATH).exists() {
+        return true;
     }
-
-    let uinput_exists = std::path::Path::new("/dev/uinput").exists()
-        || std::path::Path::new("/dev/misc/uinput").exists();
-    let dev_ok = std::fs::OpenOptions::new().read(true).open(device).is_ok();
-
-    if !uinput_ok || !dev_ok {
-        eprintln!("\n=========================================================================");
-        eprintln!("ERROR: Missing permissions or kernel module to run gestosd.");
-        if !dev_ok {
-            eprintln!(" - Cannot read mouse input device '{}'.", device);
-        }
-        if !uinput_ok {
-            if !uinput_exists {
-                eprintln!(" - /dev/uinput virtual device creator does not exist. The uinput kernel module is likely not loaded.");
-            } else {
-                eprintln!(" - Cannot write to /dev/uinput virtual device creator.");
-            }
-        }
-
-        if !uinput_exists {
-            eprintln!("\nTo resolve the missing kernel module:\n");
-            eprintln!("1. Load the uinput kernel module:");
-            eprintln!("   sudo modprobe uinput");
-            eprintln!("   (To load it automatically on boot, add 'uinput' to /etc/modules)\n");
-            eprintln!(
-                "=========================================================================\n"
-            );
-            return false;
-        }
-
-        eprintln!("\nTo resolve permissions, choose one of the following setups:\n");
-        eprintln!("OPTION A: SECURE SETUP (Recommended - Only gestosd has access)");
-        eprintln!(
-            "  1. Install the gestosd udev rules (restricts access to the 'input' group):"
-        );
-        eprintln!("     sudo cp 99-gestos.rules /etc/udev/rules.d/");
-        eprintln!("     sudo udevadm control --reload-rules && sudo udevadm trigger");
-        eprintln!("  2. Configure the gestosd binary to run as Set-Group-ID (SGID) to 'input':");
-        eprintln!("     sudo chown root:input /usr/local/bin/gestosd");
-        eprintln!("     sudo chmod 2755 /usr/local/bin/gestosd");
-        eprintln!("     (Note: This allows only this binary to capture inputs/inject actions)");
-
-        eprintln!("\nOPTION B: STANDARD SETUP (Allows all user applications to capture inputs)");
-        eprintln!("  1. Add your user to the 'input' group:");
-        eprintln!("     sudo usermod -aG input $USER");
-        eprintln!("  2. Install the udev rules:");
-        eprintln!("     sudo cp 99-gestos.rules /etc/udev/rules.d/");
-        eprintln!("     sudo udevadm control --reload-rules && sudo udevadm trigger");
-        eprintln!("=========================================================================\n");
-        return false;
-    }
-    true
+    eprintln!("\n=========================================================================");
+    eprintln!("ERROR: Missing permissions: the Gestos input service isn't running.");
+    eprintln!(" - {} does not exist.", gestos::input_protocol::SOCKET_PATH);
+    eprintln!("\nTo start it:\n");
+    eprintln!("   sudo systemctl enable --now gestos-input.socket\n");
+    eprintln!("If that fails, reinstall Gestos. The uinput kernel module must also be loaded:\n");
+    eprintln!("   sudo modprobe uinput");
+    eprintln!("=========================================================================\n");
+    false
 }
 
 #[cfg(target_os = "linux")]
@@ -332,93 +279,36 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
     sender
 }
 
-/// Runs a gesture's actions in order on their own thread, because they can sleep or wait on a
-/// child process (`swaylock` runs until the screen is unlocked).
-#[cfg(target_os = "linux")]
-type SharedKeyboards = std::sync::Arc<std::sync::Mutex<gestos::keyboards::Keyboards>>;
-
-#[cfg(target_os = "linux")]
-fn held_modifiers(keyboards: &Option<SharedKeyboards>) -> Modifiers {
-    keyboards
-        .as_ref()
-        .and_then(|keyboards| keyboards.lock().ok().map(|keyboards| keyboards.held()))
-        .unwrap_or_default()
-}
-
 /// A shortcut sent while a modifier is still held would combine with it and mean something else.
 #[cfg(target_os = "linux")]
-fn wait_for_modifier_release(keyboards: &Option<SharedKeyboards>) {
+fn wait_for_modifier_release(input: &InputClient) {
     let deadline = Instant::now() + MODIFIER_RELEASE_TIMEOUT;
-    while !held_modifiers(keyboards).is_empty() && Instant::now() < deadline {
+    while !input.held().is_empty() && Instant::now() < deadline {
         std::thread::sleep(MODIFIER_RELEASE_POLL);
     }
 }
 
-/// Runs this program again, which regains its rights just long enough to open keyboards. Rights
-/// are dropped for good after startup, so this is the only way to open one that appears later.
-#[cfg(target_os = "linux")]
-fn restart_daemon() -> ! {
-    std::thread::sleep(KEYBOARD_SETTLE_DELAY);
-    let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let error = std::env::current_exe()
-        .map(|exe| Command::new(exe).args(&args).exec())
-        .unwrap_or_else(|e| e);
-    eprintln!("gestosd: Could not restart: {}", error);
-    std::process::exit(1);
-}
-
-/// Watches for new input devices, without needing any rights.
-#[cfg(target_os = "linux")]
-fn watch_input_devices() -> Option<fs::File> {
-    let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
-    if fd < 0 {
-        return None;
-    }
-    let file = unsafe { <fs::File as std::os::fd::FromRawFd>::from_raw_fd(fd) };
-    let watched = unsafe {
-        libc::inotify_add_watch(fd, c"/dev/input".as_ptr(), libc::IN_CREATE)
-    };
-    (watched >= 0).then_some(file)
-}
-
+/// Runs a gesture's actions in order on their own thread, because they can sleep or wait on a
+/// child process (`swaylock` runs until the screen is unlocked).
 #[cfg(target_os = "linux")]
 fn spawn_gesture_actions(
     actions: Vec<ActionType>,
     wayland_ctx: WaylandContext,
-    uinput: Option<gestos::uinput::UinputDevice>,
-    wait_for_release: Option<SharedKeyboards>,
+    input: InputClient,
+    wait_for_release: bool,
 ) {
     std::thread::spawn(move || {
-        wait_for_modifier_release(&wait_for_release);
+        if wait_for_release {
+            wait_for_modifier_release(&input);
+        }
         for action in &actions {
             if let ActionType::Click(btn) = action {
-                if let Some(ref u) = uinput {
-                    u.click(btn.unwrap_or(1));
-                }
+                input.click(btn.unwrap_or(1));
             } else {
-                wayland_ctx.execute_action(action, &|keys_str| {
-                    if let Some(ref u) = uinput {
-                        u.keypress_string(keys_str);
-                    }
-                });
+                wayland_ctx.execute_action(action, &|keys_str| input.keypress_string(keys_str));
             }
         }
     });
-}
-
-/// Grabs the device, waiting briefly for an instance that is exiting to release it.
-#[cfg(target_os = "linux")]
-fn grab_device(dev: &mut evdev::Device) -> std::io::Result<()> {
-    let mut attempt = 1;
-    loop {
-        match dev.grab() {
-            Err(e) if e.raw_os_error() == Some(libc::EBUSY) && attempt < GRAB_ATTEMPTS => {
-                attempt += 1;
-                std::thread::sleep(GRAB_RETRY_INTERVAL);
-            }
-            result => return result,
-        }
-    }
 }
 
 #[cfg(target_os = "linux")]
@@ -439,10 +329,9 @@ fn dispatch_gesture(
     points: &[gestos::protractor::Point2D],
     config: &Configuration,
     modifiers: Modifiers,
-    keyboards: &Option<SharedKeyboards>,
+    input: &InputClient,
     signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
     wayland_ctx: &WaylandContext,
-    uinput: &Option<gestos::uinput::UinputDevice>,
 ) {
     let reduce_notifications = config.reduce_notifications;
     let templates = gesture_templates(config, modifiers);
@@ -453,12 +342,11 @@ fn dispatch_gesture(
 
     match candidates.len() {
         0 => println!("Gesture failed: did not match any known template."),
-        1 => run_gesture(&candidates[0], reduce_notifications, keyboards, signals, wayland_ctx, uinput),
+        1 => run_gesture(&candidates[0], reduce_notifications, input, signals, wayland_ctx),
         _ => {
             let signals = signals.clone();
             let wayland_ctx = wayland_ctx.clone();
-            let uinput = uinput.clone();
-            let keyboards = keyboards.clone();
+            let input = input.clone();
             std::thread::spawn(move || {
                 if let Some(gesture) = choose_gesture(candidates) {
                     // Actions like closing a window act on the focused one, which only gets
@@ -469,10 +357,9 @@ fn dispatch_gesture(
                     run_gesture(
                         &gesture,
                         reduce_notifications,
-                        &keyboards,
+                        &input,
                         &signals,
                         &wayland_ctx,
-                        &uinput,
                     );
                 }
             });
@@ -561,183 +448,81 @@ fn announce_gesture(
 fn run_gesture(
     gesture: &Gesture,
     reduce_notifications: bool,
-    keyboards: &Option<SharedKeyboards>,
+    input: &InputClient,
     signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
     wayland_ctx: &WaylandContext,
-    uinput: &Option<gestos::uinput::UinputDevice>,
 ) {
     println!("Matched gesture: {}", gesture.name);
 
     announce_gesture(gesture, reduce_notifications, signals);
 
-    let wait_for_release = if gesture.modifiers.is_empty() {
-        None
-    } else {
-        keyboards.clone()
-    };
     spawn_gesture_actions(
         gesture.actions.clone(),
         wayland_ctx.clone(),
-        uinput.clone(),
-        wait_for_release,
+        input.clone(),
+        !gesture.modifiers.is_empty(),
     );
 }
 
+/// Why a connection to the input service ended.
 #[cfg(target_os = "linux")]
-fn run_grabber(
+enum SessionEnd {
+    Refused { permanent: bool, message: String },
+    Lost(String),
+}
+
+/// Handles one connection to the input service. Sets `opened` once the device is in use.
+#[cfg(target_os = "linux")]
+#[allow(clippy::too_many_arguments)]
+fn run_session(
+    socket_path: &str,
     device_path: &str,
     trigger_button: i32,
     sensitivity: i32,
-    mut config: gestos::config::Configuration,
-    wayland_ctx: gestos::wayland::WaylandContext,
-) -> Result<(), std::io::Error> {
-    use evdev::{Device, EventType, KeyCode};
-    use gestos::gesture::GestureRecognizer;
-    use gestos::uinput::UinputDevice;
+    config: &mut Configuration,
+    wayland_ctx: &WaylandContext,
+    signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
+    wake_reader: &mut UnixStream,
+    opened: &mut bool,
+) -> SessionEnd {
+    use gestos::input_protocol::{Event, LineBuffer, Request};
 
-    let signals = spawn_signal_thread();
-
-    println!("Attempting to open device: {}", device_path);
-    let mut dev = Device::open(device_path)?;
-
-    let target_button = gestos::uinput::trigger_button_code(trigger_button)
-        .map(KeyCode)
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("trigger {} is not a mouse button", trigger_button),
-            )
-        })?;
-    if !dev
-        .supported_keys()
-        .is_some_and(|keys| keys.contains(target_button))
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!(
-                "device {} does not have trigger button {}",
-                device_path, trigger_button
-            ),
-        ));
-    }
-
-    // Adjust sensitivity threshold if relative device vs absolute device
-    let mut threshold = sensitivity as f64;
-    let mut min_path_length = 15.0;
-    let abs_x = dev
-        .get_absinfo()
-        .ok()
-        .and_then(|mut iter| iter.find(|(code, _)| *code == evdev::AbsoluteAxisCode::ABS_X))
-        .map(|(_, info)| info);
-    if let Some(abs_info) = abs_x {
-        // Absolute units vary by device, so scale from its resolution (units per mm) or range.
-        let range = abs_info.maximum() - abs_info.minimum();
-        let resolution = abs_info.resolution();
-        if resolution > 0 {
-            min_path_length = (resolution * 2) as f64;
-        } else if range > 0 {
-            min_path_length = (range / 50) as f64;
-        }
-        if sensitivity <= 30 {
-            if resolution > 0 {
-                threshold = (resolution * 4) as f64;
-            } else if range > 0 {
-                threshold = (range / 25) as f64;
-            }
-        }
-    }
-
-    // Create the virtual device first: a grabbed mouse with nowhere to forward its events
-    // would leave the user without a pointer.
-    let uinput = match UinputDevice::init_from_device(&dev) {
-        Ok(u) => Some(u),
+    let (input, mut reader) = match InputClient::connect(socket_path) {
+        Ok(connection) => connection,
         Err(e) => {
-            eprintln!("gestosd: Failed to initialize uinput: {}", e);
-            None
+            return SessionEnd::Lost(format!("Cannot connect to the input service: {e}"));
         }
     };
-
-    // Exclusive grab (only for button 3 by default)
-    let mut grabbed = false;
-    if trigger_button == 3 {
-        if uinput.is_none() {
-            eprintln!("gestosd: Not grabbing the device because uinput is unavailable.");
-        } else if let Err(e) = grab_device(&mut dev) {
-            eprintln!("gestosd: Failed to grab device exclusively: {}", e);
-        } else {
-            println!("gestosd: Grabbed device exclusively.");
-            grabbed = true;
-        }
-    }
-
-    // Opened now, while there are rights to, and only if a gesture needs them.
-    let keyboards: Option<SharedKeyboards> = config.uses_modifiers().then(|| {
-        let keyboards = gestos::keyboards::Keyboards::open();
-        println!("Reading modifier state from {} keyboards.", keyboards.count());
-        std::sync::Arc::new(std::sync::Mutex::new(keyboards))
+    input.send(&Request::Open {
+        button: trigger_button,
+        sensitivity,
+        keyboards: config.uses_modifiers(),
+        device: device_path.to_string(),
     });
 
-    // Drop the elevated GID for good, including the saved GID that setegid would leave behind
-    let rgid = nix::unistd::getgid();
-    let egid = nix::unistd::getegid();
-    if egid != rgid {
-        nix::unistd::setresgid(rgid, rgid, rgid)
-            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-        println!(
-            "gestosd: Successfully dropped elevated GID from {} to {}",
-            egid, rgid
-        );
-    }
-
-    println!(
-        "Listening for events from device using libevdev (button {})",
-        trigger_button
-    );
-
-    let (mut wake_reader, wake_writer) = UnixStream::pair()?;
-    wake_reader.set_nonblocking(true)?;
-    wake_writer.set_nonblocking(true)?;
-    let _ = RELOAD_WAKE.set(wake_writer);
-
-    let mut recognizer = GestureRecognizer::new(threshold / 10.0, min_path_length);
-    let mut pending_frame: Vec<evdev::InputEvent> = Vec::new();
-    let mut held_at_press = Modifiers::default();
-    let mut restart_requested = false;
-    let mut input_watch = keyboards.as_ref().and_then(|_| watch_input_devices());
-
-    // Event loop
+    let mut lines = LineBuffer::default();
+    let mut points = Vec::new();
     loop {
         if RELOAD_REQUESTED.swap(false, Ordering::Relaxed) {
             println!("gestosd: Reloading configuration dynamically...");
             match Configuration::load_trusted(&config.user_config_path) {
                 Ok(new_config) => {
-                    config = new_config;
-                    restart_requested |= keyboards.is_none() && config.uses_modifiers();
+                    *config = new_config;
+                    input.send(&Request::SetKeyboards(config.uses_modifiers()));
                     println!("gestosd: Configuration reloaded successfully.");
                 }
                 Err(problem) => eprintln!("gestosd: Failed to reload configuration: {problem}"),
             }
         }
 
-        if restart_requested && !recognizer.is_drawing() {
-            println!("gestosd: Restarting to open keyboards.");
-            restart_daemon();
-        }
-
         let mut poll_fds = [
             libc::pollfd {
-                fd: dev.as_raw_fd(),
+                fd: reader.as_raw_fd(),
                 events: libc::POLLIN,
                 revents: 0,
             },
             libc::pollfd {
                 fd: wake_reader.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            },
-            // A negative descriptor is ignored.
-            libc::pollfd {
-                fd: input_watch.as_ref().map_or(-1, |watch| watch.as_raw_fd()),
                 events: libc::POLLIN,
                 revents: 0,
             },
@@ -747,107 +532,102 @@ fn run_grabber(
             if err.kind() == std::io::ErrorKind::Interrupted {
                 continue;
             }
-            return Err(err);
+            return SessionEnd::Lost(err.to_string());
         }
         if poll_fds[1].revents != 0 {
             let mut drained = [0u8; 64];
             let _ = wake_reader.read(&mut drained);
         }
-        if poll_fds[2].revents != 0 {
-            if let Some(watch) = input_watch.as_mut() {
-                let mut buffer = [0u8; 4096];
-                if let Ok(length) = watch.read(&mut buffer) {
-                    restart_requested |= gestos::keyboards::created_event_nodes(&buffer[..length])
-                        .iter()
-                        .any(|node| gestos::keyboards::is_physical_keyboard(node));
-                }
-            }
-        }
         if poll_fds[0].revents == 0 {
             continue;
         }
 
-        let events = match dev.fetch_events() {
-            Ok(events) => events,
+        let mut bytes = [0u8; 4096];
+        match reader.read(&mut bytes) {
+            Ok(0) => return SessionEnd::Lost("The input service closed the connection.".to_string()),
+            Ok(length) => lines.push(&bytes[..length]),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(e),
-        };
+            Err(e) => return SessionEnd::Lost(e.to_string()),
+        }
+        if lines.overflowed() {
+            return SessionEnd::Lost("The input service sent something unexpected.".to_string());
+        }
 
-        for ev in events {
-            let ev_type = ev.event_type();
-            let ev_code = ev.code();
-            let ev_value = ev.value();
-
-            if ev_type == EventType::KEY && ev_code == target_button.0 {
-                if ev_value == 1 {
-                    held_at_press = held_modifiers(&keyboards);
-                    let start = recognizer.press();
-                    println!("Gesture drawing started at ({:.1}, {:.1})", start.x, start.y);
-                    let _ = signals.try_send(DaemonSignal::GestureStarted(start.x, start.y));
-                } else if ev_value == 0 {
-                    let path = recognizer.release();
+        while let Some(line) = lines.next_line() {
+            match Event::decode(&line) {
+                Some(Event::Ready) => {
+                    *opened = true;
+                    println!(
+                        "Listening for events from {} (button {})",
+                        device_path, trigger_button
+                    );
+                }
+                Some(Event::Started(x, y)) => {
+                    points.clear();
+                    let _ = signals.try_send(DaemonSignal::GestureStarted(x, y));
+                }
+                Some(Event::Updated(x, y)) => {
+                    let _ = signals.try_send(DaemonSignal::GestureUpdated(x, y));
+                }
+                Some(Event::Ended) => {
                     let _ = signals.try_send(DaemonSignal::GestureEnded);
-
-                    if let Some(points) = path {
-                        println!("Gesture drawing finished. Path points: {}", points.len());
-                        if held_at_press.super_key {
-                            if let Some(ref u) = uinput {
-                                u.tap_key(UNUSED_KEY);
-                            }
-                        }
-                        dispatch_gesture(
-                            &points,
-                            &config,
-                            held_at_press,
-                            &keyboards,
-                            &signals,
-                            &wayland_ctx,
-                            &uinput,
-                        );
-                    } else {
-                        println!("Gesture failed: path too short or too few points.");
-                        // Click emulation
-                        if grabbed {
-                            if let Some(ref u) = uinput {
-                                let u = u.clone();
-                                std::thread::spawn(move || u.click(trigger_button));
-                            }
-                        }
-                    }
                 }
-                continue;
-            }
-
-            // Forward whole frames, so one movement isn't split across several reports
-            if grabbed {
-                if ev_type != EventType::SYNCHRONIZATION {
-                    pending_frame.push(ev);
-                } else if ev_code == 0 && !pending_frame.is_empty() {
-                    if let Some(ref u) = uinput {
-                        u.forward_frame(&pending_frame);
-                    }
-                    pending_frame.clear();
+                Some(Event::Point(x, y)) => points.push(gestos::protractor::Point2D { x, y }),
+                Some(Event::Finished(modifiers)) => {
+                    println!("Gesture drawing finished. Path points: {}", points.len());
+                    dispatch_gesture(&points, config, modifiers, &input, signals, wayland_ctx);
+                    points.clear();
                 }
-            }
-
-            if ev_type == EventType::RELATIVE {
-                match ev_code {
-                    0 => recognizer.move_by(ev_value as f64, 0.0),
-                    1 => recognizer.move_by(0.0, ev_value as f64),
-                    _ => {}
+                Some(Event::Held(modifiers)) => input.answer_held(modifiers),
+                Some(Event::Refused { permanent, message }) => {
+                    return SessionEnd::Refused { permanent, message };
                 }
-            } else if ev_type == EventType::ABSOLUTE {
-                match ev_code {
-                    0 => recognizer.set_x(ev_value as f64),
-                    1 => recognizer.set_y(ev_value as f64),
-                    _ => {}
-                }
-            } else if ev_type == EventType::SYNCHRONIZATION && ev_code == 0 {
-                if let Some(point) = recognizer.sync() {
-                    let _ = signals.try_send(DaemonSignal::GestureUpdated(point.x, point.y));
-                }
+                None => eprintln!("gestosd: Ignoring an unknown message from the input service."),
             }
         }
+    }
+}
+
+/// Stays connected to the input service. Once a connection has worked, losing it is temporary,
+/// as when another user takes the seat or the mouse is unplugged, so it tries again until it can.
+#[cfg(target_os = "linux")]
+fn run_grabber(
+    device_path: &str,
+    trigger_button: i32,
+    sensitivity: i32,
+    mut config: gestos::config::Configuration,
+    wayland_ctx: gestos::wayland::WaylandContext,
+) -> Result<(), std::io::Error> {
+    let signals = spawn_signal_thread();
+
+    let (mut wake_reader, wake_writer) = UnixStream::pair()?;
+    wake_writer.set_nonblocking(true)?;
+    let _ = RELOAD_WAKE.set(wake_writer);
+
+    let mut opened = false;
+    loop {
+        match run_session(
+            gestos::input_protocol::SOCKET_PATH,
+            device_path,
+            trigger_button,
+            sensitivity,
+            &mut config,
+            &wayland_ctx,
+            &signals,
+            &mut wake_reader,
+            &mut opened,
+        ) {
+            SessionEnd::Refused { permanent: true, message } => {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, message));
+            }
+            SessionEnd::Refused { message, .. } | SessionEnd::Lost(message) => {
+                if !opened {
+                    return Err(std::io::Error::other(message));
+                }
+                eprintln!("gestosd: {message} Trying again.");
+            }
+        }
+        std::thread::sleep(INPUT_RECONNECT_INTERVAL);
     }
 }
 
@@ -1074,26 +854,14 @@ fn run_manager(devices: &[String], button: i32, sensitivity: i32, custom_config:
     }
 }
 
-/// Runs the MyGestures migration with the user's own group, so that this binary's elevated
-/// `input` group doesn't end up owning files in their home.
-fn migrate_legacy_files_as_user() {
+fn migrate_legacy_files() {
     if std::env::var("GESTOS_CHILD").is_ok() {
-        return;
-    }
-    let rgid = nix::unistd::getgid();
-    let egid = nix::unistd::getegid();
-    if egid != rgid && nix::unistd::setegid(rgid).is_err() {
-        eprintln!("gestosd: Skipping the MyGestures migration: could not lower group rights.");
         return;
     }
     gestos::config::migrate_legacy_user_files(
         &gestos::config::config_home(),
         gestos::config::autostart_dir().as_deref(),
     );
-    if egid != rgid && nix::unistd::setegid(egid).is_err() {
-        eprintln!("gestosd: Could not restore group rights after the MyGestures migration.");
-        std::process::exit(1);
-    }
 }
 
 fn parse_number_arg(flag: &str, value: &str) -> i32 {
@@ -1162,7 +930,7 @@ fn main() {
         std::process::exit(EXIT_PERMANENT_ERROR);
     }
 
-    migrate_legacy_files_as_user();
+    migrate_legacy_files();
 
     let config_path = custom_config
         .as_ref()
@@ -1182,7 +950,7 @@ fn main() {
 
     // If multiple devices are specified, run process manager
     if devices.len() > 1 {
-        if devices.iter().all(|device| check_permissions(device)) && config_is_valid() {
+        if input_service_is_set_up() && config_is_valid() {
             stop_legacy_instance();
         }
         start_dbus_service();
@@ -1192,7 +960,7 @@ fn main() {
 
     // Single device execution
     let device_path = &devices[0];
-    if !check_permissions(device_path) {
+    if !input_service_is_set_up() {
         std::process::exit(1);
     }
 
@@ -1230,7 +998,7 @@ fn main() {
     let wayland_ctx = WaylandContext::discover();
 
     println!("Trigger button: {}", button);
-    println!("Capture method: evdev");
+    println!("Capture method: gestos-input service");
     println!("Starting grabber...");
 
     if let Err(e) = run_grabber(device_path, button, sensitivity, config, wayland_ctx) {
@@ -1417,6 +1185,82 @@ mod tests {
             receiver.try_recv(),
             Ok(DaemonSignal::ActionExecuted(name, _, _)) if name == "plain"
         ));
+    }
+
+    /// Runs a session against a stand-in for the service, which says these lines and hangs up.
+    fn session_against(
+        name: &str,
+        lines: &'static str,
+    ) -> (SessionEnd, bool, Vec<DaemonSignal>, String) {
+        use std::os::unix::net::UnixListener;
+        let socket = std::env::temp_dir().join(format!("gestos-{name}-{}.sock", std::process::id()));
+        let _ = fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).unwrap();
+        let service = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 256];
+            let length = stream.read(&mut request).unwrap();
+            stream.write_all(lines.as_bytes()).unwrap();
+            String::from_utf8_lossy(&request[..length]).into_owned()
+        });
+        let mut config = Configuration {
+            gestures: vec![sample_gesture("held", "ctrl")],
+            apps: Vec::new(),
+            user_config_path: PathBuf::new(),
+            reduce_notifications: false,
+        };
+        let (signals, received) = std::sync::mpsc::sync_channel(16);
+        let (mut wake_reader, _wake_writer) = UnixStream::pair().unwrap();
+        let mut opened = false;
+        let end = run_session(
+            socket.to_str().unwrap(),
+            "/dev/input/event1",
+            3,
+            30,
+            &mut config,
+            &WaylandContext::default(),
+            &signals,
+            &mut wake_reader,
+            &mut opened,
+        );
+        let request = service.join().unwrap();
+        let _ = fs::remove_file(&socket);
+        (end, opened, received.try_iter().collect(), request)
+    }
+
+    #[test]
+    fn a_session_asks_for_keyboards_only_if_a_gesture_needs_them() {
+        let (_, _, _, request) = session_against("request", "ready\n");
+        assert_eq!(request, "open 3 30 1 /dev/input/event1\n");
+    }
+
+    #[test]
+    fn a_session_passes_the_drawing_on_as_signals() {
+        let (end, opened, signals, _) =
+            session_against("draw", "ready\nstarted 1 2\nupdated 3 4\nended\n");
+        assert!(opened);
+        assert!(matches!(end, SessionEnd::Lost(_)));
+        assert!(matches!(signals[0], DaemonSignal::GestureStarted(x, y) if x == 1.0 && y == 2.0));
+        assert!(matches!(signals[1], DaemonSignal::GestureUpdated(x, y) if x == 3.0 && y == 4.0));
+        assert!(matches!(signals[2], DaemonSignal::GestureEnded));
+    }
+
+    #[test]
+    fn a_refusal_ends_the_session_with_its_reason() {
+        let (end, opened, _, _) = session_against("refuse", "refused 1 no such button\n");
+        assert!(!opened);
+        assert!(matches!(
+            end,
+            SessionEnd::Refused { permanent: true, message } if message == "no such button"
+        ));
+    }
+
+    #[test]
+    fn a_session_survives_a_gesture_that_matches_nothing() {
+        let (end, opened, _, _) =
+            session_against("nomatch", "ready\npoint 0 0\npoint 9 9\nfinished none\n");
+        assert!(opened);
+        assert!(matches!(end, SessionEnd::Lost(_)));
     }
 
     #[test]

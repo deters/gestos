@@ -24,7 +24,6 @@ build() {
 package() {
 	DESTDIR="$pkgdir" meson install -C build
 
-	# Set Set-Group-ID (SGID) permission on gestos binary securely
-	chgrp input "$pkgdir"/usr/bin/gestosd
-	chmod 2755 "$pkgdir"/usr/bin/gestosd
+	# OpenRC starts the input service here, not systemd
+	install -Dm755 packaging/gestos-input.initd "$pkgdir"/etc/init.d/gestos-input
 }

@@ -3,7 +3,7 @@
 
 # SECURE SETUP (Recommended): Restrict /dev/uinput to the 'input' group.
 # This prevents unauthorized users/processes from injecting keyboard/mouse events.
-# When gestos is installed as Set-Group-ID (SGID) to the 'input' group, it is granted access.
+# The gestos-input service runs in this group, and nothing else in Gestos needs it.
 KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE:="0660", OPTIONS+="static_node=uinput"
 
 # Access to input devices (mice, touchpads, etc.) is allowed via the 'input' group.

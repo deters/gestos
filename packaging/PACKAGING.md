@@ -208,3 +208,10 @@ To run correctly, the daemon requires the `uinput` kernel module to be loaded. T
 * **Source File**: `packaging/gestos.conf`
 * **Installation Target**: `/lib/modules-load.d/gestos.conf`
 * **Purpose**: Instructs the system to load the `uinput` kernel module automatically at boot time so that users do not need to manually run `sudo modprobe uinput` or add it manually to `/etc/modules`.
+
+## 10. The Input Service
+
+`gestosd` runs with no special rights. Only `gestos-input` can reach input devices, so **don't install any Gestos binary as Set-Group-ID**.
+
+* **systemd**: install `gestos-input.socket` and `gestos-input@.service` and enable the socket. The service uses `DynamicUser` and joins the `input` group, so no account needs creating. Packaging scripts enable the socket on install.
+* **OpenRC**: `packaging/gestos-input.initd` runs it as the `gestos-input` account, which the pre-install script creates. elogind is required, because the service reads the active user from `/run/systemd/seats`.

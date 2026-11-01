@@ -18,33 +18,26 @@ if [ -z "$DESTDIR" ]; then
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger 2>/dev/null || true
 
-    # Set Set-Group-ID (SGID) on gestosd to securely access input devices
-    GESTOSD_BIN="${MESON_INSTALL_PREFIX:-/usr/local}/bin/gestosd"
-    if [ -f "$GESTOSD_BIN" ]; then
-        # Create 'input' group if it doesn't exist
-        if ! grep -q "^input:" /etc/group 2>/dev/null; then
-            echo "Creating 'input' group..."
-            if command -v groupadd >/dev/null 2>&1; then
-                groupadd -r input 2>/dev/null || true
-            elif command -v addgroup >/dev/null 2>&1; then
-                addgroup -S input 2>/dev/null || addgroup input 2>/dev/null || true
-            fi
-        fi
+    # Earlier versions installed gestosd as Set-Group-ID. The input service does this job now.
+    GESTOSD_BIN="$PREFIX/bin/gestosd"
+    chown root:root "$GESTOSD_BIN" 2>/dev/null || true
+    chmod 755 "$GESTOSD_BIN" 2>/dev/null || true
 
-        echo "Setting Set-Group-ID (SGID) to 'input' group on $GESTOSD_BIN..."
-        if chown root:input "$GESTOSD_BIN" 2>/dev/null && chmod 2755 "$GESTOSD_BIN" 2>/dev/null; then
-            echo "Successfully configured secure SGID permissions for gestosd."
-        else
-            echo "Warning: Could not set SGID permissions on $GESTOSD_BIN."
-            echo "Falling back to standard user group configuration..."
-            # Determine user to add to input group
-            TARGET_USER="${SUDO_USER:-$USER}"
-            if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
-                if ! groups "$TARGET_USER" 2>/dev/null | grep -q "\binput\b"; then
-                    echo "Adding user '$TARGET_USER' to 'input' group..."
-                    usermod -aG input "$TARGET_USER" 2>/dev/null || echo "Please add your user to the 'input' group manually: sudo usermod -aG input $TARGET_USER"
-                fi
-            fi
+    # The input service reaches input devices through this group
+    if ! grep -q "^input:" /etc/group 2>/dev/null; then
+        echo "Creating 'input' group..."
+        if command -v groupadd >/dev/null 2>&1; then
+            groupadd -r input 2>/dev/null || true
+        elif command -v addgroup >/dev/null 2>&1; then
+            addgroup -S input 2>/dev/null || addgroup input 2>/dev/null || true
+        fi
+    fi
+
+    if command -v systemctl >/dev/null 2>&1; then
+        echo "Starting the Gestos input service..."
+        systemctl daemon-reload 2>/dev/null || true
+        if ! systemctl enable --now gestos-input.socket 2>/dev/null; then
+            echo "Warning: Could not start it. Run: sudo systemctl enable --now gestos-input.socket"
         fi
     fi
 
