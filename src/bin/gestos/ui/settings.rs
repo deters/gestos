@@ -196,6 +196,59 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     osd_row.set_visible(false); // HIDE FOR NOW
     general_list.append(&osd_row);
 
+    // Reduce Notifications row
+    let reduce_row = gtk::ListBoxRow::new();
+    reduce_row.set_activatable(false);
+    let reduce_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    reduce_box.set_margin_start(16);
+    reduce_box.set_margin_end(16);
+    reduce_box.set_margin_top(12);
+    reduce_box.set_margin_bottom(12);
+
+    let reduce_text_vbox = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    reduce_text_vbox.set_hexpand(true);
+    reduce_text_vbox.set_halign(gtk::Align::Start);
+
+    let reduce_title = gtk::Label::new(Some("Reduce Notifications"));
+    reduce_title.add_css_class("status-label");
+    reduce_title.set_halign(gtk::Align::Start);
+    reduce_text_vbox.append(&reduce_title);
+
+    let reduce_description = "Don't show a notification each time a gesture runs";
+    let reduce_subtitle = gtk::Label::new(Some(reduce_description));
+    reduce_subtitle.add_css_class("action-label");
+    reduce_subtitle.set_halign(gtk::Align::Start);
+    reduce_subtitle.set_xalign(0.0);
+    reduce_subtitle.set_wrap(true);
+    reduce_text_vbox.append(&reduce_subtitle);
+
+    reduce_box.append(&reduce_text_vbox);
+
+    let reduce_switch = gtk::Switch::new();
+    reduce_switch.set_valign(gtk::Align::Center);
+    reduce_switch.set_active(state_rc.borrow().config.reduce_notifications);
+
+    let state_rc_reduce = Rc::clone(state_rc);
+    let dialog_reduce = dialog.clone();
+    reduce_switch.connect_state_set(move |_, enabled| {
+        let mut state = state_rc_reduce.borrow_mut();
+        if state.config.reduce_notifications != enabled {
+            state.config.reduce_notifications = enabled;
+            match state.config.save_to_file() {
+                Ok(()) => {
+                    reduce_subtitle.set_text(reduce_description);
+                    reload_daemon(state.dbus_conn.as_ref(), Some(&dialog_reduce));
+                }
+                Err(e) => reduce_subtitle.set_text(&format!("Could not change this setting: {e}")),
+            }
+        }
+        glib::Propagation::Proceed
+    });
+
+    reduce_box.append(&reduce_switch);
+    reduce_row.set_child(Some(&reduce_box));
+    general_list.append(&reduce_row);
+
     // --- Backup & Restore Section ---
     let maintenance_header = gtk::Label::new(Some("Backup & Restore"));
     maintenance_header.add_css_class("section-header");
@@ -319,6 +372,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
 
     let parent_clone = parent.clone();
     let state_rc_clone = Rc::clone(state_rc);
+    let reduce_switch_import = reduce_switch.clone();
     import_btn.connect_clicked(move |_| {
         let chooser = gtk::FileChooserNative::new(
             Some("Import Configuration"),
@@ -343,6 +397,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
 
         let parent_err_clone = parent_clone.clone();
         let state_rc_inner = Rc::clone(&state_rc_clone);
+        let reduce_switch_response = reduce_switch_import.clone();
         chooser.connect_response(move |c, response| {
             if response == gtk::ResponseType::Accept {
                 if let Some(file) = c.file() {
@@ -350,6 +405,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
                         if let Some(mut new_config) = Configuration::load_from_file(&path) {
                             let parent_confirm = parent_err_clone.clone();
                             let state_rc_confirm = Rc::clone(&state_rc_inner);
+                            let reduce_switch_confirm = reduce_switch_response.clone();
                             show_confirm_dialog(
                                 &parent_err_clone,
                                 "Confirm Import",
@@ -366,6 +422,8 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
                                         state.config = new_config;
                                         drop(state);
                                         refresh_gesture_list(&state_rc_confirm, None);
+                                        let reduce = state_rc_confirm.borrow().config.reduce_notifications;
+                                        reduce_switch_confirm.set_active(reduce);
                                         let state = state_rc_confirm.borrow();
                                         reload_daemon(state.dbus_conn.as_ref(), Some(&parent_confirm));
                                     }
@@ -434,8 +492,15 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
                     show_error_dialog(&parent_confirm, &format!("Failed to reset config: {}", e));
                     return;
                 }
-                let new_config = Configuration::load_from_defaults();
+                let mut new_config = Configuration::load_from_defaults();
                 let mut state = state_rc_inner.borrow_mut();
+                // This removes gestures, and a preference isn't one of them.
+                if state.config.reduce_notifications {
+                    new_config.reduce_notifications = true;
+                    if let Err(e) = new_config.save_to_file() {
+                        show_error_dialog(&parent_confirm, &format!("Failed to reset config: {}", e));
+                    }
+                }
                 state.config = new_config;
                 drop(state);
                 refresh_gesture_list(&state_rc_inner, None);

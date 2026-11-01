@@ -444,6 +444,7 @@ fn dispatch_gesture(
     wayland_ctx: &WaylandContext,
     uinput: &Option<gestos::uinput::UinputDevice>,
 ) {
+    let reduce_notifications = config.reduce_notifications;
     let templates = gesture_templates(config, modifiers);
     let candidates: Vec<Gesture> = gestos::protractor::match_gesture_candidates(points, &templates)
         .iter()
@@ -452,7 +453,7 @@ fn dispatch_gesture(
 
     match candidates.len() {
         0 => println!("Gesture failed: did not match any known template."),
-        1 => run_gesture(&candidates[0], keyboards, signals, wayland_ctx, uinput),
+        1 => run_gesture(&candidates[0], reduce_notifications, keyboards, signals, wayland_ctx, uinput),
         _ => {
             let signals = signals.clone();
             let wayland_ctx = wayland_ctx.clone();
@@ -465,7 +466,14 @@ fn dispatch_gesture(
                     let delay = chooser_focus_return_delay();
                     println!("Waiting {} ms for focus to return.", delay.as_millis());
                     std::thread::sleep(delay);
-                    run_gesture(&gesture, &keyboards, &signals, &wayland_ctx, &uinput);
+                    run_gesture(
+                        &gesture,
+                        reduce_notifications,
+                        &keyboards,
+                        &signals,
+                        &wayland_ctx,
+                        &uinput,
+                    );
                 }
             });
         }
@@ -525,16 +533,17 @@ fn choose_gesture(mut candidates: Vec<Gesture>) -> Option<Gesture> {
     }
 }
 
+/// Says which gesture ran. The notification and the overlay's popup both come from this signal,
+/// so leaving it out quiets them both.
 #[cfg(target_os = "linux")]
-fn run_gesture(
+fn announce_gesture(
     gesture: &Gesture,
-    keyboards: &Option<SharedKeyboards>,
+    reduce_notifications: bool,
     signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
-    wayland_ctx: &WaylandContext,
-    uinput: &Option<gestos::uinput::UinputDevice>,
 ) {
-    println!("Matched gesture: {}", gesture.name);
-
+    if reduce_notifications {
+        return;
+    }
     let action_desc = gesture.action_description();
     let icon_name = gesture
         .actions
@@ -546,6 +555,20 @@ fn run_gesture(
         action_desc,
         icon_name,
     ));
+}
+
+#[cfg(target_os = "linux")]
+fn run_gesture(
+    gesture: &Gesture,
+    reduce_notifications: bool,
+    keyboards: &Option<SharedKeyboards>,
+    signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
+    wayland_ctx: &WaylandContext,
+    uinput: &Option<gestos::uinput::UinputDevice>,
+) {
+    println!("Matched gesture: {}", gesture.name);
+
+    announce_gesture(gesture, reduce_notifications, signals);
 
     let wait_for_release = if gesture.modifiers.is_empty() {
         None
@@ -1384,6 +1407,21 @@ mod tests {
     }
 
     #[test]
+    fn reduced_notifications_leave_out_the_gesture_announcement() {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let gesture = sample_gesture("plain", "");
+
+        announce_gesture(&gesture, true, &sender);
+        assert!(receiver.try_recv().is_err());
+
+        announce_gesture(&gesture, false, &sender);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(DaemonSignal::ActionExecuted(name, _, _)) if name == "plain"
+        ));
+    }
+
+    #[test]
     fn only_gestures_with_exactly_the_held_modifiers_can_match() {
         let config = Configuration {
             gestures: vec![
@@ -1393,6 +1431,7 @@ mod tests {
             ],
             apps: Vec::new(),
             user_config_path: PathBuf::new(),
+            reduce_notifications: false,
         };
         let names = |modifiers: &str| -> Vec<String> {
             gesture_templates(&config, Modifiers::parse(modifiers))
