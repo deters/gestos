@@ -3,7 +3,7 @@ use gtk::{gio, glib};
 use gestos::protractor::match_gesture;
 use gtk4 as gtk;
 use std::rc::Rc;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use gestos::config::{ActionType, Gesture};
 use gestos::modifiers::Modifiers;
 use gestos::config::generate_unique_id;
@@ -42,6 +42,22 @@ pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> Strin
         _ => opt.name.clone(),
     }
 }
+/// A name no other gesture has, adding a number if needed: "Close Window (2)".
+fn unique_gesture_name(name: &str, gestures: &[Gesture], own_id: Option<&str>) -> String {
+    let is_taken = |candidate: &str| {
+        gestures
+            .iter()
+            .any(|gesture| gesture.name == candidate && Some(gesture.id.as_str()) != own_id)
+    };
+    if !is_taken(name) {
+        return name.to_string();
+    }
+    (2..)
+        .map(|number| format!("{name} ({number})"))
+        .find(|candidate| !is_taken(candidate))
+        .unwrap()
+}
+
 /// The modifier keys a gesture needs. Holding them while drawing sets them too.
 #[derive(Clone)]
 struct ModifierToggles {
@@ -689,6 +705,7 @@ fn open_editor(
     let udn_clone = Rc::clone(&update_default_name);
     let selected_action_clone = Rc::clone(&selected_action);
 
+    let name_follows_action_clone = Rc::clone(&is_name_customized);
     let picker_activate_clone = action_picker.clone();
     let selection_model_clone = selection_model.clone();
     list_view.connect_activate(move |_, position| {
@@ -700,6 +717,8 @@ fn open_editor(
         let boxed = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
         let opt = boxed.borrow::<EditorActionOption>().clone();
         
+        // A gesture is named after its action, so a new action means a new name.
+        *name_follows_action_clone.borrow_mut() = false;
         btn_label_clone.set_text(&opt.name);
         let (icon_name, _) = get_action_category_icon(&opt.action_type);
         btn_icon_clone.set_icon_name(Some(icon_name));
@@ -719,7 +738,14 @@ fn open_editor(
 
     let udn_clone4 = Rc::clone(&update_default_name);
     let usd_clone_change = Rc::clone(&update_shortcut_display);
+    let details_loaded = Rc::new(Cell::new(false));
+    let details_loaded_changed = Rc::clone(&details_loaded);
+    let name_follows_details = Rc::clone(&is_name_customized);
     action_details_entry.connect_changed(move |_| {
+        // Loading a gesture isn't a change, but editing its keys or command changes its action.
+        if details_loaded_changed.get() {
+            *name_follows_details.borrow_mut() = false;
+        }
         udn_clone4();
         usd_clone_change();
     });
@@ -787,6 +813,8 @@ fn open_editor(
         action_select_icon.set_icon_name(Some(icon_name));
     }
 
+    details_loaded.set(true);
+
     let usd_init = Rc::clone(&update_shortcut_display);
     usd_init(); // Set initial keycaps if keys exist
 
@@ -809,6 +837,7 @@ fn open_editor(
     let selected_action_save = Rc::clone(&selected_action);
 
     let toggles_save = modifier_toggles.clone();
+    let is_name_customized_save = Rc::clone(&is_name_customized);
     save_btn.connect_clicked(move |_| {
         let modifiers = toggles_save.get();
         let name = name_entry.text().to_string();
@@ -853,6 +882,12 @@ fn open_editor(
         };
 
         let mut state = state_clone.borrow_mut();
+        // A generated name yields to one that's taken. Only a hand-written name is an error.
+        let name = if *is_name_customized_save.borrow() {
+            name
+        } else {
+            unique_gesture_name(&name, &state.config.gestures, target_id.as_deref())
+        };
         if is_edit {
             let lookup_id = target_id.as_ref().unwrap();
             if let Some(pos) = state
@@ -967,4 +1002,42 @@ fn open_editor(
 
     dialog.set_default_widget(Some(&save_btn));
     dialog.present();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gesture(id: &str, name: &str) -> Gesture {
+        Gesture {
+            id: id.to_string(),
+            name: name.to_string(),
+            raw_movement: String::new(),
+            points: Vec::new(),
+            actions: Vec::new(),
+            is_custom: true,
+            is_modified: false,
+            is_deleted: false,
+            modifiers: Modifiers::default(),
+        }
+    }
+
+    #[test]
+    fn a_free_name_is_kept() {
+        let gestures = [gesture("a", "Back")];
+        assert_eq!(unique_gesture_name("Close", &gestures, None), "Close");
+    }
+
+    #[test]
+    fn a_taken_name_gets_the_first_free_number() {
+        let gestures = [gesture("a", "Close"), gesture("b", "Close (2)")];
+        assert_eq!(unique_gesture_name("Close", &gestures, None), "Close (3)");
+    }
+
+    #[test]
+    fn a_gesture_may_keep_its_own_name() {
+        let gestures = [gesture("a", "Close"), gesture("b", "Back")];
+        assert_eq!(unique_gesture_name("Close", &gestures, Some("a")), "Close");
+        assert_eq!(unique_gesture_name("Back", &gestures, Some("a")), "Back (2)");
+    }
 }
