@@ -22,14 +22,16 @@ Install the dependencies:
 
 ```bash
 # Fedora
-sudo dnf install pkgconf-pkg-config gtk4-devel libevdev-devel git meson ninja-build cargo
+sudo dnf install gtk4-devel meson ninja-build cargo gcc git
 
-# Ubuntu / Debian
-sudo apt install pkg-config libgtk-4-dev libevdev-dev git meson ninja-build cargo
+# Debian 13
+sudo apt install libgtk-4-dev meson ninja-build cargo build-essential pkg-config git
 
 # Alpine
-apk add git meson cargo sudo make glib-dev cairo-dev gdk4 gdk-pixbuf-dev pango-dev gtk4.0-dev
+apk add gtk4.0-dev meson cargo gcc musl-dev git
 ```
+
+Older systems may need a newer Rust from [rustup](https://rustup.rs). Rust 1.75, from Ubuntu 24.04, is too old, and 1.85 works.
 
 Then build and install:
 
