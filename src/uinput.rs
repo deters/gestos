@@ -287,25 +287,6 @@ mod tests {
     }
 
     #[test]
-    fn every_keypress_in_the_shipped_config_resolves() {
-        let path = std::env::temp_dir().join(format!(
-            "gestos-keys-{}.yaml",
-            std::process::id()
-        ));
-        std::fs::write(&path, include_str!("../gestos.yaml")).unwrap();
-        let config = crate::config::Configuration::load_from_file(&path).unwrap();
-        std::fs::remove_file(&path).unwrap();
-
-        for gesture in &config.gestures {
-            for action in &gesture.actions {
-                if let crate::config::ActionType::Keypress(keys) = action {
-                    assert!(parse_key_combo(keys).is_ok(), "{}: {}", gesture.name, keys);
-                }
-            }
-        }
-    }
-
-    #[test]
     fn every_fallback_key_used_by_the_desktop_backends_resolves() {
         for keys in [
             "Super_L+Shift_L+Control_L+Alt_L+F12",

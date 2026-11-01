@@ -136,13 +136,13 @@ Install Gestos like any new version. The new packages replace `mygestures`, and 
 Gestures configuration:
 -----------------------
 
-On first execution, Gestos will create a configuration file for your user:
+Gestos starts with no gestures, so the ones you have are the ones you chose. On first execution, it creates an empty configuration file for your user:
 
 `~/.config/gestos/gestos.yaml`
 
 Gestures are defined using coordinate paths matched using the Protractor gesture recognition algorithm.
 
-Example of `gestos.yaml`:
+You can create gestures in the `gestos` app or by editing the file. Example of `gestos.yaml`:
 
 ```yaml
 global:

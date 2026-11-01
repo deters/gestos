@@ -1049,13 +1049,9 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_default_config_is_valid() {
+    fn the_shipped_config_is_valid_and_has_no_gestures() {
         let file = TempConfig::new("shipped", include_str!("../gestos.yaml"));
         let config = Configuration::load_from_file(&file.0).unwrap();
-        assert!(!config.gestures.is_empty());
-        for gesture in &config.gestures {
-            assert!(gesture.points.len() >= 2, "{}", gesture.name);
-            assert!(!gesture.actions.is_empty(), "{}", gesture.name);
-        }
+        assert!(config.gestures.is_empty());
     }
 }

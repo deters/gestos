@@ -204,10 +204,10 @@ pub fn build_ui(app: &gtk::Application) {
     empty_state_box.append(&empty_icon);
 
     let empty_title = gtk::Label::new(None);
-    empty_title.set_markup("<span size='large' weight='bold'>No Gestures Found</span>");
+    empty_title.set_markup("<span size='large' weight='bold'>No Gestures</span>");
     empty_state_box.append(&empty_title);
 
-    let empty_subtitle = gtk::Label::new(Some("Configure some gestures or add a new one to get started."));
+    let empty_subtitle = gtk::Label::new(Some("Create one, or search above for what you want it to do."));
     empty_subtitle.set_opacity(0.65);
     empty_state_box.append(&empty_subtitle);
 

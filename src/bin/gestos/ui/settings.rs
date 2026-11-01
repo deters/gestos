@@ -398,19 +398,19 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     reset_text_vbox.set_hexpand(true);
     reset_text_vbox.set_halign(gtk::Align::Start);
 
-    let reset_title = gtk::Label::new(Some("Reset to Defaults"));
+    let reset_title = gtk::Label::new(Some("Remove All Gestures"));
     reset_title.add_css_class("status-label");
     reset_title.set_halign(gtk::Align::Start);
     reset_text_vbox.append(&reset_title);
 
-    let reset_subtitle = gtk::Label::new(Some("Restore default configuration values"));
+    let reset_subtitle = gtk::Label::new(Some("Delete every gesture and start over"));
     reset_subtitle.add_css_class("action-label");
     reset_subtitle.set_halign(gtk::Align::Start);
     reset_text_vbox.append(&reset_subtitle);
 
     reset_box.append(&reset_text_vbox);
 
-    let reset_btn = gtk::Button::with_mnemonic("_Reset…");
+    let reset_btn = gtk::Button::with_mnemonic("_Remove All…");
     reset_btn.set_valign(gtk::Align::Center);
     reset_btn.add_css_class("destructive-action");
 
@@ -421,9 +421,9 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
         let state_rc_inner = Rc::clone(&state_rc_clone2);
         show_confirm_dialog(
             &parent_clone,
-            "Reset to Defaults",
-            "Are you sure you want to reset all gesture settings to defaults? This action cannot be undone.",
-            "Reset",
+            "Remove All Gestures?",
+            "Every gesture will be deleted. This can't be undone.",
+            "Remove All",
             true,
             move || {
                 let default_path = gestos::config::get_default_config_path();
