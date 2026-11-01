@@ -635,7 +635,16 @@ impl Configuration {
                         continue;
                     }
                 };
-                let actions = gest_cfg.action_expr.to_actions();
+                let mut actions = gest_cfg.action_expr.to_actions();
+                // A gesture does one thing. A list is still read, so that an older config loads.
+                if actions.len() > 1 {
+                    eprintln!(
+                        "Gesture '{}' lists {} actions. Only the first one is used.",
+                        name,
+                        actions.len()
+                    );
+                    actions.truncate(1);
+                }
                 let is_abort = actions.contains(&ActionType::Abort);
                 let raw_movement = gest_cfg
                     .movement_expr
@@ -707,11 +716,9 @@ impl Configuration {
     fn to_yaml(&self) -> Result<String, serde_yaml::Error> {
         let mut global = serde_yaml::Mapping::new();
         for g in &self.gestures {
-            let action_expr = match g.actions.as_slice() {
-                [single] => ActionsVecOrString::Single(single.to_string()),
-                actions => {
-                    ActionsVecOrString::Multiple(actions.iter().map(|a| a.to_string()).collect())
-                }
+            let action_expr = match g.actions.first() {
+                Some(action) => ActionsVecOrString::Single(action.to_string()),
+                None => ActionsVecOrString::Multiple(Vec::new()),
             };
             let entry = GestureConfig {
                 id: Some(g.id.clone()),
@@ -1002,10 +1009,24 @@ mod tests {
     }
 
     #[test]
-    fn saving_keeps_every_action_of_a_gesture() {
-        let actions = vec![ActionType::Kill, ActionType::Keypress("Alt+Left".to_string())];
-        let reloaded = save_and_reload("multi", vec![gesture("Both", actions.clone())]);
-        assert_eq!(reloaded.gestures[0].actions, actions);
+    fn only_the_first_action_of_a_list_is_used() {
+        let file = TempConfig::new(
+            "list",
+            "global:
+  \"Both\":
+    move: \"0,0 9,9\"
+    do:
+      - kill
+      - raise
+",
+        );
+        let config = Configuration::load_from_file(&file.0).unwrap();
+        assert_eq!(config.gestures[0].actions, vec![ActionType::Kill]);
+
+        config.save_to_file().unwrap();
+        let saved = fs::read_to_string(&file.0).unwrap();
+        assert!(saved.contains("do: kill"), "{saved}");
+        assert!(!saved.contains("raise"), "{saved}");
     }
 
     #[test]

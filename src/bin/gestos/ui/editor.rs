@@ -63,14 +63,6 @@ fn option_for_gesture(
         })
 }
 
-/// The editor only shows a gesture's first action, so any others stay as they are.
-fn set_main_action(gesture: &mut Gesture, action: ActionType) {
-    match gesture.actions.first_mut() {
-        Some(first) => *first = action,
-        None => gesture.actions.push(action),
-    }
-}
-
 /// A name no other gesture has, adding a number if needed: "Close Window (2)".
 fn unique_gesture_name(name: &str, gestures: &[Gesture], own_id: Option<&str>) -> String {
     let is_taken = |candidate: &str| {
@@ -724,13 +716,13 @@ fn open_editor(
                     state.config.gestures[pos].name = name.clone();
                     state.config.gestures[pos].raw_movement = raw_movement;
                     state.config.gestures[pos].points = pts.clone();
-                    set_main_action(&mut state.config.gestures[pos], action);
+                    state.config.gestures[pos].actions = vec![action];
                     println!("Gesture renamed successfully: {} -> {}", lookup_name, name);
                 } else {
                     state.config.gestures[pos].modifiers = modifiers;
                     state.config.gestures[pos].raw_movement = raw_movement;
                     state.config.gestures[pos].points = pts.clone();
-                    set_main_action(&mut state.config.gestures[pos], action);
+                    state.config.gestures[pos].actions = vec![action];
                     println!("Gesture modified successfully: {}", name);
                 }
             } else {
@@ -871,17 +863,6 @@ mod tests {
     #[test]
     fn a_gesture_without_actions_has_nothing_to_show() {
         assert!(option_for_gesture(&gesture("a", "Empty"), &[]).is_none());
-    }
-
-    #[test]
-    fn saving_changes_only_the_first_action() {
-        let mut several = gesture("a", "Several");
-        several.actions = vec![ActionType::Kill, ActionType::Raise];
-        set_main_action(&mut several, ActionType::Keypress("a".to_string()));
-        assert_eq!(
-            several.actions,
-            [ActionType::Keypress("a".to_string()), ActionType::Raise]
-        );
     }
 
     #[test]
