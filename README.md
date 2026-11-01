@@ -50,6 +50,34 @@ sudo meson install -C build
 
 The installation process automatically installs the `gestosd` daemon and `gestos` settings app, installs the udev rules, reloads the udev system, and sets `gestosd` to run with Set-Group-ID (SGID) access to the `input` group. Your user is only added to the `input` group if setting SGID fails.
 
+### Faster development builds (optional):
+
+If you rebuild often, `clang` and `mold` link much faster, and lighter debug info makes the binaries smaller. This is only for development, and nothing needs it to build or run the project.
+
+Install them with your package manager:
+
+```bash
+# Fedora
+sudo dnf install clang mold
+# Ubuntu / Debian
+sudo apt install clang mold
+# Alpine
+apk add clang mold
+```
+
+Then add this to `~/.cargo/config.toml`:
+
+```toml
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[profile.dev]
+debug = "line-tables-only"
+```
+
+Change `x86_64-unknown-linux-gnu` to match your system if it differs (`rustc -vV` shows it as `host`). The next build recompiles everything once. This applies to all your Rust projects, and you lose local variables in a debugger, though panics keep their file and line numbers.
+
 Usage:
 ------
 
