@@ -1,6 +1,13 @@
 # Gestos
 
-Formerly known as MyGestures. Your MyGestures config and autostart entry are carried over the first time Gestos runs.
+Formerly known as MyGestures.
+
+- **Any desktop:** GNOME, KDE, Sway, Hyprland, XFCE.
+- **No config files:** search an action, draw a gesture, save.
+- **Real desktop actions:** GNOME's own actions and shortcuts.
+- **Modifier keys:** one stroke, different actions with Ctrl, Alt, Shift or Super.
+- **Similar gestures:** a chooser at the pointer instead of a guess.
+- **Window tiling on GNOME:** through an optional extension.
 
 ## Get started
 
@@ -14,13 +21,9 @@ Draw the gesture and save it:
 
 That's it. Hold the right mouse button anywhere, draw your gesture, and let go. A short click still works as a normal right click.
 
-Here it is from the start, with an upward gesture that maximizes a window:
+## Actions
 
-![Creating a gesture that draws up to toggle maximize](docs/screenshots/maximize-gesture.gif)
-
-And an S-shaped one that saves:
-
-![Creating a gesture that draws an S to save with Ctrl+S](docs/screenshots/save-gesture.gif)
+Gestos can manage windows and workspaces, control media and volume, take screenshots, lock the screen or log out, open apps, use the standard app shortcuts like Copy, Save, or Zoom In, and tile windows on GNOME. It can also run your GNOME or KDE shortcut actions, any keyboard shortcut, or a command.
 
 ## Install
 
