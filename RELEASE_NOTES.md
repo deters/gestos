@@ -1,16 +1,12 @@
-# Gestos 6.1.0
-
-## New
-
-- **Toggle Tile Windows, on GNOME:** fits the windows on a workspace together without overlaps, each near where it was and sized in proportion to the others. Resizing a tile keeps the edge where you leave it. Using it again, or moving, maximizing, or snapping a window, puts them all back.
-- **The “Gestos” GNOME extension:** tiling runs in it, and it comes with Gestos. After installing, log out and back in, then turn it on in Gestos's Preferences, which also shows whether it's running and has a Window Gap setting. Gestos works without it, and other desktops don't use it.
-- **Original sizes kept:** tiled windows get their original size back before they're closed from GNOME, maximized, or left at logout, so apps don't save the tiled size. If an app closes one itself, the next window it opens at that size gets the original size instead.
+# Gestos 6.1.1
 
 ## Fixed
 
-- Gestos shows with its own icon in GNOME's app list and dock.
+Toggle Tile Windows, in the “Gestos” GNOME extension:
 
-## Packaging
+- Windows no longer cover each other when an app can't get as small as its tile, sets its smallest size late, or resizes its window itself. Apps that keep resizing their window keep that size, still tiled, and the tiles beside them take the rest.
+- Tiles stay at least 100 pixels wide and tall while the screen has room for them.
+- The gap between tiles is exact when it's an odd number of pixels.
+- Windows moved to a tiled workspace join once they're on screen, so GNOME's placement doesn't undo their tile.
 
-- The extension installs to `share/gnome-shell/extensions/gestos@deters.github.io`. Build with `-Dgnome_extension=false` to leave it out.
-- Building it needs `glib-compile-schemas`, and its tests run with `gjs` when it's installed.
+Log out and back in after updating, so GNOME loads the new extension.
