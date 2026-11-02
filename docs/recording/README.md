@@ -1,8 +1,10 @@
-# Recording the README's GIF
+# Recording the README's GIFs
 
-`docs/screenshots/first-gestures.gif` shows setting up the first two gestures. **When that part of the README needs updating, re-record it with this script**, so that it keeps showing the same story on the current screens.
+`docs/screenshots/maximize-gesture.gif` and `save-gesture.gif` show setting up the first two gestures. **When that part of the README needs updating, re-record them with this script**, so that they keep showing the same story on the current screens.
 
 ## The script
+
+One run gives both GIFs. Step 11 is the last frame of the first and the first of the second.
 
 | Step | Shows | Hold (1/100 s) |
 |---|---|---|
@@ -15,7 +17,7 @@
 | 8 | The finished line | 100 |
 | 9 | Pointer on **Save** | 70 |
 | 10 | The gesture saved, search still filled | 130 |
-| 11 | Search cleared, pointer away | 80 |
+| 11 | Search cleared, pointer away | 400 ending `maximize-gesture`, 130 starting `save-gesture` |
 | 12 | Typing `sa` | 70 |
 | 13 | The full `save` | 100 |
 | 14 | Pointer on **Save (Ctrl+S)** | 80 |
@@ -26,7 +28,7 @@
 | 21 | The gesture saved, pointer on the search's clear button | 110 |
 | 22 | **Search cleared, both gestures showing, pointer away** | 400 |
 
-It always ends with the search box cleared, so that both new gestures can be seen. If the wording in the README describes these gestures, keep the two in step.
+Each GIF ends with the search box cleared, so that its new gesture can be seen. If the wording in the README describes these gestures, keep the two in step.
 
 ## Recording it
 
@@ -48,10 +50,14 @@ Everything runs isolated: see the top of [record.sh](record.sh). Build first, wi
 
 4. Load [demo.js](demo.js) into the page, then go through the script, taking a screenshot for each step.
 
-5. Build the GIF, from each screenshot and how long it holds:
+5. Build each GIF, from its name and each screenshot and how long it holds:
 
    ```bash
-   docs/recording/record.sh build step1.jpg:130 step2.jpg:70
+   docs/recording/record.sh build maximize-gesture step1.jpg:130 step2.jpg:70
+   ```
+
+   ```bash
+   docs/recording/record.sh build save-gesture step11.jpg:130 step12.jpg:70
    ```
 
 6. Stop everything, which also deletes the temporary home folder:

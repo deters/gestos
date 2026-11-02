@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs Gestos through GTK's Broadway backend, for recording the README's GIF in a browser. It has
+# Runs Gestos through GTK's Broadway backend, for recording the README's GIFs in a browser. It has
 # its own home folder and D-Bus session, and a stand-in for the daemon, so it can't touch the real
 # config, the mouse, or a running daemon. See README.md in this folder.
 set -e
@@ -34,15 +34,16 @@ SESSION
         LANG=en_US.UTF-8 setsid dbus-run-session -- "$dir/run.sh" >"$dir/app.log" 2>&1 &
     ;;
 build)
-    # Arguments are frame:delay, with the delay in hundredths of a second.
-    shift
+    # Arguments are the GIF's name, then frame:delay, with the delay in hundredths of a second.
+    name=$2
+    shift 2
     list=""
     for frame in "$@"; do
         list="$list ( ${frame%:*} -crop 549x549+10+9 +repage -set delay ${frame##*:} )"
     done
     # shellcheck disable=SC2086
     magick $list -loop 0 -colors 96 -dither None -layers Optimize \
-        "$root/docs/screenshots/first-gestures.gif"
+        "$root/docs/screenshots/$name.gif"
     ;;
 stop)
     pkill -f "$dir/bin/gestos" || true
@@ -51,7 +52,7 @@ stop)
     rm -rf "$dir"
     ;;
 *)
-    echo "Usage: $0 {server|app|build FRAME:DELAY...|stop}" >&2
+    echo "Usage: $0 {server|app|build NAME FRAME:DELAY...|stop}" >&2
     exit 1
     ;;
 esac
