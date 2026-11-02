@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.gestos" path="/org/gnome/shell/extensions/gestos/">
+    <key name="window-gap" type="i">
+      <range min="0" max="100"/>
+      <default>0</default>
+      <summary>Window gap</summary>
+      <description>Pixels between tiled windows and at the edges of the screen.</description>
+    </key>
+    <key name="closed-sizes" type="a{s(iiiix)}">
+      <default>{}</default>
+      <summary>Sizes to undo</summary>
+      <description>Apps whose window closed at a size the extension gave it, so they saved that size: for each app, the window's original width and height, the width and height it closed at, and when, in seconds since 1970. The next window the app opens at that size gets its original size back.</description>
+    </key>
+  </schema>
+</schemalist>

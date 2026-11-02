@@ -100,6 +100,7 @@ pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static 
         ActionType::Maximize | ActionType::ToggleMaximized => ("window-maximize-symbolic", "icon-bg-blue"),
         ActionType::Restore => ("window-restore-symbolic", "icon-bg-blue"),
         ActionType::ToggleFullscreen => ("view-fullscreen-symbolic", "icon-bg-blue"),
+        ActionType::ToggleTileWindows => ("view-grid-symbolic", "icon-bg-blue"),
         ActionType::Lower | ActionType::Raise => ("window-new-symbolic", "icon-bg-blue"),
         ActionType::WorkspaceLeft => ("go-previous-symbolic", "icon-bg-blue"),
         ActionType::WorkspaceRight => ("go-next-symbolic", "icon-bg-blue"),
@@ -271,6 +272,7 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
             }
         }
         ActionType::ToggleFullscreen => "Toggle Fullscreen".to_string(),
+        ActionType::ToggleTileWindows => "Toggle Tile Windows".to_string(),
         ActionType::ShowDesktop => "Show Desktop".to_string(),
         ActionType::LockScreen => "Lock Screen".to_string(),
         ActionType::Terminal => "Open Terminal".to_string(),
@@ -398,6 +400,20 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     }
 
     main_hbox.append(&vbox);
+
+    // A gesture whose action needs the GNOME extension says so while the extension can't run it.
+    if let Some(action) = gesture.actions.first() {
+        let status = &state_rc.borrow().extension_status;
+        if action.needs_gnome_extension() && !status.is_running() {
+            let warning = gtk::Image::from_icon_name("dialog-warning-symbolic");
+            warning.add_css_class("warning");
+            warning.set_valign(gtk::Align::Center);
+            let note = crate::ui::main_window::extension_note(action, status).unwrap_or_default();
+            warning.set_tooltip_text(Some(note));
+            warning.update_property(&[gtk::accessible::Property::Label(note)]);
+            main_hbox.append(&warning);
+        }
+    }
 
     // 3. Mini Cairo preview canvas
     let preview_frame = gtk::Frame::new(None);

@@ -1,3 +1,4 @@
+option('gnome_extension', type: 'boolean', value: true, description: 'Install the GNOME Shell extension')
 option('udevdir', type: 'string', value: '', description: 'Directory for udev rules')
 option('modulesloaddir', type: 'string', value: '', description: 'Directory for systemd modules-load configuration')
 option('dbusservicedir', type: 'string', value: '', description: 'Directory for D-Bus services')

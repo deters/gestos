@@ -2,6 +2,7 @@ mod state;
 mod suggestions;
 mod actions;
 mod daemon;
+mod extension;
 mod system;
 mod ui;
 

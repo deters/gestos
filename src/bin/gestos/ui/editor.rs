@@ -421,6 +421,15 @@ fn open_editor(
     modifiers_list.append(&modifiers_row);
     scroll_content.append(&modifiers_list);
 
+    // For actions that need the GNOME extension, which isn't always there.
+    let extension_label = gtk::Label::new(None);
+    extension_label.add_css_class("dim-label");
+    extension_label.set_halign(gtk::Align::Start);
+    extension_label.set_xalign(0.0);
+    extension_label.set_wrap(true);
+    extension_label.set_visible(false);
+    scroll_content.append(&extension_label);
+
     canvas.add_controller(drag);
     canvas_frame.set_child(Some(&canvas));
     scroll_content.append(&canvas_frame);
@@ -603,6 +612,12 @@ fn open_editor(
         }
         dialog.set_title(Some(&opt.name));
         dialog_title.set_text(&opt.name);
+        let note = crate::ui::main_window::extension_note(
+            &opt.action_type,
+            &state_rc.borrow().extension_status,
+        );
+        extension_label.set_text(note.unwrap_or_default());
+        extension_label.set_visible(note.is_some());
         // Most actions have nothing to fill in, which leaves this section empty.
         let has_details = action_needs_parameter(&opt);
         settings_section_label.set_visible(has_details);

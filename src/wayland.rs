@@ -13,6 +13,53 @@ const TEMPORARY_SHORTCUT_PICKUP_DELAY_MILLIS: u64 = 100;
 // How long GNOME gets to act on the shortcut before it's restored. Nothing waits for this.
 const TEMPORARY_SHORTCUT_RESTORE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
 
+const GNOME_SHELL_NAME: &str = "org.gnome.Shell";
+const GESTOS_EXTENSION_PATH: &str = "/io/github/deters/Gestos/Extension";
+const GESTOS_EXTENSION_INTERFACE: &str = "io.github.deters.Gestos.Extension";
+const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
+const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
+
+fn call_extension(conn: &zbus::blocking::Connection, shell: &str, method: &str) -> zbus::Result<()> {
+    conn.call_method(
+        Some(shell),
+        GESTOS_EXTENSION_PATH,
+        Some(GESTOS_EXTENSION_INTERFACE),
+        method,
+        &(),
+    )?;
+    Ok(())
+}
+
+/// Runs a window action in the GNOME Shell extension. The extension stays as the user left it, so
+/// when it isn't running, a notification says so instead of doing nothing.
+fn run_extension_action(
+    conn: &zbus::blocking::Connection,
+    shell: &str,
+    notifications: &str,
+    method: &str,
+) -> zbus::Result<()> {
+    if call_extension(conn, shell, method).is_ok() {
+        return Ok(());
+    }
+    conn.call_method(
+        Some(notifications),
+        NOTIFICATIONS_PATH,
+        Some(NOTIFICATIONS_NAME),
+        "Notify",
+        &(
+            "Gestos",
+            0u32,
+            "dialog-warning-symbolic",
+            "This action needs the \u{201c}Gestos\u{201d} GNOME extension",
+            "Turn it on in Gestos Preferences.",
+            Vec::<&str>::new(),
+            HashMap::<&str, zbus::zvariant::Value>::new(),
+            -1i32,
+        ),
+    )?;
+    Ok(())
+}
+
 /// Experimental: GESTOS_SHORTCUT_DELAY_MS overrides the wait, to find what a desktop needs.
 fn temporary_shortcut_pickup_delay(setting: Option<&str>) -> std::time::Duration {
     let millis = setting
@@ -112,6 +159,18 @@ fn first_installed<'a>(
         .iter()
         .map(|command| command.split_whitespace().collect::<Vec<_>>())
         .find(|parts| parts.first().is_some_and(|program| installed(program)))
+}
+
+/// On its own thread, so that a busy Shell can't hold up the next gesture.
+fn spawn_extension_action(method: &'static str) {
+    std::thread::spawn(move || {
+        let result = zbus::blocking::Connection::session().and_then(|conn| {
+            run_extension_action(&conn, GNOME_SHELL_NAME, NOTIFICATIONS_NAME, method)
+        });
+        if let Err(e) = result {
+            log::warn!("Failed to run {}: {}", method, e);
+        }
+    });
 }
 
 #[derive(Debug, Clone, Default)]
@@ -380,6 +439,7 @@ impl WaylandContext {
             ActionType::LockScreen => {
                 self.run_gnome_shortcut("screensaver", "Super_L+l", uinput_handler)
             }
+            ActionType::ToggleTileWindows => spawn_extension_action("ToggleTileWindows"),
             ActionType::Terminal => self.open_terminal(),
             ActionType::VolumeUp => {
                 self.run_gnome_shortcut("volume-up", "XF86AudioRaiseVolume", uinput_handler)
@@ -684,6 +744,97 @@ impl WaylandContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[derive(Clone, Default)]
+    struct FakeShell {
+        extension_active: Arc<AtomicBool>,
+        tile_calls: Arc<AtomicUsize>,
+        notifications: Arc<AtomicUsize>,
+    }
+
+    struct FakeExtension(FakeShell);
+    #[zbus::interface(name = "io.github.deters.Gestos.Extension")]
+    impl FakeExtension {
+        fn toggle_tile_windows(&self) -> zbus::fdo::Result<bool> {
+            if !self.0.extension_active.load(Ordering::SeqCst) {
+                return Err(zbus::fdo::Error::UnknownMethod("not loaded".to_string()));
+            }
+            self.0.tile_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(true)
+        }
+    }
+
+    struct FakeNotifications(FakeShell);
+    #[zbus::interface(name = "org.freedesktop.Notifications")]
+    impl FakeNotifications {
+        #[allow(clippy::too_many_arguments)]
+        fn notify(
+            &self,
+            _app: String,
+            _replaces: u32,
+            _icon: String,
+            _summary: String,
+            _body: String,
+            _actions: Vec<String>,
+            _hints: HashMap<String, zbus::zvariant::OwnedValue>,
+            _timeout: i32,
+        ) -> u32 {
+            self.0.notifications.fetch_add(1, Ordering::SeqCst);
+            1
+        }
+    }
+
+    // The name is unique per test and process, so this can't reach the real Shell on the bus.
+    fn tile_windows_with(shell: &FakeShell, test: &str) -> Option<()> {
+        let conn = zbus::blocking::Connection::session().ok()?;
+        let name = format!("io.github.deters.GestosTestTile{}.P{}", test, std::process::id());
+        let _service = zbus::blocking::connection::Builder::session()
+            .and_then(|b| b.name(name.clone()))
+            .and_then(|b| b.serve_at(GESTOS_EXTENSION_PATH, FakeExtension(shell.clone())))
+            .and_then(|b| b.serve_at(NOTIFICATIONS_PATH, FakeNotifications(shell.clone())))
+            .and_then(|b| b.build())
+            .unwrap();
+        run_extension_action(&conn, &name, &name, "ToggleTileWindows").unwrap();
+        Some(())
+    }
+
+    #[test]
+    fn tile_windows_uses_a_running_extension() {
+        let shell = FakeShell {
+            extension_active: Arc::new(AtomicBool::new(true)),
+            ..Default::default()
+        };
+        if tile_windows_with(&shell, "Active").is_none() {
+            return;
+        }
+        assert_eq!(shell.tile_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(shell.notifications.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn tile_windows_says_when_the_extension_isnt_running() {
+        let shell = FakeShell::default();
+        if tile_windows_with(&shell, "Missing").is_none() {
+            return;
+        }
+        assert_eq!(shell.tile_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(shell.notifications.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn only_tiling_needs_the_extension() {
+        assert!(ActionType::ToggleTileWindows.needs_gnome_extension());
+        assert!(!ActionType::Maximize.needs_gnome_extension());
+        assert!(!ActionType::Gnome("close".to_string()).needs_gnome_extension());
+    }
+
+    #[test]
+    fn tile_windows_survives_saving() {
+        let action = ActionType::ToggleTileWindows;
+        assert_eq!(ActionType::from_string(&action.to_string()), Some(action));
+    }
 
     fn gsettings_command(args: &[&str]) -> Option<String> {
         let output = Command::new("gsettings").args(args).output().ok()?;

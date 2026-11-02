@@ -24,6 +24,7 @@ pub enum ActionType {
     ShowAppGrid,
     Click(Option<i32>),
     ToggleFullscreen,
+    ToggleTileWindows,
     ShowDesktop,
     LockScreen,
     Terminal,
@@ -79,6 +80,7 @@ impl ActionType {
                 Some(ActionType::Click(btn))
             }
             "toggle-fullscreen" => Some(ActionType::ToggleFullscreen),
+            "toggle-tile-windows" => Some(ActionType::ToggleTileWindows),
             "show-desktop" => Some(ActionType::ShowDesktop),
             "lock-screen" => Some(ActionType::LockScreen),
             "terminal" => Some(ActionType::Terminal),
@@ -108,6 +110,11 @@ impl ActionType {
             "disabled" | "abort" => Some(ActionType::Abort),
             _ => None,
         }
+    }
+
+    /// Whether this runs in the Gestos GNOME Shell extension, which is optional.
+    pub fn needs_gnome_extension(&self) -> bool {
+        matches!(self, ActionType::ToggleTileWindows)
     }
 
     /// The GNOME shortcut key a built-in action runs on GNOME, if it has one.
@@ -158,6 +165,7 @@ impl ActionType {
             ActionType::Maximize | ActionType::ToggleMaximized => "window-maximize-symbolic",
             ActionType::Restore => "window-restore-symbolic",
             ActionType::ToggleFullscreen => "view-fullscreen-symbolic",
+            ActionType::ToggleTileWindows => "view-grid-symbolic",
             ActionType::Lower | ActionType::Raise => "window-new-symbolic",
             ActionType::WorkspaceLeft => "go-previous-symbolic",
             ActionType::WorkspaceRight => "go-next-symbolic",
@@ -204,6 +212,7 @@ impl ActionType {
             ActionType::ShowAppGrid => "Show App Grid".to_string(),
             ActionType::Click(btn) => format!("Click Button {}", btn.unwrap_or(1)),
             ActionType::ToggleFullscreen => "Toggle Fullscreen".to_string(),
+            ActionType::ToggleTileWindows => "Toggle Tile Windows".to_string(),
             ActionType::ShowDesktop => "Show Desktop".to_string(),
             ActionType::LockScreen => "Lock Screen".to_string(),
             ActionType::Terminal => "Open Terminal".to_string(),
@@ -257,6 +266,7 @@ impl std::fmt::Display for ActionType {
                 }
             }
             ActionType::ToggleFullscreen => write!(f, "toggle-fullscreen"),
+            ActionType::ToggleTileWindows => write!(f, "toggle-tile-windows"),
             ActionType::ShowDesktop => write!(f, "show-desktop"),
             ActionType::LockScreen => write!(f, "lock-screen"),
             ActionType::Terminal => write!(f, "terminal"),

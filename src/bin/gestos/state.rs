@@ -1,3 +1,4 @@
+use crate::extension::ExtensionStatus;
 use gestos::config::{ActionType, Configuration};
 use gtk4 as gtk;
 #[allow(dead_code)]
@@ -22,4 +23,6 @@ pub struct AppState {
     pub suggestion_box: gtk::Box,
     pub suggestion_no_match: gtk::Label,
     pub suggestion_list: gtk::ListBox,
+    /// Whether the GNOME extension can run the actions that need it.
+    pub extension_status: ExtensionStatus,
 }

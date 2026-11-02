@@ -8,7 +8,103 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use crate::state::AppState;
 use crate::daemon::reload_daemon;
+use crate::extension::{self, ExtensionStatus};
 use crate::system::{get_autostart_file_path, mark_autostart_decided, set_autostart_enabled, is_osd_enabled, set_osd_enabled, get_overlay_autostart_file_path, set_overlay_enabled};
+
+/// A row with a title, a subtitle under it, and room for a control at its end.
+fn settings_row(title: &str, subtitle: &str) -> (gtk::ListBoxRow, gtk::Box, gtk::Label) {
+    let row = gtk::ListBoxRow::new();
+    row.set_activatable(false);
+    let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row_box.set_margin_start(16);
+    row_box.set_margin_end(16);
+    row_box.set_margin_top(12);
+    row_box.set_margin_bottom(12);
+
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    text.set_hexpand(true);
+    text.set_halign(gtk::Align::Start);
+    let title_label = gtk::Label::new(Some(title));
+    title_label.add_css_class("status-label");
+    title_label.set_halign(gtk::Align::Start);
+    text.append(&title_label);
+    let subtitle_label = gtk::Label::new(Some(subtitle));
+    subtitle_label.add_css_class("action-label");
+    subtitle_label.set_halign(gtk::Align::Start);
+    subtitle_label.set_xalign(0.0);
+    subtitle_label.set_wrap(true);
+    text.append(&subtitle_label);
+    row_box.append(&text);
+
+    row.set_child(Some(&row_box));
+    (row, row_box, subtitle_label)
+}
+
+/// The GNOME extension: whether it's running, a switch for it, and its settings.
+fn append_extension_section(state_rc: &Rc<RefCell<AppState>>, main_box: &gtk::Box) {
+    let header = gtk::Label::new(Some("GNOME Extension"));
+    header.add_css_class("section-header");
+    header.set_halign(gtk::Align::Start);
+    header.set_margin_top(12);
+    header.set_margin_bottom(4);
+    main_box.append(&header);
+
+    let list = gtk::ListBox::new();
+    list.add_css_class("boxed-list");
+    list.set_selection_mode(gtk::SelectionMode::None);
+    main_box.append(&list);
+
+    let status = state_rc.borrow().extension_status.clone();
+    let (status_row, status_box, status_subtitle) =
+        // Named as GNOME's Extensions app lists it.
+        settings_row("Gestos", &status.description());
+    if status.can_switch() {
+        let switch = gtk::Switch::new();
+        switch.set_valign(gtk::Align::Center);
+        switch.set_active(status != ExtensionStatus::Off);
+        switch.update_property(&[gtk::accessible::Property::Label("Gestos GNOME extension")]);
+        let state_switch = Rc::clone(state_rc);
+        switch.connect_state_set(move |_, enabled| {
+            let conn = state_switch.borrow().dbus_conn.clone();
+            let Some(conn) = conn else {
+                status_subtitle.set_text("Could not change this setting: no session bus");
+                return glib::Propagation::Stop;
+            };
+            if let Err(e) = extension::set_enabled(&conn, enabled) {
+                status_subtitle.set_text(&format!("Could not change this setting: {e}"));
+                return glib::Propagation::Stop;
+            }
+            // GNOME takes a moment to start or stop it.
+            let state_after = Rc::clone(&state_switch);
+            let subtitle = status_subtitle.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(500), move || {
+                crate::ui::main_window::refresh_extension_status(&state_after);
+                subtitle.set_text(&state_after.borrow().extension_status.description());
+            });
+            glib::Propagation::Proceed
+        });
+        status_box.append(&switch);
+    }
+    list.append(&status_row);
+
+    // The extension keeps its settings with it, so they're only here while it's installed.
+    if let Some(settings) = extension::settings() {
+        let (gap_row, gap_box, _) = settings_row(
+            "Window Gap",
+            "Space around tiled windows",
+        );
+        let gap = gtk::SpinButton::with_range(0.0, 100.0, 1.0);
+        gap.set_valign(gtk::Align::Center);
+        gap.update_property(&[gtk::accessible::Property::Label("Window Gap")]);
+        settings.bind("window-gap", &gap, "value").build();
+        // The binding needs the settings for as long as the button is there.
+        gap.connect_destroy(move |_| {
+            let _ = &settings;
+        });
+        gap_box.append(&gap);
+        list.append(&gap_row);
+    }
+}
 
 pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     let parent = state_rc.borrow().window.clone();
@@ -248,6 +344,12 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     reduce_box.append(&reduce_switch);
     reduce_row.set_child(Some(&reduce_box));
     general_list.append(&reduce_row);
+
+    // --- GNOME Extension Section ---
+    // Only on GNOME, where the extension can exist. Elsewhere its actions aren't offered at all.
+    if state_rc.borrow().extension_status != ExtensionStatus::Unavailable {
+        append_extension_section(state_rc, &main_box);
+    }
 
     // --- Backup & Restore Section ---
     let maintenance_header = gtk::Label::new(Some("Backup & Restore"));

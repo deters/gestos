@@ -368,6 +368,18 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
             tooltip: "Ignore gesture matching".to_string(),
         },
     ]);
+    // It runs in the GNOME Shell extension, so no other desktop can do it.
+    let is_gnome = std::env::var("XDG_CURRENT_DESKTOP")
+        .map(|d| d.to_lowercase().contains("gnome"))
+        .unwrap_or(false);
+    if is_gnome {
+        options.push(EditorActionOption {
+            category: 1,
+            action_type: ActionType::ToggleTileWindows,
+            name: "Toggle Tile Windows".to_string(),
+            tooltip: "Fit the windows on the workspace together, or put them back".to_string(),
+        });
+    }
     options
 }
 

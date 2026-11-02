@@ -32,7 +32,26 @@ pub fn get_visible_gestures(state: &AppState) -> Vec<Gesture> {
 
     gestures
 }
-fn suggestion_row(option: &crate::state::EditorActionOption) -> gtk::ListBoxRow {
+/// What an action that needs the GNOME extension says about it, or None for any other action.
+pub fn extension_note(
+    action: &gestos::config::ActionType,
+    status: &crate::extension::ExtensionStatus,
+) -> Option<&'static str> {
+    if !action.needs_gnome_extension() {
+        return None;
+    }
+    Some(if status.is_running() {
+        // Named as GNOME's Extensions app lists it, so it can be found there.
+        "Uses the \u{201c}Gestos\u{201d} GNOME extension"
+    } else {
+        "Needs the \u{201c}Gestos\u{201d} GNOME extension"
+    })
+}
+
+fn suggestion_row(
+    option: &crate::state::EditorActionOption,
+    status: &crate::extension::ExtensionStatus,
+) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row_box.set_margin_start(16);
@@ -42,11 +61,22 @@ fn suggestion_row(option: &crate::state::EditorActionOption) -> gtk::ListBoxRow 
 
     let (icon_name, _) = get_action_category_icon(&option.action_type);
     row_box.append(&gtk::Image::from_icon_name(icon_name));
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    text.set_hexpand(true);
+    text.set_valign(gtk::Align::Center);
     let name = gtk::Label::new(Some(&option.name));
-    name.set_hexpand(true);
     name.set_xalign(0.0);
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    row_box.append(&name);
+    text.append(&name);
+    if let Some(note) = extension_note(&option.action_type, status) {
+        let subtitle = gtk::Label::new(Some(note));
+        subtitle.add_css_class("dim-label");
+        subtitle.add_css_class("caption");
+        subtitle.set_xalign(0.0);
+        subtitle.set_wrap(true);
+        text.append(&subtitle);
+    }
+    row_box.append(&text);
     row_box.append(&gtk::Image::from_icon_name("go-next-symbolic"));
 
     row.set_child(Some(&row_box));
@@ -63,7 +93,7 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
     let query = state.search_entry.text().to_string();
     let found = find_suggestions(&state.action_options, &state.config.gestures, &query);
     for option in &found {
-        state.suggestion_list.append(&suggestion_row(option));
+        state.suggestion_list.append(&suggestion_row(option, &state.extension_status));
     }
 
     state
@@ -77,6 +107,14 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
         state.empty_state_box.set_visible(false);
     }
     state.visible_suggestions = found;
+}
+
+pub fn refresh_extension_status(state_rc: &Rc<RefCell<AppState>>) {
+    let status = crate::extension::status(state_rc.borrow().dbus_conn.as_ref());
+    if state_rc.borrow().extension_status != status {
+        state_rc.borrow_mut().extension_status = status;
+        refresh_gesture_list(state_rc, None);
+    }
 }
 
 pub fn refresh_gesture_list(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) {
@@ -234,6 +272,7 @@ pub fn build_ui(app: &gtk::Application) {
 
     let search_entry_widget = search_entry.clone();
     let gesture_status = GestureStatus::new("Gestures", dbus_conn.clone());
+    let extension_status = crate::extension::status(dbus_conn.as_ref());
     header.set_title_widget(Some(gesture_status.title()));
     header.pack_end(gesture_status.action_button());
     content_vbox.insert_child_after(gesture_status.error_area(), Some(&search_entry_widget));
@@ -252,7 +291,17 @@ pub fn build_ui(app: &gtk::Application) {
         suggestion_box,
         suggestion_no_match,
         suggestion_list,
+        extension_status,
     }));
+
+    // The extension can be turned on, off, or installed elsewhere, so its status is read again
+    // whenever the window comes back to the front.
+    let state_active = Rc::clone(&state);
+    state.borrow().window.connect_is_active_notify(move |window| {
+        if window.is_active() {
+            refresh_extension_status(&state_active);
+        }
+    });
 
     // Refresh initially
     refresh_gesture_list(&state, None);

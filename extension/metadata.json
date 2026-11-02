@@ -1,0 +1,9 @@
+{
+  "uuid": "gestos@deters.github.io",
+  "name": "Gestos",
+  "description": "Window tiling for Gestos, which GNOME has no shortcut for.",
+  "shell-version": ["50"],
+  "settings-schema": "org.gnome.shell.extensions.gestos",
+  "session-modes": ["user", "unlock-dialog"],
+  "url": "https://github.com/deters/gestos"
+}

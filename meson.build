@@ -54,6 +54,7 @@ cargo_sources = files(
   'src/bin/gestos/ui/gesture_status.rs',
   'src/bin/gestos/system.rs',
   'src/bin/gestos/daemon.rs',
+  'src/bin/gestos/extension.rs',
   'src/bin/gestos/state.rs',
   'src/bin/gestos/suggestions.rs',
   'src/bin/gestos/main.rs',
@@ -141,6 +142,29 @@ configure_file(
   configuration: conf_data,
   install_dir: systemd_system_dir
 )
+
+# The GNOME Shell extension, for window actions that only the Shell can do
+if get_option('gnome_extension')
+  extension_dir = datadir / 'gnome-shell' / 'extensions' / 'gestos@deters.github.io'
+  install_data('extension/extension.js', 'extension/prefs.js', 'extension/metadata.json', install_dir: extension_dir)
+  install_data('extension/lib/tile.js', install_dir: extension_dir / 'lib')
+  install_data('extension/schemas/org.gnome.shell.extensions.gestos.gschema.xml', install_dir: extension_dir / 'schemas')
+  # Compiled here, as extensions keep their own settings schema instead of sharing the system's.
+  custom_target(
+    'extension-schemas',
+    input: 'extension/schemas/org.gnome.shell.extensions.gestos.gschema.xml',
+    output: 'gschemas.compiled',
+    command: [find_program('glib-compile-schemas'), '--targetdir=@OUTDIR@', meson.project_source_root() / 'extension/schemas'],
+    build_by_default: true,
+    install: true,
+    install_dir: extension_dir / 'schemas',
+  )
+
+  gjs = find_program('gjs', required: false)
+  if gjs.found()
+    test('gnome-extension', gjs, args: ['-m', files('extension/tests/tile.test.js')])
+  endif
+endif
 
 # Keeps old autostart entries and scripts working after the rename from MyGestures
 # It's generated under another name: in a build folder that once built the old binary,

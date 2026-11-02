@@ -55,6 +55,10 @@ sudo meson install -C build
 
 If you're updating an older install, run the install step again. It removes the Set-Group-ID permission that `gestosd` used to have, and starts the input service.
 
+### Tiling on GNOME
+
+Toggle Tile Windows needs the “Gestos” GNOME extension, which comes with Gestos. After installing, log out and back in, then turn it on in Gestos's Preferences. Other desktops don't use it, and building with `-Dgnome_extension=false` leaves it out.
+
 ## Security
 
 Mouse gestures need access to your input devices, so Gestos keeps that access in a small, sandboxed system service, apart from everything else. The rest of the app runs as you, with no special rights.
