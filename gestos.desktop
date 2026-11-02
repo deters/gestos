@@ -7,6 +7,8 @@ Icon=gestos
 Terminal=false
 Categories=Settings;GTK;Utility;
 StartupNotify=true
+# The app ID, which the window has, so GNOME shows it as this app.
+StartupWMClass=io.github.deters.Gestos
 Actions=Start;Stop;
 
 [Desktop Action Start]
