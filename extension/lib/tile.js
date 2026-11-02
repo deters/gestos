@@ -57,8 +57,9 @@ export function restoreRect(tile, previous, pointerX) {
 
 // No side of a split gets less than this share, so that a small window still gets a usable tile.
 const MIN_SPLIT_SHARE = 0.2;
-// How far a resize can push a split, so that the tiles beyond it keep some room.
-const MIN_RESIZED_SHARE = 0.05;
+// The smallest a tile gets, along each side, while the area has room for all of them. Windows that
+// can't get that small have their own smallest size, which takes over.
+const MIN_TILE = 100;
 
 const AXES = [
     {start: 'x', size: 'width'},
@@ -106,30 +107,39 @@ function buildTree(items) {
     };
 }
 
-function splitArea(node, area) {
+// How much room a part of the tree needs along an axis for each of its tiles to get the smallest
+// size, with its share of the gap: side by side ones add up, and ones across the axis don't.
+function needed(node, axis, tiling) {
+    if (node.index !== undefined)
+        return Math.max(MIN_TILE, tiling.minimums.get(node.index)?.[axis.size] ?? 0) + tiling.gap;
+    const before = needed(node.before, axis, tiling);
+    const after = needed(node.after, axis, tiling);
+    return node.axis === axis ? before + after : Math.max(before, after);
+}
+
+// Splits the area at the node's share, moved as far as needed for both sides to have room for
+// their tiles. When the area can't fit them all, each side gets room in proportion to its needs.
+function splitArea(node, area, tiling) {
     const {start, size} = node.axis;
-    const cut = Math.round(area[size] * node.share);
+    const beforeNeeds = needed(node.before, node.axis, tiling);
+    const afterNeeds = needed(node.after, node.axis, tiling);
+    const cut = beforeNeeds + afterNeeds <= area[size]
+        ? Math.min(area[size] - afterNeeds, Math.max(beforeNeeds, area[size] * node.share))
+        : area[size] * beforeNeeds / (beforeNeeds + afterNeeds);
     return [
         {...area, [size]: cut},
         {...area, [start]: area[start] + cut, [size]: area[size] - cut},
     ];
 }
 
-function placeTree(node, area, tiles) {
+function placeTree(node, area, tiling, tiles) {
     if (node.index !== undefined) {
         tiles[node.index] = area;
         return;
     }
-    const [before, after] = splitArea(node, area);
-    placeTree(node.before, before, tiles);
-    placeTree(node.after, after, tiles);
-}
-
-// Half the gap around every tile, and the other half inside the area, adds up to the full gap
-// both between tiles and at the edges.
-function insets(gap) {
-    const half = Math.floor(gap / 2);
-    return {half, outer: gap - half};
+    const [before, after] = splitArea(node, area, tiling);
+    placeTree(node.before, before, tiling, tiles);
+    placeTree(node.after, after, tiling, tiles);
 }
 
 /**
@@ -141,19 +151,23 @@ function insets(gap) {
  * @param {Array<{x: number, y: number, width: number, height: number}>} rects - the windows
  * @param {{x: number, y: number, width: number, height: number}} area - where they fit
  * @param {number} [gap] - the pixels to leave between tiles and around the area
+ * @param {Map<number, {width: number, height: number}>} [minimums] - the smallest size of windows
+ *   that can't get as small as tiles can, by their index
  * @returns {object} the tiling, for tilingRects and moveTileEdge
  */
-export function makeTiling(rects, area, gap = 0) {
-    const {outer} = insets(gap);
+export function makeTiling(rects, area, gap = 0, minimums = new Map()) {
+    // Half the gap inside the area, and half around every tile, adds up to the full gap both
+    // between tiles and at the edges.
     return {
         tree: rects.length > 0 ? buildTree(rects.map((rect, index) => ({rect, index}))) : null,
         area: {
-            x: area.x + outer,
-            y: area.y + outer,
-            width: area.width - 2 * outer,
-            height: area.height - 2 * outer,
+            x: area.x + gap / 2,
+            y: area.y + gap / 2,
+            width: area.width - gap,
+            height: area.height - gap,
         },
         gap,
+        minimums,
     };
 }
 
@@ -165,20 +179,26 @@ export function makeTiling(rects, area, gap = 0) {
 export function tilingRects(tiling) {
     if (!tiling.tree)
         return [];
-    const {half} = insets(tiling.gap);
+    const half = tiling.gap / 2;
     const tiles = [];
-    placeTree(tiling.tree, tiling.area, tiles);
-    return tiles.map(t => ({
-        x: t.x + half,
-        y: t.y + half,
-        width: t.width - 2 * half,
-        height: t.height - 2 * half,
-    }));
+    placeTree(tiling.tree, tiling.area, tiling, tiles);
+    // Rounded edge by edge, so that neighbors stay exactly the gap apart, odd ones too.
+    return tiles.map(t => {
+        const x = Math.round(t.x + half);
+        const y = Math.round(t.y + half);
+        return {
+            x,
+            y,
+            width: Math.round(t.x + t.width - half) - x,
+            height: Math.round(t.y + t.height - half) - y,
+        };
+    });
 }
 
 /**
  * Moves the split along one edge of a window's tile to where that edge was dragged. The tiles on the
- * other side of it make room, and the tiles within each side keep their proportions.
+ * other side of it make room, and the tiles within each side keep their proportions. It stops
+ * where the tiles beyond it would get smaller than the smallest size.
  *
  * @param {object} tiling - from makeTiling, which this changes
  * @param {number} index - the window whose tile was resized
@@ -194,7 +214,7 @@ export function moveTileEdge(tiling, index, edge, position) {
     const walk = (node, area) => {
         if (node.index !== undefined)
             return node.index === index;
-        const [before, after] = splitArea(node, area);
+        const [before, after] = splitArea(node, area, tiling);
         for (const [name, child, childArea] of [['before', node.before, before], ['after', node.after, after]]) {
             if (walk(child, childArea)) {
                 if (!found && node.axis === axis && name === side)
@@ -210,11 +230,10 @@ export function moveTileEdge(tiling, index, edge, position) {
     if (!found)
         return;
 
-    const {half} = insets(tiling.gap);
-    const cut = side === 'before' ? position + half : position - half;
+    const cut = side === 'before' ? position + tiling.gap / 2 : position - tiling.gap / 2;
     const {node, area} = found;
-    node.share = Math.min(1 - MIN_RESIZED_SHARE,
-        Math.max(MIN_RESIZED_SHARE, (cut - area[axis.start]) / area[axis.size]));
+    // How far it can go is up to splitArea, which keeps room for the tiles beyond it.
+    node.share = Math.min(1, Math.max(0, (cut - area[axis.start]) / area[axis.size]));
 }
 
 /**

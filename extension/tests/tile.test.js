@@ -60,6 +60,61 @@ results.push(['leaves an edge at the screen alone', resized(threeTiles, 0, 'left
     tileRects(threeTiles, bounds)]);
 results.push(['keeps the gap while moving an edge', resized(threeTiles, 0, 'right', 690, 10)[1].x, 700]);
 
+// What any layout must do, with any gap and after any edges are dragged: no overlaps, every tile
+// inside the area and at least the smallest size, the gap kept between tiles, and with no gap, the
+// whole area filled.
+const inside = (t, area) => t.x >= area.x && t.y >= area.y &&
+    t.x + t.width <= area.x + area.width && t.y + t.height <= area.y + area.height;
+const grownBy = (t, by) => rect(t.x - by, t.y - by, t.width + 2 * by, t.height + 2 * by);
+function problemsWith(tiles, gap) {
+    if (tiles.some(t => t.width < 100 || t.height < 100))
+        return 'a tile is smaller than 100 pixels';
+    if (tiles.some(t => !inside(t, grownBy(bounds, -gap))))
+        return 'a tile is outside the area';
+    const cells = tiles.map(t => grownBy(t, gap / 2 - 0.01));
+    if (cells.some((a, i) => cells.some((b, j) => i < j && overlaps(a, b))))
+        return 'tiles overlap or are closer than the gap';
+    if (gap === 0 && tiles.reduce((sum, t) => sum + t.width * t.height, 0) !==
+        bounds.width * bounds.height)
+        return "the area isn't filled";
+    return null;
+}
+
+// The same layouts on every run.
+let seed = 42;
+const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+};
+const randomRect = () => rect(Math.round(random() * 1200 - 200), Math.round(random() * 1000 - 200),
+    Math.round(50 + random() * 900), Math.round(50 + random() * 700));
+const layouts = [];
+for (let i = 0; i < 300; i++)
+    layouts.push(Array.from({length: 1 + Math.floor(random() * 6)}, randomRect));
+for (let i = 0; i < 30; i++) {
+    const spot = randomRect();
+    layouts.push(Array.from({length: 2 + Math.floor(random() * 4)}, () => ({...spot})));
+}
+
+for (const gap of [0, 10, 41]) {
+    const failed = layouts.map(rects => {
+        const tiling = makeTiling(rects, bounds, gap);
+        const placed = problemsWith(tilingRects(tiling), gap);
+        for (let drag = 0; drag < 4; drag++) {
+            const edge = ['left', 'right', 'top', 'bottom'][Math.floor(random() * 4)];
+            moveTileEdge(tiling, Math.floor(random() * rects.length), edge,
+                Math.round(random() * (edge === 'left' || edge === 'right' ? 1000 : 800)));
+        }
+        return [rects, placed ?? problemsWith(tilingRects(tiling), gap)];
+    }).find(([, problem]) => problem);
+    results.push([`fits every layout together with a gap of ${gap}, also after dragging edges`,
+        failed ? `${failed[1]} in ${JSON.stringify(failed[0])}` : 'ok', 'ok']);
+}
+
+const withMinimum = tilingRects(makeTiling([rect(0, 0, 400, 800), rect(500, 0, 500, 800)], bounds, 0,
+    new Map([[1, {width: 700, height: 100}]])));
+results.push(["makes room for a window that can't get as small as its tile", withMinimum[1].width, 700]);
+
 results.push(['has a size an app rounded', hasSize(rect(0, 0, 690, 410), rect(0, 0, 700, 419)), true]);
 results.push(['has not a size far from it', hasSize(rect(0, 0, 400, 300), rect(0, 0, 700, 419)), false]);
 
