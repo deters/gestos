@@ -492,22 +492,55 @@ class WindowActions {
 
     _startTiling(workspace) {
         const tiling = {workspace, windows: new Map(), plans: [], waits: [], timeoutId: 0,
-            checkId: 0, relayouts: []};
+            checkId: 0, relayouts: [], joining: new Map()};
         // Windows moved here from a workspace that isn't tiled join. New windows join once they're
         // on screen, as the Shell places them before that, which would undo their tile.
         tiling.addedId = workspace.connect('window-added', (_workspace, window) => {
             if (this._findTiling(window)[1] || !window.mapped || !isTileable(window))
                 return;
-            this._addToTiling(tiling, window);
-            this._layoutWhenReady(tiling);
+            this._joinLater(tiling, window);
         });
         this._tilings.set(workspace, tiling);
         return tiling;
     }
 
+    // A window on all workspaces, as on a monitor other than the primary one, comes back to a single
+    // workspace as it closes. It can't be resized then without crashing the Shell, so windows that
+    // come here join a moment later, if they're still open.
+    _joinLater(tiling, window) {
+        if (tiling.joining.has(window))
+            return;
+        const join = {
+            unmanagedId: window.connect('unmanaged', () => this._stopJoining(tiling, window)),
+            idleId: GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                join.idleId = 0;
+                this._stopJoining(tiling, window);
+                if (window.get_workspace() !== tiling.workspace || this._findTiling(window)[1] ||
+                    !window.mapped || !isTileable(window))
+                    return GLib.SOURCE_REMOVE;
+                this._addToTiling(tiling, window);
+                this._layoutWhenReady(tiling);
+                return GLib.SOURCE_REMOVE;
+            }),
+        };
+        tiling.joining.set(window, join);
+    }
+
+    _stopJoining(tiling, window) {
+        const join = tiling.joining.get(window);
+        if (!join)
+            return;
+        tiling.joining.delete(window);
+        window.disconnect(join.unmanagedId);
+        if (join.idleId)
+            GLib.source_remove(join.idleId);
+    }
+
     _stopTiling(tiling) {
         this._stopWaiting(tiling);
         this._stopTileCheck(tiling);
+        for (const window of [...tiling.joining.keys()])
+            this._stopJoining(tiling, window);
         tiling.workspace.disconnect(tiling.addedId);
         for (const [window, state] of tiling.windows)
             this._unwatchTile(window, state);
