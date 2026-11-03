@@ -186,7 +186,8 @@ class WindowActions {
             tiling.plans = plans;
             for (const [window, state] of windows) {
                 if (this._originals.has(window))
-                    this._joinTiling(tiling, window, state);
+                    // A move that was going on ended while this was off, unseen.
+                    this._joinTiling(tiling, window, {...state, moving: false});
             }
             if (tiling.windows.size < windows.length)
                 this._layoutWhenReady(tiling);
@@ -431,10 +432,12 @@ class WindowActions {
         if (tiling && !tiling.windows.get(window).tile)
             return;
 
+        // A window that's moved leaves on its own, as the other tiles stayed where they were.
+        const endTiling = !tiling?.windows.get(window).moving;
         const flags = window.get_maximize_flags();
         if (window.is_fullscreen() || flags === Meta.MaximizeFlags.BOTH) {
             const fullscreen = window.is_fullscreen();
-            this._leave(window, true);
+            this._leave(window, endTiling);
             // Its original size is taken where it can't be seen, until it's maximized again.
             const thawLater = this._freeze(window);
             this._restoreOriginalThen(window, original, () => {
@@ -447,7 +450,7 @@ class WindowActions {
             });
         } else if (flags !== 0) {
             if (!original.snapped) {
-                this._leave(window, true);
+                this._leave(window, endTiling);
                 original.snapped = true;
             }
         } else if (original.snapped) {
@@ -688,7 +691,7 @@ class WindowActions {
             plan.windows.forEach((window, i) => {
                 const state = tiling.windows.get(window);
                 state.tile = tiles[i];
-                if (this._originals.get(window).closing)
+                if (this._originals.get(window).closing || state.moving)
                     return;
                 // A window that keeps its own size is only moved to its tile.
                 const {x, y} = tiles[i];
@@ -839,9 +842,12 @@ class WindowActions {
     // tiles beyond them make room.
     _onGrabEnd(window, op) {
         this._grabbed = null;
-        if (isMoving(op))
-            return;
         const [, tiling] = this._findTiling(window);
+        if (isMoving(op)) {
+            if (tiling?.windows.get(window).moving)
+                this._dropIntoTiling(tiling, window);
+            return;
+        }
         const plan = tiling?.plans.find(p => p.windows.includes(window));
         const tile = tiling?.windows.get(window).tile;
         if (!plan || !tile)
@@ -862,26 +868,34 @@ class WindowActions {
         this._place(tiling);
     }
 
-    // Moving a tiled window gives it its original size back under the pointer, and ends tiling for
-    // its workspace.
+    // A tiled window that's moved gets its original size back under the pointer while it moves,
+    // and the other tiles stay as they are.
     _onGrabBegin(window, op) {
         // What the user does to a window isn't undone while they do it.
         this._grabbed = window;
         if (!isMoving(op))
             return;
-        const [workspace, tiling] = this._findTiling(window);
+        const [, tiling] = this._findTiling(window);
         if (!tiling)
             return;
-        this._untile(workspace, window);
+        tiling.windows.get(window).moving = true;
 
         const original = this._originals.get(window);
-        if (original?.rect) {
+        if (original.rect) {
             const [pointerX] = global.get_pointer();
             const {x, y, width, height} =
                 restoreRect(window.get_frame_rect(), original.rect, pointerX);
+            original.size = null;
             window.move_resize_frame(true, x, y, width, height);
         }
-        this._untrack(window);
+    }
+
+    // A moved window takes a tile where it's left, at the size it had, and the tiles are placed
+    // again around it.
+    _dropIntoTiling(tiling, window) {
+        tiling.windows.get(window).moving = false;
+        this._originals.get(window).rect = copyRect(window.get_frame_rect());
+        this._layout(tiling);
     }
 
     /**
