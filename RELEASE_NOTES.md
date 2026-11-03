@@ -1,8 +1,7 @@
-# Gestos 6.1.3
+# Gestos 6.2.0
 
-## Fixed
+## Changed
 
-- **GNOME Shell no longer crashes** when a window on a monitor other than the primary one closes while the primary display's windows are tiled. The crash ended the session.
-- Close Window lets GNOME check that the app is still responding as it closes, so an app that hangs can be offered to force quit.
+- **Moving a tiled window keeps the workspace tiled.** The window you move gets its original size back while it moves, and the other tiles stay where they are. Where you leave it, it takes a tile, on that monitor, and the tiles are placed again around it. Maximizing or snapping it while it moves only takes that window out of tiling.
 
 Log out and back in after updating, so GNOME loads the new extension.
