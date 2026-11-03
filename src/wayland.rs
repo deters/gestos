@@ -393,7 +393,7 @@ impl WaylandContext {
     fn execute_gnome(&self, action: &ActionType, uinput_handler: &dyn Fn(&str)) {
         match action {
             ActionType::Iconify => self.run_gnome_shortcut("minimize", "Super_L+h", uinput_handler),
-            ActionType::Kill => self.run_gnome_shortcut("close", "Alt_L+F4", uinput_handler),
+            ActionType::Kill => self.close_gnome_window(uinput_handler),
             ActionType::Lower => uinput_handler("Alt_L+Escape"),
             ActionType::Maximize => {
                 self.run_gnome_shortcut("maximize", "Super_L+Up", uinput_handler)
@@ -632,6 +632,16 @@ impl WaylandContext {
 
     fn run_hyprctl(&self, msg: &str) {
         self.run_user_cmd("hyprctl", &msg.split_whitespace().collect::<Vec<_>>());
+    }
+
+    /// Closes the focused window in the extension, as its close button does. A pressed shortcut
+    /// is only the way when the extension isn't running.
+    fn close_gnome_window(&self, uinput_handler: &dyn Fn(&str)) {
+        let closed = zbus::blocking::Connection::session()
+            .and_then(|conn| call_extension(&conn, GNOME_SHELL_NAME, "CloseWindow"));
+        if closed.is_err() {
+            self.run_gnome_shortcut("close", "Alt_L+F4", uinput_handler);
+        }
     }
 
     fn run_gnome_shortcut(&self, key: &str, fallback_keys: &str, uinput_handler: &dyn Fn(&str)) {

@@ -17,6 +17,9 @@ const INTERFACE_XML = `
     <method name="ToggleTileWindows">
       <arg type="b" direction="out" name="changed"/>
     </method>
+    <method name="CloseWindow">
+      <arg type="b" direction="out" name="closed"/>
+    </method>
   </interface>
 </node>`;
 
@@ -871,6 +874,19 @@ class WindowActions {
             this._addToTiling(tiling, window);
         this._layoutWhenReady(tiling);
         return windows.length > 0;
+    }
+
+    /**
+     * Asks the focused window to close, the way its close button does.
+     *
+     * @returns {boolean} whether there was a window to close
+     */
+    CloseWindow() {
+        const window = global.display.focus_window;
+        if (!window?.can_close())
+            return false;
+        window.delete(global.get_current_time());
+        return true;
     }
 }
 
