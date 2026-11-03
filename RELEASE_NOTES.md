@@ -1,9 +1,8 @@
-# Gestos 6.1.2
+# Gestos 6.1.3
 
 ## Fixed
 
-- **Close Window, on GNOME:** closes the focused window the way its close button does, through the “Gestos” GNOME extension. Without the extension it still presses GNOME's close shortcut.
-- Shortcuts that gestures press on GNOME start sooner, as the keyboard layout is no longer looked up with `gsettings` each time.
-- The cursor stays smooth on a busy desktop, as the input service now runs at a slightly higher priority.
+- **GNOME Shell no longer crashes** when a window on a monitor other than the primary one closes while the primary display's windows are tiled. The crash ended the session.
+- Close Window lets GNOME check that the app is still responding as it closes, so an app that hangs can be offered to force quit.
 
 Log out and back in after updating, so GNOME loads the new extension.
