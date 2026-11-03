@@ -885,7 +885,9 @@ class WindowActions {
         const window = global.display.focus_window;
         if (!window?.can_close())
             return false;
-        window.delete(global.get_current_time());
+        // Outside of an input event the Shell's current time is 0, which Mutter can't ping the
+        // window with to find out whether its app is still responding.
+        window.delete(global.display.get_current_time_roundtrip());
         return true;
     }
 }
