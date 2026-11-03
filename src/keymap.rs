@@ -81,8 +81,14 @@ fn command_output(program: &str, args: &[&str]) -> Option<String> {
 }
 
 fn gnome_layout() -> Option<LayoutName> {
+    const INPUT_SOURCES: &str = "org.gnome.desktop.input-sources";
+    // Read in this process when possible: it's looked up before every shortcut, and starting
+    // gsettings for each key takes longer than pressing the shortcut.
     let setting = |key: &str| {
-        command_output("gsettings", &["get", "org.gnome.desktop.input-sources", key])
+        if crate::wayland::gio_reads_user_settings() {
+            return crate::wayland::read_gnome_setting(INPUT_SOURCES, key);
+        }
+        command_output("gsettings", &["get", INPUT_SOURCES, key])
     };
     // Most recently used first, which puts the layout in use now at the front.
     let mut layout = setting("mru-sources")

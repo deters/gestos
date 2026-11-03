@@ -8,6 +8,10 @@ ExecStart=@libexecdir@/gestos-input
 StandardInput=null
 StandardOutput=journal
 StandardError=journal
+# The pointer passes through here, so a busy desktop shouldn't hold it up. Set before the service
+# starts, it can't be raised further from inside; only a little, since any program of the user at
+# the screen can make the service do some work.
+Nice=-5
 
 # Only input devices, and nothing else it doesn't need.
 DynamicUser=yes

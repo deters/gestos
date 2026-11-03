@@ -72,7 +72,7 @@ type GnomeSchema = (gio::Settings, gio::SettingsSchema);
 type GnomeSettingRequest = (String, String, Sender<Option<String>>);
 
 /// Without its dconf module GIO quietly reads built-in defaults instead of the user's settings.
-fn gio_reads_user_settings() -> bool {
+pub fn gio_reads_user_settings() -> bool {
     static USES_DCONF: OnceLock<bool> = OnceLock::new();
     *USES_DCONF.get_or_init(|| {
         gio::SettingsBackend::default().type_().name() == "DConfSettingsBackend"
@@ -104,7 +104,7 @@ fn gnome_settings_thread() -> Sender<GnomeSettingRequest> {
 }
 
 /// A setting as text in gsettings' format, or nothing if this schema doesn't have the key.
-fn read_gnome_setting(schema_id: &str, key: &str) -> Option<String> {
+pub fn read_gnome_setting(schema_id: &str, key: &str) -> Option<String> {
     static REQUESTS: OnceLock<Sender<GnomeSettingRequest>> = OnceLock::new();
     let (reply, answer) = channel();
     REQUESTS
