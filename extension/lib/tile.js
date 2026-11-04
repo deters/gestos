@@ -35,6 +35,20 @@ export function keepInside(rect, bounds) {
 }
 
 /**
+ * A size made no bigger than the bounds, along each side.
+ *
+ * @param {{width: number, height: number}} size - the size to fit
+ * @param {{width: number, height: number}} bounds - the most it can be
+ * @returns {{width: number, height: number}} the fitted size
+ */
+export function fitSize(size, bounds) {
+    return {
+        width: Math.min(size.width, bounds.width),
+        height: Math.min(size.height, bounds.height),
+    };
+}
+
+/**
  * Where a tiled window goes when a drag brings back its original size.
  *
  * The pointer stays at the same relative spot across the window, so the window doesn't slip out from
@@ -108,10 +122,13 @@ function buildTree(items) {
 }
 
 // How much room a part of the tree needs along an axis for each of its tiles to get the smallest
-// size, with its share of the gap: side by side ones add up, and ones across the axis don't.
+// size, with its share of the gap: side by side ones add up, and ones across the axis don't. No
+// window needs more than the whole area, however big it says its smallest size is.
 function needed(node, axis, tiling) {
-    if (node.index !== undefined)
-        return Math.max(MIN_TILE, tiling.minimums.get(node.index)?.[axis.size] ?? 0) + tiling.gap;
+    if (node.index !== undefined) {
+        const minimum = Math.max(MIN_TILE, tiling.minimums.get(node.index)?.[axis.size] ?? 0);
+        return Math.min(minimum, tiling.area[axis.size]) + tiling.gap;
+    }
     const before = needed(node.before, axis, tiling);
     const after = needed(node.after, axis, tiling);
     return node.axis === axis ? before + after : Math.max(before, after);
@@ -158,8 +175,8 @@ function placeTree(node, area, tiling, tiles) {
 export function makeTiling(rects, area, gap = 0, minimums = new Map()) {
     // Half the gap inside the area, and half around every tile, adds up to the full gap both
     // between tiles and at the edges.
-    return {
-        tree: rects.length > 0 ? buildTree(rects.map((rect, index) => ({rect, index}))) : null,
+    const tiling = {
+        tree: null,
         area: {
             x: area.x + gap / 2,
             y: area.y + gap / 2,
@@ -169,6 +186,71 @@ export function makeTiling(rects, area, gap = 0, minimums = new Map()) {
         gap,
         minimums,
     };
+    if (rects.length === 0)
+        return tiling;
+    const items = rects.map((rect, index) => ({rect, index}));
+    tiling.tree = buildTree(items);
+    // Windows that can't get small enough for the splits that follow where they were, like ones
+    // stacked in a cascade, get a grid instead, if one gives each of them room.
+    if (overflow(tiling.tree, tiling) > 1)
+        tiling.tree = bestGrid(items, tiling) ?? tiling.tree;
+    return tiling;
+}
+
+// How far over the area the tiles' smallest sizes go: 1 or less when they fit.
+function overflow(tree, tiling) {
+    return Math.max(needed(tree, AXES[0], tiling) / tiling.area.width,
+        needed(tree, AXES[1], tiling) / tiling.area.height);
+}
+
+// A run of tiles along one axis, each with the same share of it.
+function evenRun(nodes, axis) {
+    if (nodes.length === 1)
+        return nodes[0];
+    return {axis, share: 1 / nodes.length, before: nodes[0], after: evenRun(nodes.slice(1), axis)};
+}
+
+// How much room a window needs, for putting the biggest ones where there's the most room.
+function roomNeeded(item, tiling) {
+    const minimum = tiling.minimums.get(item.index);
+    return Math.max(MIN_TILE, minimum?.width ?? 0) * Math.max(MIN_TILE, minimum?.height ?? 0);
+}
+
+// Windows in rows, top to bottom, and each row left to right, as they were on the screen. A last
+// row that isn't full has wider tiles, so the windows that need the most room go there.
+function gridTree(items, columns, tiling) {
+    const rows = Math.ceil(items.length / columns);
+    const lastRow = items.length - (rows - 1) * columns;
+    const biggest = lastRow < columns
+        ? [...items].sort((a, b) => roomNeeded(b, tiling) - roomNeeded(a, tiling)).slice(0, lastRow)
+        : [];
+    const rest = items.filter(item => !biggest.includes(item));
+    const center = (item, start, size) => item.rect[start] + item.rect[size] / 2;
+    const byRow = [...rest].sort((a, b) => center(a, 'y', 'height') - center(b, 'y', 'height'));
+    const runs = [];
+    for (let i = 0; i < byRow.length; i += columns)
+        runs.push(byRow.slice(i, i + columns));
+    if (biggest.length > 0)
+        runs.push(biggest);
+    return evenRun(runs.map(run => evenRun(
+        [...run].sort((a, b) => center(a, 'x', 'width') - center(b, 'x', 'width'))
+            .map(item => ({index: item.index})), AXES[0])), AXES[1]);
+}
+
+// Of the grids where every window has room, the one closest to square. If none has room for all,
+// the one that goes over the least.
+function bestGrid(items, tiling) {
+    let best = null;
+    for (let columns = 1; columns <= items.length; columns++) {
+        const rows = Math.ceil(items.length / columns);
+        const tree = gridTree(items, columns, tiling);
+        const candidate = {tree, over: Math.max(1, overflow(tree, tiling)),
+            off: Math.abs(columns - rows)};
+        if (!best || candidate.over < best.over ||
+            (candidate.over === best.over && candidate.off < best.off))
+            best = candidate;
+    }
+    return best?.tree;
 }
 
 /**

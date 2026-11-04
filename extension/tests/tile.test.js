@@ -2,7 +2,7 @@
 
 import {exit} from 'system';
 
-import {hasSize, keepInside, makeTiling, moveTileEdge, restoreRect, tileRects, tilingRects} from '../lib/tile.js';
+import {fitSize, hasSize, keepInside, makeTiling, moveTileEdge, restoreRect, tileRects, tilingRects} from '../lib/tile.js';
 
 const rect = (x, y, width, height) => ({x, y, width, height});
 const bounds = rect(0, 0, 1000, 800);
@@ -115,6 +115,26 @@ const withMinimum = tilingRects(makeTiling([rect(0, 0, 400, 800), rect(500, 0, 5
     new Map([[1, {width: 700, height: 100}]])));
 results.push(["makes room for a window that can't get as small as its tile", withMinimum[1].width, 700]);
 
+// Windows opened in a cascade, which can't get small enough to be stacked, go in a grid instead.
+const cascade = [rect(100, 100, 700, 500), rect(150, 150, 700, 500), rect(200, 200, 700, 500),
+    rect(250, 250, 700, 500)];
+const bigMinimums = new Map(cascade.map((_, i) => [i, {width: 528, height: 418}]));
+const inGrid = tilingRects(makeTiling(cascade, rect(0, 32, 1920, 1048), 0, bigMinimums));
+results.push(['puts big cascaded windows in a grid where they fit',
+    inGrid.every(t => t.width >= 528 && t.height >= 418) &&
+    inGrid.every((a, i) => inGrid.every((b, j) => i === j || !overlaps(a, b))), true]);
+
+results.push(['makes the grid as square as it can', inGrid.filter(t => t.y === inGrid[0].y).length, 2]);
+
+// Three that don't fit stacked: two share the top row, and the one that needs the most room gets
+// the whole bottom row.
+const three = [rect(100, 100, 700, 500), rect(150, 150, 700, 500), rect(200, 200, 700, 500)];
+const threeMinimums = new Map([[0, {width: 500, height: 400}], [1, {width: 900, height: 450}],
+    [2, {width: 500, height: 400}]]);
+const bigThree = tilingRects(makeTiling(three, rect(0, 32, 1920, 1048), 0, threeMinimums));
+results.push(['gives the widest tile to the window that needs the most room',
+    bigThree[1].width === 1920 && bigThree[0].width < 1920 && bigThree[2].width < 1920, true]);
+
 results.push(['has a size an app rounded', hasSize(rect(0, 0, 690, 410), rect(0, 0, 700, 419)), true]);
 results.push(['has not a size far from it', hasSize(rect(0, 0, 400, 300), rect(0, 0, 700, 419)), false]);
 
@@ -122,6 +142,15 @@ results.push(['moves a rect out from under the top bar',
     keepInside(rect(0, 0, 300, 200), rect(0, 32, 1000, 768)), rect(0, 32, 300, 200)]);
 results.push(['leaves a rect that is inside alone',
     keepInside(rect(50, 100, 400, 300), rect(0, 32, 1000, 768)), rect(50, 100, 400, 300)]);
+
+results.push(['fits a size that is too big inside the bounds',
+    fitSize({width: 1400, height: 300}, bounds), {width: 1000, height: 300}]);
+// A window that says it can't get smaller than the screen gets no more than its whole side of
+// the split, and the other window still gets its own room.
+results.push(['keeps a smallest size bigger than the area within the area',
+    tilingRects(makeTiling([rect(0, 0, 500, 800), rect(500, 0, 500, 800)], bounds, 0,
+        new Map([[0, {width: 5000, height: 5000}]]))),
+    [rect(0, 0, 909, 800), rect(909, 0, 91, 800)]]);
 
 // The Shell gives rectangles as boxed structs, whose fields spreading doesn't copy.
 class BoxedRect {

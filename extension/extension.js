@@ -8,7 +8,7 @@ import Shell from 'gi://Shell';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {hasSize, keepInside, makeTiling, moveTileEdge, restoreRect, tilingRects} from './lib/tile.js';
+import {fitSize, hasSize, keepInside, makeTiling, moveTileEdge, restoreRect, tilingRects} from './lib/tile.js';
 
 const OBJECT_PATH = '/io/github/deters/Gestos/Extension';
 const INTERFACE_XML = `
@@ -597,7 +597,8 @@ class WindowActions {
     _addToTiling(tiling, window, reopened = null) {
         const maximized = isMaximizedAtAll(window);
         const frame = window.get_frame_rect();
-        let rect = maximized ? null : frame;
+        // One that has no size yet gets its original size once it does, as a maximized one does.
+        let rect = maximized || frame.width === 0 || frame.height === 0 ? null : frame;
         if (reopened)
             rect = {x: frame.x, y: frame.y, width: reopened.rect.width, height: reopened.rect.height};
         const original = this._track(window, rect);
@@ -682,6 +683,27 @@ class WindowActions {
         this._place(tiling);
     }
 
+    // Where a window goes in its tile. One that keeps its own size is only moved there, no bigger
+    // than its tile. One that can't get as small as its tile, when there isn't room for all of
+    // them, keeps its smallest size there, moved just enough to stay on the screen, which the
+    // Shell would otherwise refuse.
+    _placeInTile(plan, i, state, tile) {
+        if (state.ownSize)
+            return {x: tile.x, y: tile.y, ...fitSize(state.ownSize, tile)};
+        const minimum = plan.tiling.minimums.get(i);
+        if (!minimum || (minimum.width <= tile.width && minimum.height <= tile.height))
+            return tile;
+        const area = plan.windows[i].get_work_area_current_monitor();
+        return keepInside({
+            x: tile.x,
+            y: tile.y,
+            ...fitSize({
+                width: Math.max(tile.width, minimum.width),
+                height: Math.max(tile.height, minimum.height),
+            }, area),
+        }, area);
+    }
+
     _place(tiling) {
         for (const plan of tiling.plans) {
             const tiles = this._fitOwnSizes(tiling, plan);
@@ -690,10 +712,7 @@ class WindowActions {
                 state.tile = tiles[i];
                 if (this._originals.get(window).closing)
                     return;
-                // A window that keeps its own size is only moved to its tile.
-                const {x, y} = tiles[i];
-                const {width, height} = state.ownSize ?? tiles[i];
-                this._resizeTo(window, {x, y, width, height});
+                this._resizeTo(window, this._placeInTile(plan, i, state, tiles[i]));
             });
         }
         this._stopTileCheck(tiling);
@@ -741,53 +760,71 @@ class WindowActions {
                     return;
                 const frame = window.get_frame_rect();
                 const tile = state.tile;
+                // Sizes are kept no bigger than the room the tiles have, so that a window whose
+                // app grows it as it's resized can't grow its tile, and itself, off the screen.
+                const area = plan.tiling.area;
+                const grow = size => {
+                    const known = plan.tiling.minimums.get(i);
+                    const grown = fitSize({
+                        width: Math.max(known?.width ?? 0, size.width),
+                        height: Math.max(known?.height ?? 0, size.height),
+                    }, area);
+                    if (known && grown.width === known.width && grown.height === known.height)
+                        return false;
+                    plan.tiling.minimums.set(i, grown);
+                    changed = true;
+                    return true;
+                };
                 const keepSize = size => {
-                    state.ownSize = {width: size.width, height: size.height};
-                    plan.tiling.minimums.set(i, {
-                        width: Math.max(plan.tiling.minimums.get(i)?.width ?? 0, size.width),
-                        height: Math.max(plan.tiling.minimums.get(i)?.height ?? 0, size.height),
-                    });
+                    state.ownSize = fitSize(size, area);
+                    grow(state.ownSize);
                     changed = true;
                 };
                 const moved = Math.abs(frame.x - tile.x) > 1 || Math.abs(frame.y - tile.y) > 1;
+                const tooBig = frame.width > tile.width + 1 || frame.height > tile.height + 1;
 
                 if (state.ownSize) {
-                    if (Math.abs(frame.width - state.ownSize.width) > 1 ||
-                        Math.abs(frame.height - state.ownSize.height) > 1)
-                        keepSize(frame);
-                    else if (moved)
-                        this._resizeTo(window, {x: tile.x, y: tile.y, ...state.ownSize});
+                    const size = fitSize(frame, area);
+                    if (Math.abs(size.width - state.ownSize.width) > 1 ||
+                        Math.abs(size.height - state.ownSize.height) > 1)
+                        keepSize(size);
+                    else if (moved || tooBig)
+                        this._resizeTo(window, {x: tile.x, y: tile.y, ...fitSize(state.ownSize, tile)});
                     return;
                 }
-                if (frame.width > tile.width + 1 || frame.height > tile.height + 1) {
-                    state.minimum = {
-                        width: Math.max(state.minimum?.width ?? 0, frame.width),
-                        height: Math.max(state.minimum?.height ?? 0, frame.height),
-                    };
-                    plan.tiling.minimums.set(i, {
-                        width: Math.max(plan.tiling.minimums.get(i)?.width ?? 0, state.minimum.width),
-                        height: Math.max(plan.tiling.minimums.get(i)?.height ?? 0, state.minimum.height),
-                    });
-                    changed = true;
-                    return;
+                if (tooBig) {
+                    // Only the way it didn't fit says how small it can get.
+                    state.minimum = fitSize({
+                        width: Math.max(state.minimum?.width ?? 0,
+                            frame.width > tile.width + 1 ? frame.width : 0),
+                        height: Math.max(state.minimum?.height ?? 0,
+                            frame.height > tile.height + 1 ? frame.height : 0),
+                    }, area);
+                    if (grow(state.minimum))
+                        return;
                 }
                 const shrank = tile.width - frame.width > TILE_SIZE_TOLERANCE ||
                     tile.height - frame.height > TILE_SIZE_TOLERANCE;
-                if (!moved && !shrank)
+                if (!moved && !shrank && !tooBig)
                     return;
                 state.returns = (state.returns ?? []).filter(t => now - t < TILE_RETURN_PERIOD_MS);
                 if (state.returns.length >= MAX_TILE_RETURNS && shrank) {
                     keepSize(frame);
                     return;
                 }
+                // A window that stays bigger than its tile, with the tiles already placed for all
+                // the room it can have, is left as it is.
+                if (state.returns.length >= MAX_TILE_RETURNS && tooBig)
+                    return;
                 state.returns.push(now);
-                this._resizeTo(window, tile);
+                this._resizeTo(window, this._placeInTile(plan, i, state, tile));
             });
         }
         // Sizes kept only change when an app changes them, and smallest sizes only grow, up to the
-        // screen, so placing again for them comes to an end.
+        // room the tiles have, so laying out again for them comes to an end. It's laid out from the
+        // start, as a window that needs more room can need a different layout.
         if (changed)
-            this._place(tiling);
+            this._layout(tiling);
     }
 
     // Panels and docks change the room tiles have, and so does the gap, so they're placed again,
