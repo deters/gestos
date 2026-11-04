@@ -4,7 +4,7 @@ Gives [Gestos](https://github.com/deters/gestos) window tiling, which GNOME has 
 
 ## Tiling
 
-**Toggle tile windows:** fits the windows on the current workspace together without overlaps, each near where it was and sized in proportion to the others' original sizes. Windows that are maximized or snapped to half the screen are restored first. Windows that open, close, or move in or out while it's tiled join or leave, and a workspace stays tiled with no windows left. Resizing a tiled window keeps it tiled: the edges you drag stay where you leave them, and the tiles beyond them make room. Opening or closing windows places the tiles again from the original sizes. A window you move gets its original size back while it moves, and takes a tile where you leave it, with the other tiles placed again around it. A second use, or maximizing or snapping any of them, puts them all back.
+**Toggle tile windows:** fits the windows on the current workspace together without overlaps, each near where it was and sized in proportion to the others' original sizes. Windows that are maximized or snapped to half the screen are restored first. Windows that open, close, or move in or out while it's tiled join or leave, and a workspace stays tiled with no windows left. Resizing a tiled window keeps it tiled: the edges you drag stay where you leave them, and the tiles beyond them make room. Opening or closing windows places the tiles again from the original sizes. A second use, or moving, maximizing, or snapping any of them, puts them all back.
 
 ### Original sizes
 
