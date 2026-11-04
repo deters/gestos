@@ -2,7 +2,7 @@
 
 import {exit} from 'system';
 
-import {fitSize, hasSize, keepInside, makeTiling, moveTileEdge, restoreRect, tileRects, tilingRects} from '../lib/tile.js';
+import {fitSize, hasSize, isBelievableMinimum, keepInside, makeTiling, moveTileEdge, restoreRect, tileRects, tilingRects} from '../lib/tile.js';
 
 const rect = (x, y, width, height) => ({x, y, width, height});
 const bounds = rect(0, 0, 1000, 800);
@@ -32,7 +32,7 @@ const tileCases = [
     ['splits stacked windows top and bottom', [rect(0, 500, 300, 200), rect(0, 0, 300, 400)],
         [rect(0, 533, 1000, 267), rect(0, 0, 1000, 533)]],
     ['keeps a small window usable', [rect(0, 0, 50, 50), rect(100, 0, 800, 50)],
-        [rect(0, 0, 200, 800), rect(200, 0, 800, 800)]],
+        [rect(0, 0, 250, 800), rect(250, 0, 750, 800)]],
 ];
 results.push(...tileCases.map(([name, rects, expected]) =>
     [name, tileRects(rects, bounds), expected]));
@@ -115,6 +115,23 @@ const withMinimum = tilingRects(makeTiling([rect(0, 0, 400, 800), rect(500, 0, 5
     new Map([[1, {width: 700, height: 100}]])));
 results.push(["makes room for a window that can't get as small as its tile", withMinimum[1].width, 700]);
 
+// Some apps say the size they open at is their smallest one, which is likely when it's most of the
+// screen.
+results.push(['believes a smallest size of up to half the screen',
+    [isBelievableMinimum({width: 500, height: 400}, bounds),
+        isBelievableMinimum({width: 900, height: 300}, bounds),
+        isBelievableMinimum({width: 300, height: 700}, bounds)], [true, false, false]]);
+
+// Apps can say their windows get smaller than they can, so no tile gets smaller than a quarter of
+// the width and a third of the height, and grids go up to 4 across and 3 down.
+const many = Array.from({length: 12}, (_, i) => rect(i * 10, i * 10, 300, 200));
+const manyTiles = tileRects(many, bounds);
+results.push(['fits up to 12 windows in a grid of 4 by 3',
+    [new Set(manyTiles.map(t => t.x)).size, new Set(manyTiles.map(t => t.y)).size], [4, 3]]);
+const fiveTiles = tileRects(many.slice(0, 5), bounds);
+results.push(['keeps tiles at least a quarter wide and a third high',
+    fiveTiles.every(t => t.width >= 250 && t.height >= 266), true]);
+
 // Windows opened in a cascade, which can't get small enough to be stacked, go in a grid instead.
 const cascade = [rect(100, 100, 700, 500), rect(150, 150, 700, 500), rect(200, 200, 700, 500),
     rect(250, 250, 700, 500)];
@@ -150,7 +167,7 @@ results.push(['fits a size that is too big inside the bounds',
 results.push(['keeps a smallest size bigger than the area within the area',
     tilingRects(makeTiling([rect(0, 0, 500, 800), rect(500, 0, 500, 800)], bounds, 0,
         new Map([[0, {width: 5000, height: 5000}]]))),
-    [rect(0, 0, 909, 800), rect(909, 0, 91, 800)]]);
+    [rect(0, 0, 800, 800), rect(800, 0, 200, 800)]]);
 
 // The Shell gives rectangles as boxed structs, whose fields spreading doesn't copy.
 class BoxedRect {

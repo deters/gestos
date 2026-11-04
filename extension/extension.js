@@ -8,7 +8,7 @@ import Shell from 'gi://Shell';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {fitSize, hasSize, keepInside, makeTiling, moveTileEdge, restoreRect, tilingRects} from './lib/tile.js';
+import {fitSize, hasSize, isBelievableMinimum, keepInside, makeTiling, moveTileEdge, restoreRect, tilingRects} from './lib/tile.js';
 
 const OBJECT_PATH = '/io/github/deters/Gestos/Extension';
 const INTERFACE_XML = `
@@ -662,11 +662,14 @@ class WindowActions {
         const gap = this._settings.get_int('window-gap');
         tiling.plans = [...monitors.values()].map(group => {
             // Planned with how small each app lets its window get, so that none has to move again.
-            // One that turned out not to get as small as it said keeps what it showed instead.
+            // One that turned out not to get as small as it said keeps what it showed instead. One
+            // that says it can't get smaller than most of the screen gets a tile like the others.
+            const area = group[0].get_work_area_current_monitor();
             const minimums = new Map();
             group.forEach((window, i) => {
-                const reported = minimumFrameSize(window);
-                const seen = tiling.windows.get(window).minimum;
+                const believable = size => size && isBelievableMinimum(size, area) ? size : null;
+                const reported = believable(minimumFrameSize(window));
+                const seen = believable(tiling.windows.get(window).minimum);
                 if (reported || seen) {
                     minimums.set(i, {
                         width: Math.max(reported?.width ?? 0, seen?.width ?? 0),
@@ -677,7 +680,7 @@ class WindowActions {
             return {
                 windows: group,
                 tiling: makeTiling(group.map(window => this._originals.get(window).rect),
-                    group[0].get_work_area_current_monitor(), gap, minimums),
+                    area, gap, minimums),
             };
         });
         this._place(tiling);
@@ -690,7 +693,8 @@ class WindowActions {
     _placeInTile(plan, i, state, tile) {
         if (state.ownSize)
             return {x: tile.x, y: tile.y, ...fitSize(state.ownSize, tile)};
-        const minimum = plan.tiling.minimums.get(i);
+        // One whose smallest size wasn't believed still stays on the screen, if it was right.
+        const minimum = plan.tiling.minimums.get(i) ?? minimumFrameSize(plan.windows[i]);
         if (!minimum || (minimum.width <= tile.width && minimum.height <= tile.height))
             return tile;
         const area = plan.windows[i].get_work_area_current_monitor();
@@ -764,6 +768,9 @@ class WindowActions {
                 // app grows it as it's resized can't grow its tile, and itself, off the screen.
                 const area = plan.tiling.area;
                 const grow = size => {
+                    // Room isn't made for most of the screen, as the layout wouldn't believe it.
+                    if (!isBelievableMinimum(size, area))
+                        return false;
                     const known = plan.tiling.minimums.get(i);
                     const grown = fitSize({
                         width: Math.max(known?.width ?? 0, size.width),

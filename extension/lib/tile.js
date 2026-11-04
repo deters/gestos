@@ -49,6 +49,18 @@ export function fitSize(size, bounds) {
 }
 
 /**
+ * Whether a window's smallest size can be believed. Some apps say the size they open at is their
+ * smallest one until they're shown, and a size that takes up most of the screen is likely that.
+ *
+ * @param {{width: number, height: number}} size - the smallest size the window has
+ * @param {{width: number, height: number}} area - the room the tiles have
+ * @returns {boolean} whether it's no more than half the area's width and half its height
+ */
+export function isBelievableMinimum(size, area) {
+    return size.width <= area.width / 2 && size.height <= area.height / 2;
+}
+
+/**
  * Where a tiled window goes when a drag brings back its original size.
  *
  * The pointer stays at the same relative spot across the window, so the window doesn't slip out from
@@ -71,14 +83,21 @@ export function restoreRect(tile, previous, pointerX) {
 
 // No side of a split gets less than this share, so that a small window still gets a usable tile.
 const MIN_SPLIT_SHARE = 0.2;
-// The smallest a tile gets, along each side, while the area has room for all of them. Windows that
-// can't get that small have their own smallest size, which takes over.
-const MIN_TILE = 100;
+// The most tiles that fit across and down the area. No tile gets smaller than the area split this
+// way, while there's room for all of them, as some apps say they can get smaller than they can.
+// Windows that can't get that small have their own smallest size, which takes over.
+const MAX_COLUMNS = 4;
+const MAX_ROWS = 3;
 
 const AXES = [
-    {start: 'x', size: 'width'},
-    {start: 'y', size: 'height'},
+    {start: 'x', size: 'width', most: MAX_COLUMNS},
+    {start: 'y', size: 'height', most: MAX_ROWS},
 ];
+
+// The smallest a tile gets along an axis, so that the most tiles fit, with the gap between them.
+function smallestTile(axis, tiling) {
+    return Math.floor(tiling.area[axis.size] / axis.most) - tiling.gap;
+}
 
 function span(rects, {start, size}) {
     const first = Math.min(...rects.map(r => r[start]));
@@ -126,7 +145,8 @@ function buildTree(items) {
 // window needs more than the whole area, however big it says its smallest size is.
 function needed(node, axis, tiling) {
     if (node.index !== undefined) {
-        const minimum = Math.max(MIN_TILE, tiling.minimums.get(node.index)?.[axis.size] ?? 0);
+        const minimum = Math.max(smallestTile(axis, tiling),
+            tiling.minimums.get(node.index)?.[axis.size] ?? 0);
         return Math.min(minimum, tiling.area[axis.size]) + tiling.gap;
     }
     const before = needed(node.before, axis, tiling);
@@ -213,7 +233,8 @@ function evenRun(nodes, axis) {
 // How much room a window needs, for putting the biggest ones where there's the most room.
 function roomNeeded(item, tiling) {
     const minimum = tiling.minimums.get(item.index);
-    return Math.max(MIN_TILE, minimum?.width ?? 0) * Math.max(MIN_TILE, minimum?.height ?? 0);
+    return Math.max(smallestTile(AXES[0], tiling), minimum?.width ?? 0) *
+        Math.max(smallestTile(AXES[1], tiling), minimum?.height ?? 0);
 }
 
 // Windows in rows, top to bottom, and each row left to right, as they were on the screen. A last
@@ -238,11 +259,15 @@ function gridTree(items, columns, tiling) {
 }
 
 // Of the grids where every window has room, the one closest to square. If none has room for all,
-// the one that goes over the least.
+// the one that goes over the least. Grids go up to the most tiles across and down, unless there
+// are more windows than that.
 function bestGrid(items, tiling) {
+    const most = MAX_COLUMNS * MAX_ROWS;
     let best = null;
     for (let columns = 1; columns <= items.length; columns++) {
         const rows = Math.ceil(items.length / columns);
+        if (items.length <= most && (columns > MAX_COLUMNS || rows > MAX_ROWS))
+            continue;
         const tree = gridTree(items, columns, tiling);
         const candidate = {tree, over: Math.max(1, overflow(tree, tiling)),
             off: Math.abs(columns - rows)};
