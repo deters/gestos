@@ -157,7 +157,7 @@ pub fn show_about_dialog<W: IsA<gtk::Window>>(parent: &W) {
     dialog.set_transient_for(Some(parent));
     dialog.set_modal(true);
     dialog.set_program_name(Some("Gestos"));
-    dialog.set_version(Some("6.2.1"));
+    dialog.set_version(Some("6.2.2"));
     dialog.set_comments(Some(
         "A modern mouse gestures editor for Wayland desktop environments.",
     ));
