@@ -1,11 +1,8 @@
-# Gestos 6.2.1
-
-## Changed
-
-- **Moving a tiled window puts all the windows back** at their original sizes again, as before 6.2.0.
+# Gestos 6.2.2
 
 ## Fixed
 
-- **Big windows tile without overlapping where they fit.** When the windows can't all get as small as their tiles, they're laid out as a grid, as square as fits, and the windows that need the most room get the widest tiles. Windows that can't fit at all stay on the screen.
+- **Windows that misreport their smallest size tile like the others.** Some apps, like ones built on WebKit, say the size they open at is the smallest they can get, which left them overlapping their neighbors. A window that says it can't get smaller than half the screen now gets a tile like the others.
+- **Tiles stay usable.** No tile gets smaller than a quarter of the screen's width or a third of its height, so up to 12 windows fit, 4 across and 3 down.
 
 Log out and back in after updating, so GNOME loads the new extension.
