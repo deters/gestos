@@ -13,6 +13,8 @@ use std::rc::Rc;
 const WAIT_STEP_MILLIS: f64 = 50.0;
 // The pause a new step starts with: about what an app takes to open a dialog.
 const NEW_WAIT_MILLIS: u32 = 200;
+// How tall the box for text to type is before it holds more than about three lines.
+const TYPE_BOX_HEIGHT: i32 = 72;
 
 struct StepsEditor {
     parent: gtk::Window,
@@ -124,7 +126,8 @@ impl StepsEditor {
                 view.set_right_margin(8);
                 view.set_top_margin(6);
                 view.set_bottom_margin(6);
-                view.set_tooltip_text(Some("Text to type. Each new line is typed as Enter."));
+                // About three lines tall, so it reads as a box for several, and growing with them.
+                view.set_size_request(-1, TYPE_BOX_HEIGHT);
                 view.buffer().set_text(text);
                 let editor = Rc::clone(self);
                 view.buffer().connect_changed(move |buffer| {
