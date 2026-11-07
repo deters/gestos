@@ -203,16 +203,13 @@ fn send_notification(summary: &str, body: &str) {
     );
 }
 
-/// Handles `gestos --start` and `gestos --stop`, which also run from the app icon's menu, where a
-/// notification is the only feedback. Returns the process exit code.
+/// Handles `gestos --start` and `gestos --stop`, which also run from the app icon's menu. Only a
+/// failure is worth a notification there. Returns the process exit code.
 pub fn run_command(enable: bool) -> i32 {
     let conn = zbus::blocking::Connection::session().ok();
     if enable {
         match turn_on(conn.as_ref()) {
-            Ok(()) => {
-                send_notification("Gestures started", "");
-                0
-            }
+            Ok(()) => 0,
             Err(message) => {
                 eprintln!("{}", message);
                 send_notification(
@@ -224,7 +221,6 @@ pub fn run_command(enable: bool) -> i32 {
         }
     } else {
         turn_off(conn.as_ref());
-        send_notification("Gestures stopped", "Your mouse works normally.");
         0
     }
 }
