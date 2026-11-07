@@ -7,6 +7,11 @@
       <summary>Window gap</summary>
       <description>Pixels between tiled windows and at the edges of the screen.</description>
     </key>
+    <key name="tiled-workspaces" type="ai">
+      <default>[]</default>
+      <summary>Tiled workspaces</summary>
+      <description>The places of the workspaces that are tiled, counting from 0, so that they're tiled again in the next session.</description>
+    </key>
     <key name="closed-sizes" type="a{s(iiiix)}">
       <default>{}</default>
       <summary>Sizes to undo</summary>

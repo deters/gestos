@@ -115,9 +115,20 @@ class WindowActions {
             'org.gnome.SessionManager.EndSessionDialog', null,
             '/org/gnome/SessionManager/EndSessionDialog', null, Gio.DBusSignalFlags.NONE,
             (_conn, _sender, _path, _iface, signal) => {
-                if (signal.startsWith('Confirmed'))
+                if (signal.startsWith('Confirmed')) {
+                    // Which workspaces are tiled stays as it was, for the next session.
+                    this._ending = true;
                     this.restoreAll();
+                }
             });
+        // Workspaces are remembered by their place, which changes as others come and go.
+        this._pendingTiled = new Set();
+        this._workspaceAddedId = global.workspace_manager.connect('workspace-added',
+            () => this.tileRemembered());
+        this._workspaceRemovedId = global.workspace_manager.connect('workspace-removed',
+            () => this._onWorkspaceRemoved());
+        this._workspacesReorderedId = global.workspace_manager.connect('workspaces-reordered',
+            () => this._saveTiled());
         // A window is mapped once it's on screen at its real size, which is when it can join.
         this._mapId = global.window_manager.connect('map',
             (_wm, actor) => this._onWindowMapped(actor.meta_window));
@@ -149,6 +160,9 @@ class WindowActions {
         global.window_manager.disconnect(this._mapId);
         global.window_manager.disconnect(this._minimizeId);
         global.window_manager.disconnect(this._unminimizeId);
+        global.workspace_manager.disconnect(this._workspaceAddedId);
+        global.workspace_manager.disconnect(this._workspaceRemovedId);
+        global.workspace_manager.disconnect(this._workspacesReorderedId);
         Meta.keybindings_set_custom_handler('close', null);
         this._injections.clear();
         for (const tiling of this._tilings.values())
@@ -999,19 +1013,24 @@ class WindowActions {
      * isn't enough, until there's room for them again. Moving or resizing a window makes the
      * others make room for it. Windows that open, close, or move in or out while it's tiled join or
      * leave, and ones that are maximized, made fullscreen or snapped are set aside until they're
-     * back to normal. It stays tiled until this is used again.
+     * back to normal. It stays tiled until this is used again, also in the sessions after this.
      *
      * @returns {boolean} whether any window changed
      */
     ToggleTileWindows() {
         const workspace = global.workspace_manager.get_active_workspace();
-        if (this._tilings.has(workspace)) {
+        let changed = true;
+        if (this._tilings.has(workspace))
             this._untile(workspace);
-            return true;
-        }
+        else
+            changed = this._tile(workspace);
+        this._saveTiled();
+        return changed;
+    }
 
-        // A workspace with no windows can be tiled too, for the windows that open there next.
-        // Windows join from the bottom up, so the top one ends up as the one touched last.
+    // A workspace with no windows can be tiled too, for the windows that open there next.
+    // Windows join from the bottom up, so the top one ends up as the one touched last.
+    _tile(workspace) {
         const windows = global.display.sort_windows_by_stacking(
             workspace.list_windows().filter(isTileable));
         const tiling = this._startTiling(workspace);
@@ -1019,6 +1038,58 @@ class WindowActions {
             this._addToTiling(tiling, window);
         this._layoutWhenReady(tiling);
         return windows.length > 0;
+    }
+
+    _workspaces() {
+        const manager = global.workspace_manager;
+        return Array.from({length: manager.get_n_workspaces()},
+            (_, i) => manager.get_workspace_by_index(i));
+    }
+
+    // Remembers which workspaces are tiled, for the next session, and for when this is turned on
+    // again. Ones that didn't exist yet stay remembered.
+    _saveTiled() {
+        if (this._ending)
+            return;
+        const indices = new Set(this._pendingTiled);
+        this._workspaces().forEach((workspace, i) => {
+            if (this._tilings.has(workspace))
+                indices.add(i);
+        });
+        this._settings.set_value('tiled-workspaces',
+            new GLib.Variant('ai', [...indices].sort((a, b) => a - b)));
+    }
+
+    /**
+     * Tiles the workspaces that were tiled before this was turned off or the session ended. Ones
+     * that don't exist yet are tiled once they do.
+     */
+    tileRemembered() {
+        if (!this._started) {
+            this._started = true;
+            this._pendingTiled = new Set(this._settings.get_value('tiled-workspaces').deepUnpack());
+        }
+        const workspaces = this._workspaces();
+        for (const index of [...this._pendingTiled]) {
+            if (index >= workspaces.length)
+                continue;
+            this._pendingTiled.delete(index);
+            if (!this._tilings.has(workspaces[index]))
+                this._tile(workspaces[index]);
+        }
+    }
+
+    // A workspace GNOME removes, as it does with empty ones, isn't tiled anymore, and the places
+    // of the ones after it change.
+    _onWorkspaceRemoved() {
+        const open = new Set(this._workspaces());
+        for (const [workspace, tiling] of [...this._tilings]) {
+            if (!open.has(workspace)) {
+                this._stopTiling(tiling);
+                this._tilings.delete(workspace);
+            }
+        }
+        this._saveTiled();
     }
 
     /**
@@ -1049,6 +1120,7 @@ export default class GestosExtension extends Extension {
         } else {
             this._actions.fixOpenWindows();
         }
+        this._actions.tileRemembered();
         this._dbus = Gio.DBusExportedObject.wrapJSObject(INTERFACE_XML, this._actions);
         this._dbus.export(Gio.DBus.session, OBJECT_PATH);
     }

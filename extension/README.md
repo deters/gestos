@@ -8,7 +8,7 @@ Gives [Gestos](https://github.com/deters/gestos) window tiling, which GNOME has 
 
 Moving or resizing a window makes the others make room for it as you go, and the size and place you leave it at become its own. The window you moved last keeps its size and place where there's room for the others. When even the smallest sizes don't fit, the windows touched longest ago are minimized. They come back on their own once you leave room for them again, and showing one yourself makes room for it.
 
-Windows that are maximized when it starts are restored first. Windows that open, close, or move in or out while it's tiled join or leave, and a workspace stays tiled with no windows left. Maximizing a window, making it fullscreen, or snapping it to half the screen sets it aside, and the others take its room until it's back to normal, when it joins again. It stays tiled until you use it again, which puts them all back.
+Windows that are maximized when it starts are restored first. Windows that open, close, or move in or out while it's tiled join or leave, and a workspace stays tiled with no windows left. Maximizing a window, making it fullscreen, or snapping it to half the screen sets it aside, and the others take its room until it's back to normal, when it joins again. It stays tiled until you use it again, which puts them all back, even after you log out and back in: windows get their original sizes back as the session ends, and the workspace is tiled again in the next one. A workspace GNOME removes, as it does with empty ones you leave, isn't tiled anymore.
 
 ### Original sizes
 
