@@ -106,36 +106,43 @@ impl InputClient {
         }
     }
 
-    /// Types text with the keys the layout has for each character, Shift and AltGr included. A
-    /// character the layout can't type is skipped, so the rest still comes out.
+    /// Types text with the keys the layout has for each character, Shift and AltGr included, and
+    /// its dead keys for accents. A character the layout can't type is skipped, so the rest still
+    /// comes out.
     pub fn type_text(&self, text: &str) {
         let layout = crate::keymap::current_layout_keys();
         for c in text.chars() {
-            let Some((key, shift, altgr)) = layout
+            let Some(keys) = layout
                 .as_deref()
-                .and_then(|layout| layout.lookup_char(c))
-                .or_else(|| us_char_key(c))
+                .and_then(|layout| layout.keys_for_char(c))
+                .or_else(|| us_char_key(c).map(|key| vec![key]))
             else {
                 eprintln!("gestos: Can't type '{}' on this keyboard layout", c);
                 continue;
             };
-            let mut codes = Vec::new();
-            if shift {
-                codes.push(evdev::KeyCode::KEY_LEFTSHIFT.0);
+            for (key, shift, altgr) in keys {
+                self.type_key(key, shift, altgr);
             }
-            if altgr {
-                codes.push(evdev::KeyCode::KEY_RIGHTALT.0);
-            }
-            codes.push(key);
-            for &code in &codes {
-                self.key(code, true);
-            }
-            std::thread::sleep(TYPED_KEY_HOLD);
-            for &code in codes.iter().rev() {
-                self.key(code, false);
-            }
-            std::thread::sleep(TYPED_KEY_GAP);
         }
+    }
+
+    fn type_key(&self, key: u16, shift: bool, altgr: bool) {
+        let mut codes = Vec::new();
+        if shift {
+            codes.push(evdev::KeyCode::KEY_LEFTSHIFT.0);
+        }
+        if altgr {
+            codes.push(evdev::KeyCode::KEY_RIGHTALT.0);
+        }
+        codes.push(key);
+        for &code in &codes {
+            self.key(code, true);
+        }
+        std::thread::sleep(TYPED_KEY_HOLD);
+        for &code in codes.iter().rev() {
+            self.key(code, false);
+        }
+        std::thread::sleep(TYPED_KEY_GAP);
     }
 
     /// Runs a keyboard action's steps in order.

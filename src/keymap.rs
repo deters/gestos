@@ -239,6 +239,44 @@ impl LayoutKeys {
     }
 }
 
+/// The dead key that puts an accent on the letter typed after it, by the accent's combining mark.
+fn dead_key(mark: char) -> Option<&'static str> {
+    Some(match mark {
+        '\u{300}' => "dead_grave",
+        '\u{301}' => "dead_acute",
+        '\u{302}' => "dead_circumflex",
+        '\u{303}' => "dead_tilde",
+        '\u{304}' => "dead_macron",
+        '\u{306}' => "dead_breve",
+        '\u{307}' => "dead_abovedot",
+        '\u{308}' => "dead_diaeresis",
+        '\u{30A}' => "dead_abovering",
+        '\u{30B}' => "dead_doubleacute",
+        '\u{30C}' => "dead_caron",
+        '\u{327}' => "dead_cedilla",
+        '\u{328}' => "dead_ogonek",
+        _ => return None,
+    })
+}
+
+impl LayoutKeys {
+    /// The keys that type a character, in order, each with the shift level it needs: its own key,
+    /// or else the dead key for its accent and then the letter, as layouts like Brazilian or US
+    /// International type `é`.
+    pub fn keys_for_char(&self, c: char) -> Option<Vec<(u16, bool, bool)>> {
+        use unicode_normalization::UnicodeNormalization;
+        if let Some(key) = self.lookup_char(c) {
+            return Some(vec![key]);
+        }
+        let mut parts = c.nfd();
+        let (letter, mark) = (parts.next()?, parts.next()?);
+        if parts.next().is_some() {
+            return None;
+        }
+        Some(vec![self.lookup(dead_key(mark)?)?, self.lookup_char(letter)?])
+    }
+}
+
 type CachedLayout = (LayoutName, Option<Arc<LayoutKeys>>);
 static CURRENT_LAYOUT: Mutex<Option<CachedLayout>> = Mutex::new(None);
 
@@ -359,6 +397,21 @@ mod tests {
         assert_eq!(brazilian.lookup_char('Ç'), Some((KeyCode::KEY_SEMICOLON.0, true, false)));
         let Some(french) = layout("fr") else { return };
         assert_eq!(french.lookup_char('a'), Some((KeyCode::KEY_Q.0, false, false)));
+    }
+
+    #[test]
+    fn accented_letters_are_typed_with_dead_keys() {
+        let Some(brazilian) = layout("br") else { return };
+        let acute = brazilian.lookup("dead_acute").unwrap();
+        let tilde = brazilian.lookup("dead_tilde").unwrap();
+        assert_eq!(brazilian.keys_for_char('é'), Some(vec![acute, (KeyCode::KEY_E.0, false, false)]));
+        assert_eq!(brazilian.keys_for_char('Á'), Some(vec![acute, (KeyCode::KEY_A.0, true, false)]));
+        assert_eq!(brazilian.keys_for_char('ã'), Some(vec![tilde, (KeyCode::KEY_A.0, false, false)]));
+        // A letter the layout has needs no dead key.
+        assert_eq!(brazilian.keys_for_char('ç').map(|keys| keys.len()), Some(1));
+        // Without dead keys, it can't be typed.
+        let Some(us) = layout("us") else { return };
+        assert_eq!(us.keys_for_char('é'), None);
     }
 
     #[test]
