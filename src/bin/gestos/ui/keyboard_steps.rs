@@ -6,7 +6,7 @@ use crate::ui::shortcut_recorder::open_shortcut_recorder;
 use gestos::key_steps::{format_steps, parse_steps, KeyStep, MAX_WAIT_MILLIS};
 use gtk::prelude::*;
 use gtk4 as gtk;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 // How much the pause changes with each click of its buttons.
@@ -21,6 +21,8 @@ struct StepsEditor {
     details: gtk::Entry,
     rows: gtk::Box,
     steps: RefCell<Vec<KeyStep>>,
+    // Whether the text box of a text step just added takes the focus, to type in right away.
+    focus_new_text: Cell<bool>,
 }
 
 /// The list of steps, and what fills it from the details entry once that holds the gesture's
@@ -37,6 +39,7 @@ pub fn build_steps_editor(parent: &gtk::Window, details: &gtk::Entry) -> (gtk::B
         details: details.clone(),
         rows,
         steps: RefCell::new(Vec::new()),
+        focus_new_text: Cell::new(false),
     });
 
     let add_buttons = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -52,6 +55,7 @@ pub fn build_steps_editor(parent: &gtk::Window, details: &gtk::Entry) -> (gtk::B
             let records = matches!(step, KeyStep::Press(_));
             editor.steps.borrow_mut().push(step.clone());
             editor.changed();
+            editor.focus_new_text.set(matches!(step, KeyStep::Type(_)));
             editor.rebuild();
             // Keys are only known once they're pressed, so a new keys step asks for them.
             if records {
@@ -140,6 +144,12 @@ impl StepsEditor {
                 frame.set_child(Some(&view));
                 frame.set_hexpand(true);
                 content.append(&frame);
+                // Once it's on screen, which is when it can take the focus.
+                if i + 1 == count && self.focus_new_text.take() {
+                    gtk::glib::idle_add_local_once(move || {
+                        view.grab_focus();
+                    });
+                }
             }
             KeyStep::Wait(millis) => {
                 let spin =
