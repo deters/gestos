@@ -122,17 +122,28 @@ impl StepsEditor {
                 record.connect_clicked(move |_| editor.record(i));
                 content.append(&record);
             }
+            // Several lines, for text like a signature. Each line break is typed as Enter.
             KeyStep::Type(text) => {
-                let entry = gtk::Entry::new();
-                entry.set_text(text);
-                entry.set_placeholder_text(Some("Text to type"));
-                entry.set_hexpand(true);
+                let view = gtk::TextView::new();
+                view.set_wrap_mode(gtk::WrapMode::WordChar);
+                view.set_accepts_tab(true);
+                view.set_left_margin(8);
+                view.set_right_margin(8);
+                view.set_top_margin(6);
+                view.set_bottom_margin(6);
+                view.set_tooltip_text(Some("Text to type. Each new line is typed as Enter."));
+                view.buffer().set_text(text);
                 let editor = Rc::clone(self);
-                entry.connect_changed(move |entry| {
-                    editor.steps.borrow_mut()[i] = KeyStep::Type(entry.text().to_string());
+                view.buffer().connect_changed(move |buffer| {
+                    let (start, end) = buffer.bounds();
+                    let text = buffer.text(&start, &end, false).to_string();
+                    editor.steps.borrow_mut()[i] = KeyStep::Type(text);
                     editor.changed();
                 });
-                content.append(&entry);
+                let frame = gtk::Frame::new(None);
+                frame.set_child(Some(&view));
+                frame.set_hexpand(true);
+                content.append(&frame);
             }
             KeyStep::Wait(millis) => {
                 let spin =
