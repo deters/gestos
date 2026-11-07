@@ -146,7 +146,25 @@ configure_file(
 # The GNOME Shell extension, for window actions that only the Shell can do
 if get_option('gnome_extension')
   extension_dir = datadir / 'gnome-shell' / 'extensions' / 'gestos@deters.github.io'
-  install_data('extension/extension.js', 'extension/prefs.js', 'extension/metadata.json', install_dir: extension_dir)
+  install_data('extension/extension.js', 'extension/prefs.js', install_dir: extension_dir)
+  # The installed metadata carries a fingerprint of the extension's code, which Gestos compares
+  # with its own to tell whether the copy GNOME runs is the one it came with.
+  custom_target(
+    'extension-metadata',
+    input: 'extension/metadata.json',
+    output: 'metadata.json',
+    command: [find_program('sh'), meson.project_source_root() / 'extension/fingerprint.sh', '@OUTPUT@'],
+    depend_files: files(
+      'extension/extension.js',
+      'extension/prefs.js',
+      'extension/lib/tile.js',
+      'extension/lib/chooser.js',
+      'extension/schemas/org.gnome.shell.extensions.gestos.gschema.xml',
+    ),
+    build_by_default: true,
+    install: true,
+    install_dir: extension_dir,
+  )
   install_data('extension/lib/tile.js', 'extension/lib/chooser.js', install_dir: extension_dir / 'lib')
   install_data('extension/schemas/org.gnome.shell.extensions.gestos.gschema.xml', install_dir: extension_dir / 'schemas')
   # Compiled here, as extensions keep their own settings schema instead of sharing the system's.

@@ -21,6 +21,11 @@ pub const STATE_ACTIVATING: f64 = 8.0;
 /// which GNOME reports for the copy it loaded.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// A fingerprint of the code of the extension that comes with this Gestos, which only changes when
+/// the extension does. Installed copies have it in their `metadata.json`. It's empty if the build
+/// couldn't make one.
+pub const FINGERPRINT: &str = env!("GESTOS_EXTENSION_FINGERPRINT");
+
 pub type ExtensionInfo = HashMap<String, OwnedValue>;
 
 /// What GNOME knows about the extension, from the Shell on the bus name given. It's empty for an
@@ -51,16 +56,36 @@ pub fn is_running(info: &ExtensionInfo) -> bool {
     matches!(value::<f64>(info, "state"), Some(STATE_ACTIVE | STATE_ACTIVATING))
 }
 
-/// Whether the copy GNOME loaded is this Gestos's own. Copies from before extensions said their
-/// version have none, so they're never current.
+/// Whether the copy GNOME loaded has the code this Gestos's own has, even if it came with an older
+/// Gestos, which doesn't need updating then.
 pub fn is_current(info: &ExtensionInfo) -> bool {
-    value::<String>(info, "version-name").as_deref() == Some(VERSION)
+    has_this_code(
+        value::<String>(info, "gestos-fingerprint").as_deref(),
+        value::<String>(info, "version-name").as_deref(),
+    )
 }
 
-/// The version a `metadata.json` says the extension is. JSON is YAML too.
-pub fn metadata_version(metadata: &str) -> Option<String> {
-    let value: serde_yaml::Value = serde_yaml::from_str(metadata).ok()?;
-    value.get("version-name")?.as_str().map(str::to_string)
+/// The same, for a copy's `metadata.json`. JSON is YAML too.
+pub fn metadata_is_current(metadata: &str) -> bool {
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(metadata) else {
+        return false;
+    };
+    let field = |key: &str| value.get(key).and_then(|field| field.as_str());
+    has_this_code(field("gestos-fingerprint"), field("version-name"))
+}
+
+/// Copies from before the fingerprint have none, and copies from before the version have neither,
+/// so they're never current. Without a fingerprint of its own, Gestos goes by the version.
+fn has_this_code(fingerprint: Option<&str>, version: Option<&str>) -> bool {
+    has_this_code_as(FINGERPRINT, fingerprint, version)
+}
+
+fn has_this_code_as(own: &str, fingerprint: Option<&str>, version: Option<&str>) -> bool {
+    if own.is_empty() {
+        version == Some(VERSION)
+    } else {
+        fingerprint == Some(own)
+    }
 }
 
 #[cfg(test)]
@@ -69,13 +94,35 @@ mod tests {
 
     #[test]
     fn the_extension_comes_with_this_version() {
-        let metadata = include_str!("../extension/metadata.json");
-        assert_eq!(metadata_version(metadata).as_deref(), Some(VERSION));
+        let metadata: serde_yaml::Value =
+            serde_yaml::from_str(include_str!("../extension/metadata.json")).unwrap();
+        assert_eq!(metadata["version-name"].as_str(), Some(VERSION));
     }
 
     #[test]
-    fn an_extension_without_a_version_is_not_current() {
+    fn the_fingerprint_is_built_in() {
+        assert_eq!(FINGERPRINT.len(), 16, "{FINGERPRINT:?}");
+    }
+
+    #[test]
+    fn the_same_code_is_current_whatever_the_version() {
+        assert!(has_this_code_as("abc", Some("abc"), Some("1.0")));
+        assert!(!has_this_code_as("abc", Some("def"), Some(VERSION)));
+        // A copy from before the fingerprint.
+        assert!(!has_this_code_as("abc", None, Some(VERSION)));
+    }
+
+    #[test]
+    fn without_a_fingerprint_the_version_tells() {
+        assert!(has_this_code_as("", None, Some(VERSION)));
+        assert!(!has_this_code_as("", None, Some("1.0")));
+    }
+
+    #[test]
+    fn a_copy_says_whether_it_is_current() {
+        let current = format!("{{\"gestos-fingerprint\": \"{FINGERPRINT}\"}}");
+        assert!(metadata_is_current(&current));
+        assert!(!metadata_is_current("{\"uuid\": \"x\"}"));
         assert!(!is_current(&ExtensionInfo::new()));
-        assert_eq!(metadata_version("{\"uuid\": \"x\"}"), None);
     }
 }

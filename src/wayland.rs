@@ -842,8 +842,8 @@ mod tests {
         notifications: Arc<AtomicUsize>,
         choice: Arc<AtomicI32>,
         chooser_points: Arc<Mutex<Vec<Vec<f64>>>>,
-        // The extension version GNOME says it runs, if it runs one.
-        running_version: Arc<Mutex<Option<String>>>,
+        // The extension GNOME says it runs, if it runs one: its fingerprint, if it has one.
+        running_fingerprint: Arc<Mutex<Option<Option<String>>>>,
     }
 
     struct FakeExtensions(FakeShell);
@@ -852,9 +852,13 @@ mod tests {
         fn get_extension_info(&self, _uuid: String) -> HashMap<String, zbus::zvariant::OwnedValue> {
             let owned = |value: zbus::zvariant::Value| value.try_to_owned().unwrap();
             let mut info = HashMap::new();
-            if let Some(version) = self.0.running_version.lock().unwrap().clone() {
+            if let Some(fingerprint) = self.0.running_fingerprint.lock().unwrap().clone() {
                 info.insert("state".to_string(), owned(1.0f64.into()));
+                let version = crate::gnome_extension::VERSION;
                 info.insert("version-name".to_string(), owned(version.into()));
+                if let Some(fingerprint) = fingerprint {
+                    info.insert("gestos-fingerprint".to_string(), owned(fingerprint.into()));
+                }
             }
             info
         }
@@ -924,7 +928,8 @@ mod tests {
     fn an_outdated_extension_is_mentioned_once() {
         let shell = FakeShell {
             extension_active: Arc::new(AtomicBool::new(true)),
-            running_version: Arc::new(Mutex::new(Some("1.0".to_string()))),
+            // Another extension's code, with the same version.
+            running_fingerprint: Arc::new(Mutex::new(Some(Some("0123456789abcdef".to_string())))),
             ..Default::default()
         };
         if tile_windows_times(&shell, "Outdated", 2).is_none() {
@@ -936,10 +941,10 @@ mod tests {
 
     #[test]
     fn a_current_extension_is_not_mentioned() {
-        let version = crate::gnome_extension::VERSION.to_string();
+        let fingerprint = crate::gnome_extension::FINGERPRINT.to_string();
         let shell = FakeShell {
             extension_active: Arc::new(AtomicBool::new(true)),
-            running_version: Arc::new(Mutex::new(Some(version))),
+            running_fingerprint: Arc::new(Mutex::new(Some(Some(fingerprint)))),
             ..Default::default()
         };
         if tile_windows_with(&shell, "Current").is_none() {

@@ -1,3 +1,4 @@
 /target/
 /build/
 *.shell-extension.zip
+/extension/.stage/

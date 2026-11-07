@@ -2,7 +2,7 @@
 //! It's optional: other desktops don't have it, and GNOME works without it.
 
 use gestos::gnome_extension::{
-    self as shell, STATE_ACTIVATING, STATE_ACTIVE, STATE_ERROR, STATE_OUT_OF_DATE, UUID, VERSION,
+    self as shell, STATE_ACTIVATING, STATE_ACTIVE, STATE_ERROR, STATE_OUT_OF_DATE, UUID,
 };
 use gtk::gio;
 use gtk::prelude::FileExt;
@@ -97,9 +97,9 @@ fn installed_path() -> Option<PathBuf> {
     installed_copies().into_iter().next()
 }
 
-fn copy_version(copy: &Path) -> Option<String> {
-    let metadata = std::fs::read_to_string(copy.join("metadata.json")).ok()?;
-    shell::metadata_version(&metadata)
+fn copy_is_current(copy: &Path) -> bool {
+    std::fs::read_to_string(copy.join("metadata.json"))
+        .is_ok_and(|metadata| shell::metadata_is_current(&metadata))
 }
 
 pub fn status(conn: Option<&zbus::blocking::Connection>) -> ExtensionStatus {
@@ -107,11 +107,11 @@ pub fn status(conn: Option<&zbus::blocking::Connection>) -> ExtensionStatus {
         return ExtensionStatus::Unavailable;
     }
     let info = conn.and_then(|conn| shell::info(conn).ok()).unwrap_or_default();
-    let copies: Vec<(PathBuf, Option<String>)> = installed_copies()
+    let copies: Vec<(PathBuf, bool)> = installed_copies()
         .into_iter()
         .map(|copy| {
-            let version = copy_version(&copy);
-            (copy, version)
+            let current = copy_is_current(&copy);
+            (copy, current)
         })
         .collect();
     status_from(
@@ -124,12 +124,12 @@ pub fn status(conn: Option<&zbus::blocking::Connection>) -> ExtensionStatus {
 }
 
 /// What the status is, from what GNOME says about the copy it runs, and the copies installed with
-/// their versions, in the order GNOME looks for them.
+/// whether each is current, in the order GNOME looks for them.
 fn status_from(
     state: Option<f64>,
     error: Option<String>,
     current: bool,
-    copies: &[(PathBuf, Option<String>)],
+    copies: &[(PathBuf, bool)],
     user_folder: &Path,
 ) -> ExtensionStatus {
     match state {
@@ -147,11 +147,10 @@ fn status_from(
 }
 
 /// What the next login loads tells how the old copy running gets updated.
-fn old_copy(copies: &[(PathBuf, Option<String>)], user_folder: &Path) -> OldCopy {
-    let is_new = |(_, version): &&(PathBuf, Option<String>)| version.as_deref() == Some(VERSION);
+fn old_copy(copies: &[(PathBuf, bool)], user_folder: &Path) -> OldCopy {
     match copies.first() {
-        Some(next) if is_new(&next) => OldCopy::Replaced,
-        Some((next, _)) if next.starts_with(user_folder) && copies.iter().any(|c| is_new(&c)) => {
+        Some((_, true)) => OldCopy::Replaced,
+        Some((next, _)) if next.starts_with(user_folder) && copies.iter().any(|(_, new)| *new) => {
             OldCopy::InUserFolder(next.clone())
         }
         _ => OldCopy::NotReplaced,
@@ -210,12 +209,12 @@ mod tests {
         PathBuf::from("/home/me/.local/share")
     }
 
-    fn copy(dir: &str, version: Option<&str>) -> (PathBuf, Option<String>) {
-        (PathBuf::from(dir).join(UUID), version.map(str::to_string))
+    fn copy(dir: &str, current: bool) -> (PathBuf, bool) {
+        (PathBuf::from(dir).join(UUID), current)
     }
 
-    fn installed() -> Vec<(PathBuf, Option<String>)> {
-        vec![copy("/usr/share/gnome-shell/extensions", Some(VERSION))]
+    fn installed() -> Vec<(PathBuf, bool)> {
+        vec![copy("/usr/share/gnome-shell/extensions", true)]
     }
 
     #[test]
@@ -240,14 +239,14 @@ mod tests {
 
     #[test]
     fn an_old_copy_running_says_what_updates_it() {
-        let outdated = |copies: &[(PathBuf, Option<String>)]| {
+        let outdated = |copies: &[(PathBuf, bool)]| {
             status_from(Some(1.0), None, false, copies, &user())
         };
         assert_eq!(outdated(&installed()), ExtensionStatus::Outdated(OldCopy::Replaced));
-        let mine = copy("/home/me/.local/share/gnome-shell/extensions", None);
+        let mine = copy("/home/me/.local/share/gnome-shell/extensions", false);
         let shadowed = [mine.clone(), installed()[0].clone()];
         assert_eq!(outdated(&shadowed), ExtensionStatus::Outdated(OldCopy::InUserFolder(mine.0)));
-        let old = [copy("/usr/share/gnome-shell/extensions", Some("1.0"))];
+        let old = [copy("/usr/share/gnome-shell/extensions", false)];
         assert_eq!(outdated(&old), ExtensionStatus::Outdated(OldCopy::NotReplaced));
     }
 
