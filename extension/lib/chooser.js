@@ -122,7 +122,16 @@ export class GestureChooser {
             Math.round(cardPosition(px, width, monitor.x, monitor.width)),
             Math.round(cardPosition(py, height, monitor.y, monitor.height)));
 
-        this._layer.connect('button-press-event', () => {
+        // Buttons recognize clicks with gestures, which leave the press to reach the layer too. So
+        // only a press away from the card, or with another button, cancels. A left press on a
+        // gesture goes on to pick it.
+        this._layer.connect('button-press-event', (_actor, event) => {
+            const [x, y] = event.get_coords();
+            const [left, top] = menu.get_transformed_position();
+            const [cardWidth, cardHeight] = menu.get_transformed_size();
+            const onCard = x >= left && x < left + cardWidth && y >= top && y < top + cardHeight;
+            if (onCard && event.get_button() === Clutter.BUTTON_PRIMARY)
+                return Clutter.EVENT_PROPAGATE;
             this._finish(-1);
             return Clutter.EVENT_STOP;
         });

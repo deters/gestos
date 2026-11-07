@@ -412,6 +412,8 @@ fn dispatch_gesture(
                         &signals,
                         &wayland_ctx,
                     );
+                } else {
+                    println!("No gesture was chosen.");
                 }
             });
         }
