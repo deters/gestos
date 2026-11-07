@@ -2,7 +2,6 @@ use crate::key_steps::{describe_steps, format_steps, parse_steps, KeyStep};
 use crate::modifiers::Modifiers;
 use crate::protractor::Point2D;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -440,30 +439,17 @@ pub struct GestureConfig {
     pub modifiers: Option<String>,
     #[serde(rename = "move")]
     pub movement_expr: Option<String>,
+    /// The apps the gesture works in, by their desktop file ID. With none, it works in all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<String>,
     #[serde(rename = "do")]
     pub action_expr: ActionsVecOrString,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppMatch {
-    pub class: Option<String>,
-    pub title: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppConfig {
-    pub name: String,
-    #[serde(rename = "match")]
-    pub match_rules: AppMatch,
-    pub gestures: HashMap<String, GestureConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct YamlConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub global: Option<serde_yaml::Mapping>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub apps: Option<Vec<AppConfig>>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reduce_notifications: bool,
 }
@@ -479,9 +465,18 @@ pub struct Gesture {
     pub is_modified: bool,
     pub is_deleted: bool,
     pub modifiers: Modifiers,
+    /// The apps it works in, by their desktop file ID, like `org.mozilla.firefox`. With none, it
+    /// works in all of them.
+    pub apps: Vec<String>,
 }
 
 impl Gesture {
+    /// Whether it works in the app that has focus, if that's known. One limited to some apps only
+    /// works when one of them is known to have it.
+    pub fn works_in(&self, app: Option<&str>) -> bool {
+        self.apps.is_empty() || app.is_some_and(|app| self.apps.iter().any(|a| a == app))
+    }
+
     /// What the gesture does, for showing below its name. Desktop actions are left out, because
     /// all there is to say about them is an internal key, and their name already says it.
     pub fn action_description(&self) -> String {
@@ -497,7 +492,6 @@ impl Gesture {
 #[derive(Debug, Clone)]
 pub struct Configuration {
     pub gestures: Vec<Gesture>,
-    pub apps: Vec<AppConfig>,
     pub user_config_path: PathBuf,
     /// Whether to skip the notification that says which gesture ran.
     pub reduce_notifications: bool,
@@ -804,7 +798,6 @@ impl Configuration {
         let user_path = get_default_config_path();
         let mut config = Configuration {
             gestures: Vec::new(),
-            apps: Vec::new(),
             user_config_path: user_path.clone(),
             reduce_notifications: false,
         };
@@ -822,7 +815,6 @@ impl Configuration {
         let content = fs::read_to_string(path.as_ref()).ok()?;
         let mut config = Configuration {
             gestures: Vec::new(),
-            apps: Vec::new(),
             user_config_path: path.as_ref().to_path_buf(),
             reduce_notifications: false,
         };
@@ -892,6 +884,7 @@ impl Configuration {
                     existing.actions = actions;
                     existing.is_deleted = is_abort;
                     existing.modifiers = modifiers;
+                    existing.apps = gest_cfg.apps;
                 } else {
                     let id = gest_cfg.id.clone().unwrap_or_else(|| {
                         if is_user {
@@ -910,13 +903,10 @@ impl Configuration {
                         is_modified: false,
                         is_deleted: is_abort,
                         modifiers,
+                        apps: gest_cfg.apps,
                     });
                 }
             }
-        }
-
-        if let Some(apps) = parsed.apps {
-            self.apps = apps;
         }
 
         self.reduce_notifications = parsed.reduce_notifications;
@@ -942,13 +932,13 @@ impl Configuration {
                 id: Some(g.id.clone()),
                 modifiers: (!g.modifiers.is_empty()).then(|| g.modifiers.to_string()),
                 movement_expr: Some(g.raw_movement.clone()),
+                apps: g.apps.clone(),
                 action_expr,
             };
             global.insert(g.name.clone().into(), serde_yaml::to_value(entry)?);
         }
         let yaml = YamlConfig {
             global: (!global.is_empty()).then_some(global),
-            apps: (!self.apps.is_empty()).then(|| self.apps.clone()),
             reduce_notifications: self.reduce_notifications,
         };
         Ok(format!(
@@ -1266,6 +1256,7 @@ mod tests {
             is_modified: false,
             is_deleted: false,
             modifiers: Modifiers::default(),
+            apps: Vec::new(),
         }
     }
 
@@ -1273,7 +1264,6 @@ mod tests {
         let file = TempConfig::new(test_name, "");
         let config = Configuration {
             gestures,
-            apps: Vec::new(),
             user_config_path: file.0.clone(),
             reduce_notifications: false,
         };
@@ -1300,6 +1290,30 @@ mod tests {
         let saved = fs::read_to_string(&file.0).unwrap();
         assert!(saved.contains("do: kill"), "{saved}");
         assert!(!saved.contains("raise"), "{saved}");
+    }
+
+    #[test]
+    fn the_apps_a_gesture_works_in_survive_saving() {
+        let mut limited = gesture("Close Tab", vec![ActionType::Keypress("Control+W".into())]);
+        limited.apps = vec!["org.mozilla.firefox".to_string()];
+        let reloaded = save_and_reload("apps", vec![limited, gesture("Back", Vec::new())]);
+        let apps = |name: &str| {
+            reloaded.gestures.iter().find(|g| g.name == name).unwrap().apps.clone()
+        };
+        assert_eq!(apps("Close Tab"), ["org.mozilla.firefox"]);
+        assert!(apps("Back").is_empty());
+    }
+
+    #[test]
+    fn a_gesture_limited_to_apps_only_works_in_them() {
+        let mut limited = gesture("Close Tab", Vec::new());
+        limited.apps = vec!["org.mozilla.firefox".to_string()];
+        assert!(limited.works_in(Some("org.mozilla.firefox")));
+        assert!(!limited.works_in(Some("org.gnome.TextEditor")));
+        assert!(!limited.works_in(None));
+        let everywhere = gesture("Back", Vec::new());
+        assert!(everywhere.works_in(Some("org.gnome.TextEditor")));
+        assert!(everywhere.works_in(None));
     }
 
     #[test]
@@ -1343,7 +1357,6 @@ mod tests {
         fs::set_permissions(&file.0, fs::Permissions::from_mode(0o600)).unwrap();
         let config = Configuration {
             gestures: vec![gesture("One", vec![ActionType::Kill])],
-            apps: Vec::new(),
             user_config_path: file.0.clone(),
             reduce_notifications: false,
         };
@@ -1451,7 +1464,6 @@ mod tests {
         set_mode(&file.0, 0o664);
         let config = Configuration {
             gestures: Vec::new(),
-            apps: Vec::new(),
             user_config_path: file.0.clone(),
             reduce_notifications: false,
         };
@@ -1468,7 +1480,6 @@ mod tests {
         std::os::unix::fs::symlink(&target.0, &link).unwrap();
         let config = Configuration {
             gestures: vec![gesture("One", vec![ActionType::Kill])],
-            apps: Vec::new(),
             user_config_path: link.clone(),
             reduce_notifications: false,
         };
@@ -1533,7 +1544,6 @@ mod tests {
             let file = TempConfig::new(test_name, "");
             let config = Configuration {
                 gestures,
-                apps: Vec::new(),
                 user_config_path: file.0.clone(),
                 reduce_notifications: true,
             };

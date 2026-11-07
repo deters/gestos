@@ -21,6 +21,9 @@ const INTERFACE_XML = `
     <method name="CloseWindow">
       <arg type="b" direction="out" name="closed"/>
     </method>
+    <method name="FocusedApp">
+      <arg type="s" direction="out" name="app"/>
+    </method>
     <method name="ChooseGesture">
       <arg type="a(ssad)" direction="in" name="gestures"/>
       <arg type="i" direction="out" name="choice"/>
@@ -1137,6 +1140,18 @@ class WindowActions {
             }
         }
         this._saveTiled();
+    }
+
+    /**
+     * The app of the focused window, by its desktop file ID without the extension, as gestures name
+     * the apps they work in: `org.mozilla.firefox`. A window without a desktop file goes by its
+     * window class, and with no window focused, it's empty.
+     *
+     * @returns {string} the app
+     */
+    FocusedApp() {
+        const window = global.display.focus_window;
+        return window ? appIdOf(window)?.replace(/\.desktop$/, '') ?? '' : '';
     }
 
     /**

@@ -1,6 +1,6 @@
 # Gestos GNOME extension
 
-Gives [Gestos](https://github.com/deters/gestos) window tiling, which GNOME has no shortcut for, and asks which gesture you meant when one you drew is close to several. GNOME on Wayland only lets its own Shell see and move other windows, so these have to run inside it.
+Gives [Gestos](https://github.com/deters/gestos) window tiling, which GNOME has no shortcut for, asks which gesture you meant when one you drew is close to several, and tells Gestos which app has focus, for gestures limited to some apps. GNOME on Wayland only lets its own Shell see and move other windows, so these have to run inside it.
 
 ## Tiling
 

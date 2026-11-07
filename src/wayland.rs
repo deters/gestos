@@ -32,6 +32,27 @@ fn call_extension(conn: &zbus::blocking::Connection, shell: &str, method: &str) 
     Ok(())
 }
 
+/// The app of the focused window, from the GNOME extension, by its desktop file ID. `None` when no
+/// window is focused, or the extension can't say, such as when it isn't running.
+pub fn focused_app_in_gnome_extension() -> Option<String> {
+    let conn = zbus::blocking::Connection::session().ok()?;
+    focused_app_from(&conn, GNOME_SHELL_NAME)
+}
+
+fn focused_app_from(conn: &zbus::blocking::Connection, shell: &str) -> Option<String> {
+    let reply = conn
+        .call_method(
+            Some(shell),
+            GESTOS_EXTENSION_PATH,
+            Some(GESTOS_EXTENSION_INTERFACE),
+            "FocusedApp",
+            &(),
+        )
+        .ok()?;
+    let app: String = reply.body().deserialize().ok()?;
+    (!app.is_empty()).then_some(app)
+}
+
 /// Asks the GNOME extension which of several gestures was meant, on a card the Shell draws at the
 /// pointer. `None` means the user cancelled. An error means the extension can't ask, such as when
 /// it isn't running, or is a version from before it could.
@@ -842,6 +863,7 @@ mod tests {
         notifications: Arc<AtomicUsize>,
         choice: Arc<AtomicI32>,
         chooser_points: Arc<Mutex<Vec<Vec<f64>>>>,
+        focused_app: Arc<Mutex<String>>,
         // The extension GNOME says it runs, if it runs one: its fingerprint, if it has one.
         running_fingerprint: Arc<Mutex<Option<Option<String>>>>,
     }
@@ -873,6 +895,10 @@ mod tests {
             }
             self.0.tile_calls.fetch_add(1, Ordering::SeqCst);
             Ok(true)
+        }
+
+        fn focused_app(&self) -> String {
+            self.0.focused_app.lock().unwrap().clone()
         }
 
         fn choose_gesture(&self, gestures: Vec<(String, String, Vec<f64>)>) -> i32 {
@@ -968,6 +994,21 @@ mod tests {
             points: vec![point(0.0, 1.0), point(2.0, 3.0)],
         });
         Some(choose_in_extension(&conn, &name, &entries))
+    }
+
+    #[test]
+    fn the_extension_says_which_app_has_focus() {
+        let Ok(conn) = zbus::blocking::Connection::session() else { return };
+        let shell = FakeShell::default();
+        let name = format!("io.github.deters.GestosTestFocus.P{}", std::process::id());
+        let _service = zbus::blocking::connection::Builder::session()
+            .and_then(|b| b.name(name.clone()))
+            .and_then(|b| b.serve_at(GESTOS_EXTENSION_PATH, FakeExtension(shell.clone())))
+            .and_then(|b| b.build())
+            .unwrap();
+        assert_eq!(focused_app_from(&conn, &name), None);
+        *shell.focused_app.lock().unwrap() = "org.mozilla.firefox".to_string();
+        assert_eq!(focused_app_from(&conn, &name).as_deref(), Some("org.mozilla.firefox"));
     }
 
     #[test]

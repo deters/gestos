@@ -317,13 +317,35 @@ fn spawn_gesture_actions(
 fn gesture_templates(
     config: &Configuration,
     modifiers: Modifiers,
+    app: Option<&str>,
 ) -> Vec<(String, Vec<gestos::protractor::Point2D>)> {
     config
         .gestures
         .iter()
-        .filter(|g| !g.is_deleted && g.modifiers == modifiers)
+        .filter(|g| !g.is_deleted && g.modifiers == modifiers && g.works_in(app))
         .map(|g| (g.name.clone(), g.points.clone()))
         .collect()
+}
+
+/// A gesture made for the app in use is an exception to the ones that work everywhere, so when a
+/// drawing matches both, only the app's own count.
+fn prefer_app_gestures(candidates: Vec<Gesture>) -> Vec<Gesture> {
+    if candidates.iter().any(|g| !g.apps.is_empty()) {
+        candidates.into_iter().filter(|g| !g.apps.is_empty()).collect()
+    } else {
+        candidates
+    }
+}
+
+/// The app of the focused window, which gestures limited to some apps need. It's only asked for
+/// when there are some, and only GNOME's extension can say.
+#[cfg(target_os = "linux")]
+fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> Option<String> {
+    let limited = config.gestures.iter().any(|g| !g.is_deleted && !g.apps.is_empty());
+    if !limited || !wayland_ctx.is_gnome {
+        return None;
+    }
+    gestos::wayland::focused_app_in_gnome_extension()
 }
 
 #[cfg(target_os = "linux")]
@@ -382,11 +404,13 @@ fn dispatch_gesture(
     }
 
     let reduce_notifications = config.reduce_notifications;
-    let templates = gesture_templates(config, modifiers);
+    let app = focused_app(config, wayland_ctx);
+    let templates = gesture_templates(config, modifiers, app.as_deref());
     let candidates: Vec<Gesture> = gestos::protractor::match_gesture_candidates(points, &templates)
         .iter()
         .filter_map(|name| config.gestures.iter().find(|g| &g.name == name).cloned())
         .collect();
+    let candidates = prefer_app_gestures(candidates);
 
     match candidates.len() {
         0 => println!("Gesture failed: did not match any known template."),
@@ -1238,6 +1262,7 @@ mod tests {
             is_modified: false,
             is_deleted: false,
             modifiers: Modifiers::parse(modifiers),
+            apps: Vec::new(),
         }
     }
 
@@ -1306,7 +1331,6 @@ mod tests {
         });
         let mut config = Configuration {
             gestures: vec![sample_gesture("held", "ctrl")],
-            apps: Vec::new(),
             user_config_path: PathBuf::new(),
             reduce_notifications: false,
         };
@@ -1372,12 +1396,11 @@ mod tests {
                 sample_gesture("ctrl", "ctrl"),
                 sample_gesture("ctrl-alt", "ctrl+alt"),
             ],
-            apps: Vec::new(),
             user_config_path: PathBuf::new(),
             reduce_notifications: false,
         };
         let names = |modifiers: &str| -> Vec<String> {
-            gesture_templates(&config, Modifiers::parse(modifiers))
+            gesture_templates(&config, Modifiers::parse(modifiers), None)
                 .into_iter()
                 .map(|(name, _)| name)
                 .collect()
@@ -1386,6 +1409,38 @@ mod tests {
         assert_eq!(names("ctrl"), ["ctrl"]);
         assert_eq!(names("ctrl+alt"), ["ctrl-alt"]);
         assert!(names("shift").is_empty());
+    }
+
+    #[test]
+    fn gestures_limited_to_apps_only_match_in_them() {
+        let mut close_tab = sample_gesture("close-tab", "");
+        close_tab.apps = vec!["org.mozilla.firefox".to_string()];
+        let config = Configuration {
+            gestures: vec![sample_gesture("close", ""), close_tab],
+            user_config_path: PathBuf::new(),
+            reduce_notifications: false,
+        };
+        let names = |app: Option<&str>| -> Vec<String> {
+            gesture_templates(&config, Modifiers::default(), app)
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        };
+        assert_eq!(names(Some("org.mozilla.firefox")), ["close", "close-tab"]);
+        assert_eq!(names(Some("org.gnome.TextEditor")), ["close"]);
+        assert_eq!(names(None), ["close"]);
+    }
+
+    #[test]
+    fn an_apps_own_gesture_wins_over_one_for_every_app() {
+        let mut close_tab = sample_gesture("close-tab", "");
+        close_tab.apps = vec!["org.mozilla.firefox".to_string()];
+        let names = |candidates: Vec<Gesture>| -> Vec<String> {
+            prefer_app_gestures(candidates).into_iter().map(|g| g.name).collect()
+        };
+        assert_eq!(names(vec![sample_gesture("close", ""), close_tab]), ["close-tab"]);
+        let both = vec![sample_gesture("close", ""), sample_gesture("back", "")];
+        assert_eq!(names(both), ["close", "back"]);
     }
 
     #[test]

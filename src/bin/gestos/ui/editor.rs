@@ -11,6 +11,7 @@ use crate::state::{AppState, EditorActionOption};
 use crate::actions::{action_matches, action_needs_parameter};
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
 use crate::ui::keyboard_steps::build_steps_editor;
+use crate::ui::app_picker::build_apps_list;
 use gestos::key_steps::{format_steps, parse_steps, KeyStep};
 use crate::ui::components::{draw_gesture_path, show_confirm_dialog};
 use crate::daemon::reload_daemon;
@@ -372,51 +373,65 @@ fn open_editor(
         }
     });
 
-    let canvas_clone3 = canvas.clone();
-    let rec_drag3 = Rc::clone(&is_recording);
-    let pts_drag_end = Rc::clone(&recorded_points);
-    let state_clone_drag = Rc::clone(state_rc);
-    let edited_gesture_name = target_gesture.as_ref().map(|g| g.name.clone());
-    let conflict_box_end = conflict_box.clone();
-    let conflict_label_end = conflict_label.clone();
-    let toggles_end = modifier_toggles.clone();
-    drag.connect_drag_end(move |_, _, _| {
-        *rec_drag3.borrow_mut() = false;
-        canvas_clone3.queue_draw();
-        println!("GUI: Gesture drawing finished.");
+    // The apps the gesture works in, which are part of its trigger, like its modifier keys.
+    let gesture_apps = Rc::new(RefCell::new(
+        target_gesture.as_ref().map(|g| g.apps.clone()).unwrap_or_default(),
+    ));
 
-        let pts = pts_drag_end.borrow();
-        if pts.len() >= 2 {
-            let state = state_clone_drag.borrow();
-            let drawn_modifiers = toggles_end.get();
+    // A shape close to another gesture's conflicts when both can fire at once: with the same
+    // modifier keys, in the same app. One for some apps and one for all of them don't, as the
+    // app's own wins there.
+    let check_conflict: Rc<dyn Fn()> = {
+        let pts_check = Rc::clone(&recorded_points);
+        let state_check = Rc::clone(state_rc);
+        let edited_gesture_name = target_gesture.as_ref().map(|g| g.name.clone());
+        let conflict_box = conflict_box.clone();
+        let conflict_label = conflict_label.clone();
+        let toggles = modifier_toggles.clone();
+        let apps = Rc::clone(&gesture_apps);
+        Rc::new(move || {
+            let pts = pts_check.borrow();
+            if pts.len() < 2 {
+                conflict_box.set_visible(false);
+                return;
+            }
+            let state = state_check.borrow();
+            let drawn_modifiers = toggles.get();
+            let apps = apps.borrow();
+            let same_apps = |other: &[String]| {
+                other.is_empty() == apps.is_empty()
+                    && (apps.is_empty() || other.iter().any(|app| apps.contains(app)))
+            };
             let templates: Vec<(String, Vec<Point2D>)> = state
                 .config
                 .gestures
                 .iter()
                 .filter(|g| !g.is_deleted)
-                .filter(|g| g.modifiers == drawn_modifiers)
-                .filter(|g| {
-                    if let Some(ref name) = edited_gesture_name {
-                        g.name != *name
-                    } else {
-                        true
-                    }
-                })
+                .filter(|g| g.modifiers == drawn_modifiers && same_apps(&g.apps))
+                .filter(|g| edited_gesture_name.as_ref() != Some(&g.name))
                 .map(|g| (g.name.clone(), g.points.clone()))
                 .collect();
 
             if let Some(matched_name) = match_gesture(&pts[..], &templates) {
-                conflict_label_end.set_text(&format!(
+                conflict_label.set_text(&format!(
                     "Warning: This path is very similar to the existing gesture '{}'.",
                     matched_name
                 ));
-                conflict_box_end.set_visible(true);
+                conflict_box.set_visible(true);
             } else {
-                conflict_box_end.set_visible(false);
+                conflict_box.set_visible(false);
             }
-        } else {
-            conflict_box_end.set_visible(false);
-        }
+        })
+    };
+
+    let canvas_clone3 = canvas.clone();
+    let rec_drag3 = Rc::clone(&is_recording);
+    let check_drag_end = Rc::clone(&check_conflict);
+    drag.connect_drag_end(move |_, _, _| {
+        *rec_drag3.borrow_mut() = false;
+        canvas_clone3.queue_draw();
+        println!("GUI: Gesture drawing finished.");
+        check_drag_end();
     });
 
     let modifiers_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -434,6 +449,9 @@ fn open_editor(
     modifiers_list.set_selection_mode(gtk::SelectionMode::None);
     modifiers_list.append(&modifiers_row);
     scroll_content.append(&modifiers_list);
+
+    let apps_list = build_apps_list(&dialog, Rc::clone(&gesture_apps), Rc::clone(&check_conflict));
+    scroll_content.append(&apps_list);
 
     // For actions that need the GNOME extension, which isn't always there.
     let extension_label = gtk::Label::new(None);
@@ -685,6 +703,7 @@ fn open_editor(
     let selected_action_save = Rc::clone(&selected_action);
 
     let toggles_save = modifier_toggles.clone();
+    let apps_save = Rc::clone(&gesture_apps);
     let is_name_customized_save = Rc::clone(&is_name_customized);
     save_btn.connect_clicked(move |_| {
         let modifiers = toggles_save.get();
@@ -762,6 +781,7 @@ fn open_editor(
                         return;
                     }
                     state.config.gestures[pos].modifiers = modifiers;
+                    state.config.gestures[pos].apps = apps_save.borrow().clone();
                     state.config.gestures[pos].name = name.clone();
                     state.config.gestures[pos].raw_movement = raw_movement;
                     state.config.gestures[pos].points = pts.clone();
@@ -769,6 +789,7 @@ fn open_editor(
                     println!("Gesture renamed successfully: {} -> {}", lookup_name, name);
                 } else {
                     state.config.gestures[pos].modifiers = modifiers;
+                    state.config.gestures[pos].apps = apps_save.borrow().clone();
                     state.config.gestures[pos].raw_movement = raw_movement;
                     state.config.gestures[pos].points = pts.clone();
                     state.config.gestures[pos].actions = vec![action];
@@ -801,6 +822,7 @@ fn open_editor(
                 is_modified: false,
                 is_deleted: false,
                 modifiers,
+                apps: apps_save.borrow().clone(),
             });
             state.newly_added_gestures.push(name.clone());
         }
@@ -874,6 +896,7 @@ mod tests {
             is_modified: false,
             is_deleted: false,
             modifiers: Modifiers::default(),
+            apps: Vec::new(),
         }
     }
 

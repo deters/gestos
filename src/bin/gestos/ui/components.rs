@@ -451,6 +451,10 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         plus.add_css_class("dim-label");
         main_hbox.append(&plus);
     }
+    // A gesture for some apps shows theirs, as part of what triggers it.
+    if !gesture.apps.is_empty() {
+        main_hbox.append(&crate::ui::app_picker::app_icons(&gesture.apps));
+    }
     main_hbox.append(&preview_frame);
     row.set_child(Some(&main_hbox));
 

@@ -196,6 +196,7 @@ mod tests {
             is_modified: false,
             is_deleted: false,
             modifiers: Default::default(),
+            apps: Vec::new(),
         }
     }
 
