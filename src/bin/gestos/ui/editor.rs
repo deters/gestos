@@ -450,7 +450,7 @@ fn open_editor(
     scroll_content.append(&conflict_box);
 
     // --- ACTION SETTINGS SECTION ---
-    let settings_section_label = gtk::Label::new(Some("Details"));
+    let settings_section_label = gtk::Label::new(Some("Action Details"));
     settings_section_label.set_halign(gtk::Align::Start);
     settings_section_label.add_css_class("section-header");
     scroll_content.append(&settings_section_label);

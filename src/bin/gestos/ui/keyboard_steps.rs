@@ -40,8 +40,8 @@ pub fn build_steps_editor(parent: &gtk::Window, details: &gtk::Entry) -> (gtk::B
     let add_buttons = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     add_buttons.set_halign(gtk::Align::Start);
     for (label, step) in [
-        ("Add _Keys", KeyStep::Press(String::new())),
-        ("Add _Text", KeyStep::Type(String::new())),
+        ("Press a _Shortcut", KeyStep::Press(String::new())),
+        ("_Type a Text", KeyStep::Type(String::new())),
         ("Add _Pause", KeyStep::Wait(NEW_WAIT_MILLIS)),
     ] {
         let button = gtk::Button::with_mnemonic(label);
@@ -82,15 +82,8 @@ impl StepsEditor {
             self.rows.remove(&child);
         }
         let steps = self.steps.borrow().clone();
-        if steps.is_empty() {
-            let empty =
-                gtk::Label::new(Some("Add the keys to press, text to type and pauses, in order"));
-            empty.add_css_class("dim-label");
-            empty.set_halign(gtk::Align::Start);
-            empty.set_wrap(true);
-            empty.set_xalign(0.0);
-            self.rows.append(&empty);
-        }
+        // With no steps, only the buttons to add them show, without space kept for the list.
+        self.rows.set_visible(!steps.is_empty());
         for (i, step) in steps.iter().enumerate() {
             self.rows.append(&self.step_row(i, step, steps.len()));
         }
