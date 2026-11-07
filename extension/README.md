@@ -1,6 +1,6 @@
 # Gestos GNOME extension
 
-Gives [Gestos](https://github.com/deters/gestos) window tiling, which GNOME has no shortcut for. GNOME on Wayland only lets its own Shell see and move other windows, so these have to run inside it.
+Gives [Gestos](https://github.com/deters/gestos) window tiling, which GNOME has no shortcut for, and asks which gesture you meant when one you drew is close to several. GNOME on Wayland only lets its own Shell see and move other windows, so these have to run inside it.
 
 ## Tiling
 
@@ -22,6 +22,10 @@ Apps remember the size their windows had while they weren't maximized, and save 
 The window's picture is held while this happens, so it doesn't visibly change size before it closes or maximizes. A window snapped to half the screen gets its original size back when the snap is undone. While the screen is locked, everything stays as it is.
 
 An app closing its own window, with its close button or a shortcut like Ctrl+Q, can't be caught in time, so it saves the size it was given. The next window that app opens at that size gets its original size instead, in that session or a later one, for up to 30 days. Windows the extension didn't resize are left as their apps open them.
+
+## Choosing a gesture
+
+When a drawn gesture is close to several of yours, Gestos asks which one you meant. On GNOME, the extension asks with a card at the pointer, styled like GNOME's own menus. The Shell draws it, so no window opens or takes focus from the one the gesture acts on. Click a gesture to pick it, or move between them with the arrow keys or Tab and press Enter. Any other click, Escape, or waiting 15 seconds cancels. Without the extension, Gestos asks in a window of its own instead.
 
 ## Settings
 

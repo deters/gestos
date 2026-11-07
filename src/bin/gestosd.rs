@@ -396,12 +396,15 @@ fn dispatch_gesture(
             let wayland_ctx = wayland_ctx.clone();
             let input = input.clone();
             std::thread::spawn(move || {
-                if let Some(gesture) = choose_gesture(candidates) {
+                let chosen = choose_gesture(candidates, wayland_ctx.is_gnome);
+                if let Some((gesture, took_focus)) = chosen {
                     // Actions like closing a window act on the focused one, which only gets
-                    // focus back once the chooser has gone.
-                    let delay = chooser_focus_return_delay();
-                    println!("Waiting {} ms for focus to return.", delay.as_millis());
-                    std::thread::sleep(delay);
+                    // focus back once the chooser's window has gone.
+                    if took_focus {
+                        let delay = chooser_focus_return_delay();
+                        println!("Waiting {} ms for focus to return.", delay.as_millis());
+                        std::thread::sleep(delay);
+                    }
                     run_gesture(
                         &gesture,
                         reduce_notifications,
@@ -424,10 +427,11 @@ fn chooser_focus_return_delay() -> Duration {
     Duration::from_millis(millis)
 }
 
-/// Asks the user which of several similar gestures they meant. Nothing means they cancelled. If
-/// the chooser can't run, gestures keep working by taking the closest match.
+/// Asks the user which of several similar gestures they meant, and whether a window took focus to
+/// ask. Nothing means they cancelled. If the chooser can't run, gestures keep working by taking
+/// the closest match.
 #[cfg(target_os = "linux")]
-fn choose_gesture(mut candidates: Vec<Gesture>) -> Option<Gesture> {
+fn choose_gesture(mut candidates: Vec<Gesture>, is_gnome: bool) -> Option<(Gesture, bool)> {
     let entries: Vec<ChooserEntry> = candidates
         .iter()
         .map(|gesture| ChooserEntry {
@@ -436,6 +440,15 @@ fn choose_gesture(mut candidates: Vec<Gesture>) -> Option<Gesture> {
             points: gesture.points.clone(),
         })
         .collect();
+
+    // On GNOME the extension asks with a card the Shell draws, which takes no window's focus.
+    // Without it, the app's own chooser asks instead.
+    if is_gnome {
+        match gestos::wayland::choose_in_gnome_extension(&entries) {
+            Ok(choice) => return choice.map(|choice| (candidates.swap_remove(choice), false)),
+            Err(error) => println!("Choosing in the app, as the extension can't: {error}"),
+        }
+    }
 
     let app = std::env::current_exe()
         .ok()
@@ -459,11 +472,11 @@ fn choose_gesture(mut candidates: Vec<Gesture>) -> Option<Gesture> {
         Ok(output) if output.status.code() == Some(CHOOSER_EXIT_CANCELLED) => None,
         Ok(output) if output.status.success() => {
             let choice = parse_choice(&String::from_utf8_lossy(&output.stdout), entries.len())?;
-            Some(candidates.swap_remove(choice))
+            Some((candidates.swap_remove(choice), true))
         }
         _ => {
             eprintln!("gestosd: The gesture chooser failed. Using the closest match.");
-            Some(candidates.swap_remove(0))
+            Some((candidates.swap_remove(0), true))
         }
     }
 }

@@ -1,3 +1,4 @@
+use crate::chooser::ChooserEntry;
 use crate::config::ActionType;
 use gio::prelude::*;
 use std::collections::HashMap;
@@ -28,6 +29,38 @@ fn call_extension(conn: &zbus::blocking::Connection, shell: &str, method: &str) 
         &(),
     )?;
     Ok(())
+}
+
+/// Asks the GNOME extension which of several gestures was meant, on a card the Shell draws at the
+/// pointer. `None` means the user cancelled. An error means the extension can't ask, such as when
+/// it isn't running, or is a version from before it could.
+pub fn choose_in_gnome_extension(entries: &[ChooserEntry]) -> zbus::Result<Option<usize>> {
+    let conn = zbus::blocking::Connection::session()?;
+    choose_in_extension(&conn, GNOME_SHELL_NAME, entries)
+}
+
+fn choose_in_extension(
+    conn: &zbus::blocking::Connection,
+    shell: &str,
+    entries: &[ChooserEntry],
+) -> zbus::Result<Option<usize>> {
+    // Each gesture's points go as one list, x and y in turn.
+    let gestures: Vec<(&str, &str, Vec<f64>)> = entries
+        .iter()
+        .map(|entry| {
+            let points = entry.points.iter().flat_map(|p| [p.x, p.y]).collect();
+            (entry.name.as_str(), entry.description.as_str(), points)
+        })
+        .collect();
+    let reply = conn.call_method(
+        Some(shell),
+        GESTOS_EXTENSION_PATH,
+        Some(GESTOS_EXTENSION_INTERFACE),
+        "ChooseGesture",
+        &(gestures,),
+    )?;
+    let choice: i32 = reply.body().deserialize()?;
+    Ok(usize::try_from(choice).ok().filter(|&choice| choice < entries.len()))
 }
 
 /// Runs a window action in the GNOME Shell extension. The extension stays as the user left it, so
@@ -754,14 +787,16 @@ impl WaylandContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
     struct FakeShell {
         extension_active: Arc<AtomicBool>,
         tile_calls: Arc<AtomicUsize>,
         notifications: Arc<AtomicUsize>,
+        choice: Arc<AtomicI32>,
+        chooser_points: Arc<Mutex<Vec<Vec<f64>>>>,
     }
 
     struct FakeExtension(FakeShell);
@@ -773,6 +808,12 @@ mod tests {
             }
             self.0.tile_calls.fetch_add(1, Ordering::SeqCst);
             Ok(true)
+        }
+
+        fn choose_gesture(&self, gestures: Vec<(String, String, Vec<f64>)>) -> i32 {
+            *self.0.chooser_points.lock().unwrap() =
+                gestures.into_iter().map(|(_, _, points)| points).collect();
+            self.0.choice.load(Ordering::SeqCst)
         }
     }
 
@@ -808,6 +849,44 @@ mod tests {
             .unwrap();
         run_extension_action(&conn, &name, &name, "ToggleTileWindows").unwrap();
         Some(())
+    }
+
+    fn choose_with(shell: &FakeShell, test: &str) -> Option<zbus::Result<Option<usize>>> {
+        let conn = zbus::blocking::Connection::session().ok()?;
+        let name = format!("io.github.deters.GestosTestChoose{}.P{}", test, std::process::id());
+        let _service = zbus::blocking::connection::Builder::session()
+            .and_then(|b| b.name(name.clone()))
+            .and_then(|b| b.serve_at(GESTOS_EXTENSION_PATH, FakeExtension(shell.clone())))
+            .and_then(|b| b.build())
+            .unwrap();
+        let point = |x, y| crate::protractor::Point2D { x, y };
+        let entries = ["Back", "Close"].map(|name| ChooserEntry {
+            name: name.to_string(),
+            description: String::new(),
+            points: vec![point(0.0, 1.0), point(2.0, 3.0)],
+        });
+        Some(choose_in_extension(&conn, &name, &entries))
+    }
+
+    #[test]
+    fn the_extension_says_which_gesture_was_chosen() {
+        let shell = FakeShell::default();
+        shell.choice.store(1, Ordering::SeqCst);
+        let Some(choice) = choose_with(&shell, "Picked") else { return };
+        assert_eq!(choice.unwrap(), Some(1));
+        assert_eq!(*shell.chooser_points.lock().unwrap(), [[0.0, 1.0, 2.0, 3.0]; 2]);
+    }
+
+    #[test]
+    fn a_cancelled_or_unknown_choice_is_none() {
+        let shell = FakeShell::default();
+        for choice in [-1, 2] {
+            shell.choice.store(choice, Ordering::SeqCst);
+            let Some(result) = choose_with(&shell, &format!("Cancelled{}", choice + 1)) else {
+                return;
+            };
+            assert_eq!(result.unwrap(), None);
+        }
     }
 
     #[test]

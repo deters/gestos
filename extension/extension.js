@@ -8,6 +8,7 @@ import Shell from 'gi://Shell';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {GestureChooser} from './lib/chooser.js';
 import {fitSize, hasSize, isBelievableMinimum, keepInside, restoreRect, tileWindows} from './lib/tile.js';
 
 const OBJECT_PATH = '/io/github/deters/Gestos/Extension';
@@ -19,6 +20,10 @@ const INTERFACE_XML = `
     </method>
     <method name="CloseWindow">
       <arg type="b" direction="out" name="closed"/>
+    </method>
+    <method name="ChooseGesture">
+      <arg type="a(ssad)" direction="in" name="gestures"/>
+      <arg type="i" direction="out" name="choice"/>
     </method>
   </interface>
 </node>`;
@@ -164,6 +169,7 @@ class WindowActions {
         global.workspace_manager.disconnect(this._workspaceRemovedId);
         global.workspace_manager.disconnect(this._workspacesReorderedId);
         Meta.keybindings_set_custom_handler('close', null);
+        this._chooser?.close();
         this._injections.clear();
         for (const tiling of this._tilings.values())
             this._stopTiling(tiling);
@@ -1090,6 +1096,32 @@ class WindowActions {
             }
         }
         this._saveTiled();
+    }
+
+    /**
+     * Asks which of several similar gestures was meant, on a card at the pointer. Gestos asks here
+     * on GNOME, as the Shell can show it without a window that takes focus. A new question
+     * replaces one still open, which counts as cancelled.
+     *
+     * @param {Array} params - the gestures, each its name, description, and points as x and y in
+     *   turn
+     * @param {Gio.DBusMethodInvocation} invocation - answered with the chosen one's index, or -1
+     */
+    ChooseGestureAsync([gestures], invocation) {
+        this._chooser?.close();
+        const entries = gestures.map(([name, description, coordinates]) => ({
+            name,
+            description,
+            points: Array.from({length: Math.floor(coordinates.length / 2)},
+                (_, i) => ({x: coordinates[2 * i], y: coordinates[2 * i + 1]})),
+        }));
+        const chooser = new GestureChooser(entries, choice => {
+            if (this._chooser === chooser)
+                this._chooser = null;
+            invocation.return_value(new GLib.Variant('(i)', [choice]));
+        });
+        this._chooser = chooser;
+        chooser.open();
     }
 
     /**
