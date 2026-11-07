@@ -16,41 +16,26 @@ pub fn open_shortcut_recorder(
     dialog.set_default_size(440, 300);
     dialog.set_resizable(false);
 
-    let esc_controller = gtk::EventControllerKey::new();
-    let dialog_esc = dialog.clone();
-    esc_controller.connect_key_pressed(move |_, keyval, _, _| {
-        if keyval == gtk::gdk::Key::Escape {
-            dialog_esc.destroy();
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
-    });
-    dialog.add_controller(esc_controller);
-
+    // Every key is recorded, Escape and Backspace too, as apps use them, so the buttons are what
+    // cancel and clear it.
     let header = gtk::HeaderBar::new();
-    header.set_show_title_buttons(true); // Initially show close button
+    header.set_show_title_buttons(false);
     let title_label = gtk::Label::new(Some("Set Shortcut"));
     title_label.add_css_class("title");
     header.set_title_widget(Some(&title_label));
     dialog.set_titlebar(Some(&header));
 
-    // Cancel button (initially hidden)
-    let cancel_btn = gtk::Button::with_mnemonic("_Cancel");
-    cancel_btn.set_visible(false);
+    let cancel_btn = gtk::Button::with_label("Cancel");
     let dialog_cancel_clone = dialog.clone();
     cancel_btn.connect_clicked(move |_| {
         dialog_cancel_clone.destroy();
     });
     header.pack_start(&cancel_btn);
 
-    // Set button (initially hidden and insensitive)
-    let set_btn = gtk::Button::with_mnemonic("_Set");
-    set_btn.set_receives_default(true);
+    // Only once there's a shortcut to set.
+    let set_btn = gtk::Button::with_label("Set");
     set_btn.add_css_class("suggested-action");
-    set_btn.set_visible(false);
     set_btn.set_sensitive(false);
-    dialog.set_default_widget(Some(&set_btn));
     header.pack_end(&set_btn);
 
     let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -97,12 +82,20 @@ pub fn open_shortcut_recorder(
     shortcut_display_box.set_visible(false);
     vbox.append(&shortcut_display_box);
 
-    let hint_label = gtk::Label::new(Some(
-        "Press Esc to cancel or Backspace to reset the shortcut",
-    ));
-    hint_label.add_css_class("action-label");
-    hint_label.set_justify(gtk::Justification::Center);
-    vbox.append(&hint_label);
+    // A shortcut that's set can be taken away.
+    let clear_btn = gtk::Button::with_label("Clear Shortcut");
+    clear_btn.add_css_class("flat");
+    clear_btn.set_halign(gtk::Align::Center);
+    clear_btn.set_visible(!entry.text().is_empty());
+    let entry_clear = entry.clone();
+    let udn_clear = Rc::clone(&udn);
+    let dialog_clear = dialog.clone();
+    clear_btn.connect_clicked(move |_| {
+        entry_clear.set_text("");
+        udn_clear();
+        dialog_clear.destroy();
+    });
+    vbox.append(&clear_btn);
 
     dialog.set_child(Some(&wrapper));
 
@@ -122,34 +115,17 @@ pub fn open_shortcut_recorder(
         dialog_save.destroy();
     });
 
-    // Keypress listener
+    // Keys are caught before the window's own handling, which would move the focus with Tab or
+    // press a button with Enter.
     let key_controller = gtk::EventControllerKey::new();
-    let entry_clone = entry.clone();
-    let dialog_clone = dialog.clone();
-    let udn_clone = Rc::clone(&udn);
+    key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
     let captured_clone = Rc::clone(&captured_combination);
     let kb_image_clone = kb_image.clone();
     let display_box_clone = shortcut_display_box.clone();
     let set_btn_clone = set_btn.clone();
-    let header_clone = header.clone();
-    let cancel_btn_clone = cancel_btn.clone();
-    let hint_label_clone = hint_label.clone();
+    let clear_btn_clone = clear_btn.clone();
 
     key_controller.connect_key_pressed(move |_, keyval, _keycode, state| {
-        // Handle cancel
-        if keyval == gdk::Key::Escape {
-            dialog_clone.destroy();
-            return glib::Propagation::Stop;
-        }
-
-        // Handle reset/disable
-        if keyval == gdk::Key::BackSpace {
-            entry_clone.set_text("");
-            udn_clone();
-            dialog_clone.destroy();
-            return glib::Propagation::Stop;
-        }
-
         // Identify modifiers
         let mut mods = Vec::new();
         let mut display_mods = Vec::new();
@@ -190,9 +166,11 @@ pub fn open_shortcut_recorder(
 
         // Page Down shares its keysym with the alias "Next", which the daemon reads as the
         // media key, so the page keys are always named explicitly.
+        // Shift+Tab reports a key of its own, which is Tab with the Shift already listed.
         let mut key_name = match keyval {
             gdk::Key::Page_Up => "Page_Up".to_string(),
             gdk::Key::Page_Down => "Page_Down".to_string(),
+            gdk::Key::ISO_Left_Tab => "Tab".to_string(),
             _ => keyval.name().map(|s| s.to_string()).unwrap_or_default(),
         };
         let display_key = if key_name.len() == 1 {
@@ -213,12 +191,8 @@ pub fn open_shortcut_recorder(
         let combo_str = combo.join("+");
         *captured_clone.borrow_mut() = Some(combo_str);
 
-        // Update UI
-        header_clone.set_show_title_buttons(false);
-        cancel_btn_clone.set_visible(true);
-        set_btn_clone.set_visible(true);
         set_btn_clone.set_sensitive(true);
-        hint_label_clone.set_visible(false);
+        clear_btn_clone.set_visible(false);
         kb_image_clone.set_visible(false);
 
         // Clear previous visual keycaps
