@@ -115,6 +115,8 @@ class WindowActions {
             () => this._onWorkAreasChanged());
         // Gestos's Preferences change the gap too, and windows follow it right away.
         this._gapId = settings.connect('changed::window-gap', () => this._onWorkAreasChanged());
+        // Gestos's Preferences can tile every workspace, as they come, without tiling each one.
+        this._autoId = settings.connect('changed::tile-automatically', () => this._onAutoChanged());
         // The Shell says when the session is about to end once the user confirms it.
         this._endSessionId = Gio.DBus.session.signal_subscribe(null,
             'org.gnome.SessionManager.EndSessionDialog', null,
@@ -128,6 +130,8 @@ class WindowActions {
             });
         // Workspaces are remembered by their place, which changes as others come and go.
         this._pendingTiled = new Set();
+        // Workspaces the user stopped tiling while every workspace is tiled, which stay that way.
+        this._keptUntiled = new Set();
         this._workspaceAddedId = global.workspace_manager.connect('workspace-added',
             () => this.tileRemembered());
         this._workspaceRemovedId = global.workspace_manager.connect('workspace-removed',
@@ -161,6 +165,7 @@ class WindowActions {
         global.display.disconnect(this._grabEndId);
         global.display.disconnect(this._workAreasId);
         this._settings.disconnect(this._gapId);
+        this._settings.disconnect(this._autoId);
         Gio.DBus.session.signal_unsubscribe(this._endSessionId);
         global.window_manager.disconnect(this._mapId);
         global.window_manager.disconnect(this._minimizeId);
@@ -1026,10 +1031,13 @@ class WindowActions {
     ToggleTileWindows() {
         const workspace = global.workspace_manager.get_active_workspace();
         let changed = true;
-        if (this._tilings.has(workspace))
+        if (this._tilings.has(workspace)) {
             this._untile(workspace);
-        else
+            this._keptUntiled.add(workspace);
+        } else {
             changed = this._tile(workspace);
+            this._keptUntiled.delete(workspace);
+        }
         this._saveTiled();
         return changed;
     }
@@ -1083,12 +1091,40 @@ class WindowActions {
             if (!this._tilings.has(workspaces[index]))
                 this._tile(workspaces[index]);
         }
+        if (this._settings.get_boolean('tile-automatically'))
+            this._tileAll();
+    }
+
+    // Every workspace not tiled yet is tiled, except ones the user stopped tiling. Those are tiled
+    // again in the next session.
+    _tileAll() {
+        for (const workspace of this._workspaces()) {
+            if (!this._tilings.has(workspace) && !this._keptUntiled.has(workspace))
+                this._tile(workspace);
+        }
+        this._saveTiled();
+    }
+
+    // Turned on, it tiles every workspace. Turned off, it puts them all back.
+    _onAutoChanged() {
+        this._keptUntiled.clear();
+        if (this._settings.get_boolean('tile-automatically')) {
+            this._tileAll();
+            return;
+        }
+        for (const workspace of [...this._tilings.keys()])
+            this._untile(workspace);
+        this._saveTiled();
     }
 
     // A workspace GNOME removes, as it does with empty ones, isn't tiled anymore, and the places
     // of the ones after it change.
     _onWorkspaceRemoved() {
         const open = new Set(this._workspaces());
+        for (const workspace of [...this._keptUntiled]) {
+            if (!open.has(workspace))
+                this._keptUntiled.delete(workspace);
+        }
         for (const [workspace, tiling] of [...this._tilings]) {
             if (!open.has(workspace)) {
                 this._stopTiling(tiling);

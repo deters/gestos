@@ -89,6 +89,15 @@ fn append_extension_section(state_rc: &Rc<RefCell<AppState>>, main_box: &gtk::Bo
 
     // The extension keeps its settings with it, so they're only here while it's installed.
     if let Some(settings) = extension::settings() {
+        let (auto_row, auto_box, _) =
+            settings_row("Tile Automatically", "Tile every workspace, also new ones");
+        let auto = gtk::Switch::new();
+        auto.set_valign(gtk::Align::Center);
+        auto.update_property(&[gtk::accessible::Property::Label("Tile Automatically")]);
+        settings.bind("tile-automatically", &auto, "active").build();
+        auto_box.append(&auto);
+        list.append(&auto_row);
+
         let (gap_row, gap_box, _) = settings_row(
             "Window Gap",
             "Space around tiled windows",
@@ -97,7 +106,7 @@ fn append_extension_section(state_rc: &Rc<RefCell<AppState>>, main_box: &gtk::Bo
         gap.set_valign(gtk::Align::Center);
         gap.update_property(&[gtk::accessible::Property::Label("Window Gap")]);
         settings.bind("window-gap", &gap, "value").build();
-        // The binding needs the settings for as long as the button is there.
+        // The bindings need the settings for as long as the controls are there.
         gap.connect_destroy(move |_| {
             let _ = &settings;
         });

@@ -10,6 +10,8 @@ Moving or resizing a window makes the others make room for it as you go, and the
 
 Windows that are maximized when it starts are restored first. Windows that open, close, or move in or out while it's tiled join or leave, and a workspace stays tiled with no windows left. Maximizing a window, making it fullscreen, or snapping it to half the screen sets it aside, and the others take its room until it's back to normal, when it joins again. It stays tiled until you use it again, which puts them all back, even after you log out and back in: windows get their original sizes back as the session ends, and the workspace is tiled again in the next one. A workspace GNOME removes, as it does with empty ones you leave, isn't tiled anymore.
 
+Turn on **Tile Automatically** in Gestos's Preferences to tile every workspace, also ones GNOME adds later, without using Toggle Tile Windows on each. Toggle Tile Windows still stops tiling one workspace, which stays that way until the next session. Turning it off puts all of them back.
+
 ### Original sizes
 
 Apps remember the size their windows had while they weren't maximized, and save it when they close. So tiled windows get their original size back, and the app is given time to take it, before:
