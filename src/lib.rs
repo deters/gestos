@@ -1,6 +1,7 @@
 pub mod chooser;
 pub mod config;
 pub mod gesture;
+pub mod gnome_extension;
 #[cfg(target_os = "linux")]
 pub mod input_client;
 pub mod input_protocol;

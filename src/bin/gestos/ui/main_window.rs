@@ -40,12 +40,96 @@ pub fn extension_note(
     if !action.needs_gnome_extension() {
         return None;
     }
-    Some(if status.is_running() {
+    Some(match status {
         // Named as GNOME's Extensions app lists it, so it can be found there.
-        "Uses the \u{201c}Gestos\u{201d} GNOME extension"
-    } else {
-        "Needs the \u{201c}Gestos\u{201d} GNOME extension"
+        crate::extension::ExtensionStatus::Running => {
+            "Uses the \u{201c}Gestos\u{201d} GNOME extension"
+        }
+        crate::extension::ExtensionStatus::Outdated(_) => {
+            "Needs the \u{201c}Gestos\u{201d} GNOME extension to be updated"
+        }
+        _ => "Needs the \u{201c}Gestos\u{201d} GNOME extension",
     })
+}
+
+/// A banner across the top of the window while the extension running is older than this Gestos,
+/// as that lasts until it's updated. It has a short title, and a button for what updates it.
+#[derive(Clone)]
+pub struct ExtensionBanner {
+    area: gtk::Box,
+    title: gtk::Label,
+    button: gtk::Button,
+}
+
+impl ExtensionBanner {
+    fn new() -> Self {
+        let area = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        area.add_css_class("warning-box");
+        area.set_halign(gtk::Align::Center);
+        area.set_width_request(500);
+        area.set_margin_bottom(12);
+        area.set_margin_start(24);
+        area.set_margin_end(24);
+        area.set_visible(false);
+        let title = gtk::Label::new(None);
+        title.add_css_class("warning-label");
+        title.set_hexpand(true);
+        title.set_xalign(0.0);
+        title.set_wrap(true);
+        area.append(&title);
+        let button = gtk::Button::new();
+        button.set_valign(gtk::Align::Center);
+        area.append(&button);
+        ExtensionBanner { area, title, button }
+    }
+
+    fn show(&self, status: &crate::extension::ExtensionStatus) {
+        use crate::extension::{ExtensionStatus, OldCopy};
+        let (title, button) = match status {
+            ExtensionStatus::Outdated(OldCopy::Replaced) => {
+                ("Log out to finish updating the GNOME extension", Some("_Log Out"))
+            }
+            ExtensionStatus::Outdated(OldCopy::InUserFolder(_)) => {
+                ("An old copy of the GNOME extension is in use", Some("_Remove Old Copy"))
+            }
+            ExtensionStatus::Outdated(OldCopy::NotReplaced) => {
+                ("The GNOME extension is older than Gestos", None)
+            }
+            _ => {
+                self.area.set_visible(false);
+                return;
+            }
+        };
+        self.title.set_text(title);
+        if let Some(label) = button {
+            self.button.set_label(label);
+            self.button.set_use_underline(true);
+        }
+        self.button.set_visible(button.is_some());
+        self.area.set_visible(true);
+    }
+}
+
+/// What the banner's button does, for the status shown when it's clicked.
+fn update_extension(state_rc: &Rc<RefCell<AppState>>) {
+    use crate::extension::{ExtensionStatus, OldCopy};
+    let status = state_rc.borrow().extension_status.clone();
+    match status {
+        ExtensionStatus::Outdated(OldCopy::Replaced) => {
+            let conn = state_rc.borrow().dbus_conn.clone();
+            if let Some(Err(e)) = conn.map(|conn| crate::extension::log_out(&conn)) {
+                eprintln!("Could not log out: {e}");
+            }
+        }
+        ExtensionStatus::Outdated(OldCopy::InUserFolder(copy)) => {
+            // To the trash, so that it can be put back.
+            match crate::extension::trash_copy(&copy) {
+                Ok(()) => refresh_extension_status(state_rc),
+                Err(e) => eprintln!("Could not remove {}: {e}", copy.display()),
+            }
+        }
+        _ => {}
+    }
 }
 
 fn suggestion_row(
@@ -114,6 +198,7 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
 pub fn refresh_extension_status(state_rc: &Rc<RefCell<AppState>>) {
     let status = crate::extension::status(state_rc.borrow().dbus_conn.as_ref());
     if state_rc.borrow().extension_status != status {
+        state_rc.borrow().extension_banner.show(&status);
         state_rc.borrow_mut().extension_status = status;
         refresh_gesture_list(state_rc, None);
     }
@@ -279,6 +364,9 @@ pub fn build_ui(app: &gtk::Application) {
     header.pack_end(gesture_status.action_button());
     content_vbox.insert_child_after(gesture_status.error_area(), Some(&search_entry_widget));
     content_vbox.insert_child_after(gesture_status.notice_area(), Some(gesture_status.error_area()));
+    let extension_banner = ExtensionBanner::new();
+    extension_banner.show(&extension_status);
+    content_vbox.insert_child_after(&extension_banner.area, Some(gesture_status.notice_area()));
 
     let state = Rc::new(RefCell::new(AppState {
         config,
@@ -294,7 +382,11 @@ pub fn build_ui(app: &gtk::Application) {
         suggestion_no_match,
         suggestion_list,
         extension_status,
+        extension_banner: extension_banner.clone(),
     }));
+
+    let state_banner = Rc::clone(&state);
+    extension_banner.button.connect_clicked(move |_| update_extension(&state_banner));
 
     // The extension can be turned on, off, or installed elsewhere, so its status is read again
     // whenever the window comes back to the front.

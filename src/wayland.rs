@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::OnceLock;
 
@@ -63,17 +64,61 @@ fn choose_in_extension(
     Ok(usize::try_from(choice).ok().filter(|&choice| choice < entries.len()))
 }
 
+// Whether this session was told the extension running is out of date. It stays out of date until
+// the next login, so saying it once is enough.
+static TOLD_OUTDATED: AtomicBool = AtomicBool::new(false);
+
 /// Runs a window action in the GNOME Shell extension. The extension stays as the user left it, so
-/// when it isn't running, a notification says so instead of doing nothing.
+/// when it isn't running, a notification says so instead of doing nothing. An old copy can lack
+/// the action, or run it the way an older Gestos did, so a notification says that once a session.
 fn run_extension_action(
     conn: &zbus::blocking::Connection,
     shell: &str,
     notifications: &str,
     method: &str,
 ) -> zbus::Result<()> {
-    if call_extension(conn, shell, method).is_ok() {
+    run_extension_action_telling(conn, shell, notifications, method, &TOLD_OUTDATED)
+}
+
+fn run_extension_action_telling(
+    conn: &zbus::blocking::Connection,
+    shell: &str,
+    notifications: &str,
+    method: &str,
+    told_outdated: &AtomicBool,
+) -> zbus::Result<()> {
+    let ran = call_extension(conn, shell, method).is_ok();
+    let outdated = crate::gnome_extension::info_from(conn, shell).is_ok_and(|info| {
+        crate::gnome_extension::is_running(&info) && !crate::gnome_extension::is_current(&info)
+    });
+    if outdated {
+        if !told_outdated.swap(true, Ordering::SeqCst) {
+            notify(
+                conn,
+                notifications,
+                "The \u{201c}Gestos\u{201d} GNOME extension is out of date",
+                "Open Gestos to see how to update it.",
+            )?;
+        }
         return Ok(());
     }
+    if ran {
+        return Ok(());
+    }
+    notify(
+        conn,
+        notifications,
+        "This action needs the \u{201c}Gestos\u{201d} GNOME extension",
+        "Turn it on in Gestos Preferences.",
+    )
+}
+
+fn notify(
+    conn: &zbus::blocking::Connection,
+    notifications: &str,
+    summary: &str,
+    body: &str,
+) -> zbus::Result<()> {
     conn.call_method(
         Some(notifications),
         NOTIFICATIONS_PATH,
@@ -83,8 +128,8 @@ fn run_extension_action(
             "Gestos",
             0u32,
             "dialog-warning-symbolic",
-            "This action needs the \u{201c}Gestos\u{201d} GNOME extension",
-            "Turn it on in Gestos Preferences.",
+            summary,
+            body,
             Vec::<&str>::new(),
             HashMap::<&str, zbus::zvariant::Value>::new(),
             -1i32,
@@ -787,7 +832,7 @@ impl WaylandContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicI32, AtomicUsize};
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
@@ -797,6 +842,22 @@ mod tests {
         notifications: Arc<AtomicUsize>,
         choice: Arc<AtomicI32>,
         chooser_points: Arc<Mutex<Vec<Vec<f64>>>>,
+        // The extension version GNOME says it runs, if it runs one.
+        running_version: Arc<Mutex<Option<String>>>,
+    }
+
+    struct FakeExtensions(FakeShell);
+    #[zbus::interface(name = "org.gnome.Shell.Extensions")]
+    impl FakeExtensions {
+        fn get_extension_info(&self, _uuid: String) -> HashMap<String, zbus::zvariant::OwnedValue> {
+            let owned = |value: zbus::zvariant::Value| value.try_to_owned().unwrap();
+            let mut info = HashMap::new();
+            if let Some(version) = self.0.running_version.lock().unwrap().clone() {
+                info.insert("state".to_string(), owned(1.0f64.into()));
+                info.insert("version-name".to_string(), owned(version.into()));
+            }
+            info
+        }
     }
 
     struct FakeExtension(FakeShell);
@@ -839,16 +900,52 @@ mod tests {
 
     // The name is unique per test and process, so this can't reach the real Shell on the bus.
     fn tile_windows_with(shell: &FakeShell, test: &str) -> Option<()> {
+        tile_windows_times(shell, test, 1)
+    }
+
+    fn tile_windows_times(shell: &FakeShell, test: &str, times: usize) -> Option<()> {
         let conn = zbus::blocking::Connection::session().ok()?;
         let name = format!("io.github.deters.GestosTestTile{}.P{}", test, std::process::id());
         let _service = zbus::blocking::connection::Builder::session()
             .and_then(|b| b.name(name.clone()))
             .and_then(|b| b.serve_at(GESTOS_EXTENSION_PATH, FakeExtension(shell.clone())))
             .and_then(|b| b.serve_at(NOTIFICATIONS_PATH, FakeNotifications(shell.clone())))
+            .and_then(|b| b.serve_at("/org/gnome/Shell", FakeExtensions(shell.clone())))
             .and_then(|b| b.build())
             .unwrap();
-        run_extension_action(&conn, &name, &name, "ToggleTileWindows").unwrap();
+        let told = AtomicBool::new(false);
+        for _ in 0..times {
+            run_extension_action_telling(&conn, &name, &name, "ToggleTileWindows", &told).unwrap();
+        }
         Some(())
+    }
+
+    #[test]
+    fn an_outdated_extension_is_mentioned_once() {
+        let shell = FakeShell {
+            extension_active: Arc::new(AtomicBool::new(true)),
+            running_version: Arc::new(Mutex::new(Some("1.0".to_string()))),
+            ..Default::default()
+        };
+        if tile_windows_times(&shell, "Outdated", 2).is_none() {
+            return;
+        }
+        assert_eq!(shell.tile_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(shell.notifications.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_current_extension_is_not_mentioned() {
+        let version = crate::gnome_extension::VERSION.to_string();
+        let shell = FakeShell {
+            extension_active: Arc::new(AtomicBool::new(true)),
+            running_version: Arc::new(Mutex::new(Some(version))),
+            ..Default::default()
+        };
+        if tile_windows_with(&shell, "Current").is_none() {
+            return;
+        }
+        assert_eq!(shell.notifications.load(Ordering::SeqCst), 0);
     }
 
     fn choose_with(shell: &FakeShell, test: &str) -> Option<zbus::Result<Option<usize>>> {

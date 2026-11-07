@@ -25,4 +25,6 @@ pub struct AppState {
     pub suggestion_list: gtk::ListBox,
     /// Whether the GNOME extension can run the actions that need it.
     pub extension_status: ExtensionStatus,
+    /// Says when the extension running is older than this Gestos, and what updates it.
+    pub extension_banner: crate::ui::main_window::ExtensionBanner,
 }
