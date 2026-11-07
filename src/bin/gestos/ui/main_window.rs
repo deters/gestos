@@ -409,6 +409,7 @@ pub fn build_ui(app: &gtk::Application) {
          .gesture-row { padding: 6px; }\n\
          .icon-holder { padding: 4px; }\n\
          .icon-swiss-red { color: #da291c; }\n\
+         .icon-purple { color: #9141ac; }\n\
          .action-label { font-size: 0.9em; opacity: 0.7; }\n\
          .status-dot-running { color: #10b981; }\n\
          .status-dot-stopped { color: #6b7280; }\n\

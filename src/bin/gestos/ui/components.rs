@@ -102,7 +102,7 @@ pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static 
         ActionType::Maximize | ActionType::ToggleMaximized => ("window-maximize-symbolic", "icon-bg-blue"),
         ActionType::Restore => ("window-restore-symbolic", "icon-bg-blue"),
         ActionType::ToggleFullscreen => ("view-fullscreen-symbolic", "icon-bg-blue"),
-        ActionType::ToggleTileWindows => ("view-grid-symbolic", "icon-bg-blue"),
+        ActionType::ToggleTileWindows => ("view-grid-symbolic", "icon-purple"),
         ActionType::Lower | ActionType::Raise => ("window-new-symbolic", "icon-bg-blue"),
         ActionType::WorkspaceLeft => ("go-previous-symbolic", "icon-bg-blue"),
         ActionType::WorkspaceRight => ("go-next-symbolic", "icon-bg-blue"),
