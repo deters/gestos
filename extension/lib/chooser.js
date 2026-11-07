@@ -83,7 +83,18 @@ export class GestureChooser {
         this._done = done;
     }
 
+    // A card that fails to open is taken down before the error goes back to Gestos, which then asks
+    // in its own window, so the two never show together.
     open() {
+        try {
+            this._show();
+        } catch (error) {
+            this._takeDown();
+            throw error;
+        }
+    }
+
+    _show() {
         this._layer = new St.Widget({
             reactive: true,
             can_focus: true,
@@ -117,13 +128,8 @@ export class GestureChooser {
         });
         this._layer.connect('key-press-event', (_actor, event) => this._onKeyPress(event));
 
+        // The Shell's own dialogs take the grab the same way, which also gives the card key focus.
         this._grab = Main.pushModal(this._layer, {actionMode: Shell.ActionMode.POPUP});
-        // Another modal, like the overview, already has the keyboard.
-        if ((this._grab.get_seat_state() & Clutter.GrabState.KEYBOARD) === 0) {
-            this._finish(-1);
-            return;
-        }
-        this._layer.grab_key_focus();
         this._timeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, CANCEL_AFTER_SECONDS,
             () => {
                 this._timeoutId = 0;
@@ -193,9 +199,13 @@ export class GestureChooser {
     }
 
     _finish(choice) {
-        if (!this._done)
-            return;
         const done = this._done;
+        this._takeDown();
+        done?.(choice);
+    }
+
+    // Removes the card and lets go of the pointer and keyboard. After this, nothing is answered.
+    _takeDown() {
         this._done = null;
         if (this._timeoutId) {
             GLib.source_remove(this._timeoutId);
@@ -207,6 +217,5 @@ export class GestureChooser {
         }
         this._layer?.destroy();
         this._layer = null;
-        done(choice);
     }
 }
