@@ -8,6 +8,7 @@ import Shell from 'gi://Shell';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {arrangeWindows} from './lib/arrange.js';
 import {fitSize, hasSize, isBelievableMinimum, keepInside, makeTiling, moveTileEdge, restoreRect, tilingRects} from './lib/tile.js';
 
 const OBJECT_PATH = '/io/github/deters/Gestos/Extension';
@@ -15,6 +16,9 @@ const INTERFACE_XML = `
 <node>
   <interface name="io.github.deters.Gestos.Extension">
     <method name="ToggleTileWindows">
+      <arg type="b" direction="out" name="changed"/>
+    </method>
+    <method name="ToggleArrangeWindows">
       <arg type="b" direction="out" name="changed"/>
     </method>
     <method name="CloseWindow">
@@ -40,6 +44,8 @@ const TILE_RETURN_PERIOD_MS = 5000;
 const TILE_SIZE_TOLERANCE = 32;
 // How long a size to undo is kept for an app that isn't opened again.
 const CLOSED_SIZE_DAYS = 30;
+// How often arranged windows make room for one that's being moved or resized.
+const ARRANGE_DRAG_DELAY_MS = 100;
 
 // Apps without a desktop file get a made-up app for each window, so those go by their own id.
 function appIdOf(window) {
@@ -121,6 +127,11 @@ class WindowActions {
         // A window is mapped once it's on screen at its real size, which is when it can join.
         this._mapId = global.window_manager.connect('map',
             (_wm, actor) => this._onWindowMapped(actor.meta_window));
+        // Arranged windows make room for one that's shown again, and take the room one leaves.
+        this._minimizeId = global.window_manager.connect('minimize',
+            (_wm, actor) => this._onMinimized(actor.meta_window));
+        this._unminimizeId = global.window_manager.connect('unminimize',
+            (_wm, actor) => this._onUnminimized(actor.meta_window));
 
         // Windows closed from the Shell, by its close shortcut, window menu, or overview, get their
         // original size back before they close.
@@ -142,6 +153,8 @@ class WindowActions {
         this._settings.disconnect(this._gapId);
         Gio.DBus.session.signal_unsubscribe(this._endSessionId);
         global.window_manager.disconnect(this._mapId);
+        global.window_manager.disconnect(this._minimizeId);
+        global.window_manager.disconnect(this._unminimizeId);
         Meta.keybindings_set_custom_handler('close', null);
         this._injections.clear();
         for (const tiling of this._tilings.values())
@@ -170,7 +183,8 @@ class WindowActions {
                 .map(([window, {rect, appId, size, snapped}]) =>
                     [window, {rect, appId, size, snapped}]),
             tilings: [...this._tilings].map(([workspace, tiling]) =>
-                [workspace, {windows: copy(tiling.windows), plans: tiling.plans}]),
+                [workspace, {windows: copy(tiling.windows), plans: tiling.plans,
+                    arrange: tiling.arrange, order: [...tiling.order]}]),
         };
     }
 
@@ -181,13 +195,14 @@ class WindowActions {
             if (open.has(window))
                 Object.assign(this._track(window, original.rect), original);
         }
-        for (const [workspace, {windows, plans}] of saved.tilings) {
-            const tiling = this._startTiling(workspace);
+        for (const [workspace, {windows, plans, arrange, order}] of saved.tilings) {
+            const tiling = this._startTiling(workspace, arrange);
             tiling.plans = plans;
             for (const [window, state] of windows) {
                 if (this._originals.has(window))
                     this._joinTiling(tiling, window, state);
             }
+            tiling.order = (order ?? []).filter(window => tiling.windows.has(window));
             if (tiling.windows.size < windows.length)
                 this._layoutWhenReady(tiling);
         }
@@ -490,9 +505,11 @@ class WindowActions {
         return hasSize(window.get_frame_rect(), closed.size) ? closed : null;
     }
 
-    _startTiling(workspace) {
+    // An arranged workspace keeps its windows' own sizes, as tiling doesn't, and the order the user
+    // touched them in, the last one first.
+    _startTiling(workspace, arrange = false) {
         const tiling = {workspace, windows: new Map(), plans: [], waits: [], timeoutId: 0,
-            checkId: 0, relayouts: [], joining: new Map()};
+            checkId: 0, relayouts: [], joining: new Map(), arrange, order: [], dragId: 0};
         // Windows moved here from a workspace that isn't tiled join. New windows join once they're
         // on screen, as the Shell places them before that, which would undo their tile.
         tiling.addedId = workspace.connect('window-added', (_workspace, window) => {
@@ -539,6 +556,7 @@ class WindowActions {
     _stopTiling(tiling) {
         this._stopWaiting(tiling);
         this._stopTileCheck(tiling);
+        this._stopDragLayout(tiling);
         for (const window of [...tiling.joining.keys()])
             this._stopJoining(tiling, window);
         tiling.workspace.disconnect(tiling.addedId);
@@ -572,12 +590,16 @@ class WindowActions {
         if (state)
             this._unwatchTile(window, state);
         tiling.windows.delete(window);
+        tiling.order = tiling.order.filter(w => w !== window);
     }
 
     _onTileChanged(tiling, window) {
-        if (this._grabbed === window || this._originals.get(window)?.closing)
+        if (this._originals.get(window)?.closing)
             return;
-        this._scheduleTileCheck(tiling);
+        if (this._grabbed !== window)
+            this._scheduleTileCheck(tiling);
+        else if (tiling.arrange)
+            this._scheduleDragLayout(tiling);
     }
 
     _scheduleTileCheck(tiling) {
@@ -604,6 +626,8 @@ class WindowActions {
         const original = this._track(window, rect);
         original.snapped = false;
         this._joinTiling(tiling, window, {tile: null});
+        // A window that joins is the one the user touched last, as it's just been opened or shown.
+        tiling.order.unshift(window);
         if (maximized)
             window.unmaximize();
     }
@@ -654,36 +678,176 @@ class WindowActions {
     // Plans the tiles of each monitor from the windows' original sizes, so the layout stays the same
     // as windows join and leave.
     _layout(tiling) {
-        const monitors = new Map();
-        for (const window of tiling.windows.keys()) {
-            const monitor = window.get_monitor();
-            monitors.set(monitor, [...monitors.get(monitor) ?? [], window]);
+        if (tiling.arrange) {
+            this._arrange(tiling, null);
+            return;
         }
         const gap = this._settings.get_int('window-gap');
-        tiling.plans = [...monitors.values()].map(group => {
-            // Planned with how small each app lets its window get, so that none has to move again.
-            // One that turned out not to get as small as it said keeps what it showed instead. One
-            // that says it can't get smaller than most of the screen gets a tile like the others.
+        tiling.plans = this._byMonitor(tiling, [...tiling.windows.keys()]).map(group => {
             const area = group[0].get_work_area_current_monitor();
-            const minimums = new Map();
-            group.forEach((window, i) => {
-                const believable = size => size && isBelievableMinimum(size, area) ? size : null;
-                const reported = believable(minimumFrameSize(window));
-                const seen = believable(tiling.windows.get(window).minimum);
-                if (reported || seen) {
-                    minimums.set(i, {
-                        width: Math.max(reported?.width ?? 0, seen?.width ?? 0),
-                        height: Math.max(reported?.height ?? 0, seen?.height ?? 0),
-                    });
-                }
-            });
             return {
                 windows: group,
                 tiling: makeTiling(group.map(window => this._originals.get(window).rect),
-                    area, gap, minimums),
+                    area, gap, this._minimumsOf(tiling, group, area)),
             };
         });
         this._place(tiling);
+    }
+
+    _byMonitor(tiling, windows) {
+        const monitors = new Map();
+        for (const window of windows) {
+            const monitor = window.get_monitor();
+            monitors.set(monitor, [...monitors.get(monitor) ?? [], window]);
+        }
+        return [...monitors.values()];
+    }
+
+    // Windows are planned with how small each app lets its window get, so that none has to move
+    // again. One that turned out not to get as small as it said keeps what it showed instead. One
+    // that says it can't get smaller than most of the screen gets as small as the others.
+    _minimumsOf(tiling, group, area) {
+        const minimums = new Map();
+        group.forEach((window, i) => {
+            const believable = size => size && isBelievableMinimum(size, area) ? size : null;
+            const reported = believable(minimumFrameSize(window));
+            const seen = believable(tiling.windows.get(window).minimum);
+            if (reported || seen) {
+                minimums.set(i, {
+                    width: Math.max(reported?.width ?? 0, seen?.width ?? 0),
+                    height: Math.max(reported?.height ?? 0, seen?.height ?? 0),
+                });
+            }
+        });
+        return minimums;
+    }
+
+    // Arranges the windows of each monitor at their original sizes and places, the one the user
+    // touched last first. One being moved or resized is where the user has it, and the others make
+    // room for it, but only once it's left there do they get minimized for lack of room.
+    _arrange(tiling, dragged) {
+        const gap = this._settings.get_int('window-gap');
+        const windows = tiling.order.filter(window => tiling.windows.has(window));
+        tiling.plans = this._byMonitor(tiling, windows).map(group => {
+            const area = group[0].get_work_area_current_monitor();
+            const rects = group.map(window => window === dragged
+                ? copyRect(window.get_frame_rect()) : this._originals.get(window).rect);
+            return {windows: group, rects: arrangeWindows(rects, area, gap,
+                this._minimumsOf(tiling, group, area))};
+        });
+        for (const plan of tiling.plans) {
+            plan.windows.forEach((window, i) => {
+                const rect = plan.rects[i];
+                const state = tiling.windows.get(window);
+                if (window === dragged || !state || this._originals.get(window).closing)
+                    return;
+                if (!rect) {
+                    if (!dragged)
+                        this._minimizeArranged(tiling, window);
+                    return;
+                }
+                state.tile = rect;
+                const frame = window.get_frame_rect();
+                if (frame.x !== rect.x || frame.y !== rect.y || frame.width !== rect.width ||
+                    frame.height !== rect.height)
+                    this._resizeTo(window, rect);
+            });
+        }
+        this._stopTileCheck(tiling);
+        this._scheduleTileCheck(tiling);
+    }
+
+    // A window there's no room for leaves, at its original size, as it would come back.
+    _minimizeArranged(tiling, window) {
+        this._dropFromTiling(tiling, window);
+        this._restoreOriginal(window);
+        window.minimize();
+    }
+
+    _onMinimized(window) {
+        const [, tiling] = this._findTiling(window);
+        if (!tiling?.arrange)
+            return;
+        this._dropFromTiling(tiling, window);
+        this._restoreOriginal(window);
+        this._layout(tiling);
+    }
+
+    _onUnminimized(window) {
+        const workspace = window.get_workspace();
+        const tiling = workspace && this._tilings.get(workspace);
+        if (!tiling?.arrange || tiling.windows.has(window) || !isTileable(window))
+            return;
+        this._addToTiling(tiling, window);
+        this._layoutWhenReady(tiling);
+    }
+
+    _scheduleDragLayout(tiling) {
+        if (tiling.dragId)
+            return;
+        tiling.dragId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ARRANGE_DRAG_DELAY_MS, () => {
+            tiling.dragId = 0;
+            if (this._grabbed && tiling.windows.has(this._grabbed))
+                this._arrange(tiling, this._grabbed);
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _stopDragLayout(tiling) {
+        if (tiling.dragId) {
+            GLib.source_remove(tiling.dragId);
+            tiling.dragId = 0;
+        }
+    }
+
+    // Checks that arranged windows are where they were put. One that's bigger than it was given
+    // can't get that small, which the arrangement makes room for. One that moved or changed size
+    // goes back a few times, and after that keeps what its app wants, as its original size.
+    _checkArranged(tiling) {
+        const now = Date.now();
+        let changed = false;
+        for (const plan of tiling.plans) {
+            plan.windows.forEach(window => {
+                const state = tiling.windows.get(window);
+                const original = this._originals.get(window);
+                if (!state?.tile || !original || original.closing || this._grabbed === window)
+                    return;
+                const frame = window.get_frame_rect();
+                const tile = state.tile;
+                const area = window.get_work_area_current_monitor();
+                const wider = frame.width > tile.width + 1;
+                const taller = frame.height > tile.height + 1;
+                if ((wider || taller) && tile.width < original.rect.width + 1 &&
+                    tile.height < original.rect.height + 1) {
+                    const minimum = fitSize({
+                        width: Math.max(state.minimum?.width ?? 0, wider ? frame.width : 0),
+                        height: Math.max(state.minimum?.height ?? 0, taller ? frame.height : 0),
+                    }, area);
+                    if (minimum.width !== state.minimum?.width ||
+                        minimum.height !== state.minimum?.height) {
+                        state.minimum = minimum;
+                        changed = true;
+                        return;
+                    }
+                }
+                const moved = Math.abs(frame.x - tile.x) > 1 || Math.abs(frame.y - tile.y) > 1;
+                if (!moved && hasSize(frame, tile))
+                    return;
+                state.returns = (state.returns ?? []).filter(t => now - t < TILE_RETURN_PERIOD_MS);
+                if (state.returns.length >= MAX_TILE_RETURNS) {
+                    if (!hasSize(frame, original.rect) || moved) {
+                        original.rect = copyRect(frame);
+                        state.returns = [];
+                        changed = true;
+                    }
+                    return;
+                }
+                state.returns.push(now);
+                this._resizeTo(window, tile);
+            });
+        }
+        if (changed)
+            this._layout(tiling);
     }
 
     // Where a window goes in its tile. One that keeps its own size is only moved there, no bigger
@@ -755,6 +919,10 @@ class WindowActions {
     // that keeps resizing its window wants that size, so the window keeps it, still tiled, and the
     // tiles beside it take the room it doesn't use.
     _checkTiles(tiling) {
+        if (tiling.arrange) {
+            this._checkArranged(tiling);
+            return;
+        }
         const now = Date.now();
         let changed = false;
         for (const plan of tiling.plans) {
@@ -839,6 +1007,10 @@ class WindowActions {
     _onWorkAreasChanged() {
         const gap = this._settings.get_int('window-gap');
         for (const tiling of this._tilings.values()) {
+            if (tiling.arrange) {
+                this._layout(tiling);
+                continue;
+            }
             for (const plan of tiling.plans) {
                 plan.tiling.area = makeTiling([],
                     plan.windows[0].get_work_area_current_monitor(), gap).area;
@@ -883,9 +1055,16 @@ class WindowActions {
     // tiles beyond them make room.
     _onGrabEnd(window, op) {
         this._grabbed = null;
+        const [, tiling] = this._findTiling(window);
+        // An arranged window keeps the size and place the user left it at, as its own.
+        if (tiling?.arrange) {
+            this._stopDragLayout(tiling);
+            this._originals.get(window).rect = copyRect(window.get_frame_rect());
+            this._layout(tiling);
+            return;
+        }
         if (isMoving(op))
             return;
-        const [, tiling] = this._findTiling(window);
         const plan = tiling?.plans.find(p => p.windows.includes(window));
         const tile = tiling?.windows.get(window).tile;
         if (!plan || !tile)
@@ -911,9 +1090,13 @@ class WindowActions {
     _onGrabBegin(window, op) {
         // What the user does to a window isn't undone while they do it.
         this._grabbed = window;
+        const [workspace, tiling] = this._findTiling(window);
+        if (tiling?.arrange) {
+            this._grabArranged(tiling, window, op);
+            return;
+        }
         if (!isMoving(op))
             return;
-        const [workspace, tiling] = this._findTiling(window);
         if (!tiling)
             return;
         this._untile(workspace, window);
@@ -928,6 +1111,52 @@ class WindowActions {
         this._untrack(window);
     }
 
+    // The arranged window the user takes becomes the one they touched last. One that's moved gets
+    // its original size back under the pointer, and the others make room for it as it goes.
+    _grabArranged(tiling, window, op) {
+        tiling.order = [window, ...tiling.order.filter(w => w !== window)];
+        const original = this._originals.get(window);
+        const frame = window.get_frame_rect();
+        if (isMoving(op) && original?.rect && !hasSize(frame, original.rect)) {
+            const [pointerX] = global.get_pointer();
+            const {x, y, width, height} = restoreRect(frame, original.rect, pointerX);
+            window.move_resize_frame(true, x, y, width, height);
+        }
+        this._scheduleDragLayout(tiling);
+    }
+
+    // Tiles or arranges the windows on the current workspace, or puts them back if it already is.
+    // A workspace that's tiled the other way keeps its windows, which change to this way.
+    _toggle(arrange) {
+        const workspace = global.workspace_manager.get_active_workspace();
+        const current = this._tilings.get(workspace);
+        if (current?.arrange === arrange) {
+            this._untile(workspace, null);
+            return true;
+        }
+        if (current) {
+            current.arrange = arrange;
+            current.order = global.display.sort_windows_by_stacking([...current.windows.keys()])
+                .reverse();
+            for (const state of current.windows.values()) {
+                delete state.ownSize;
+                delete state.returns;
+            }
+            this._layoutWhenReady(current);
+            return current.windows.size > 0;
+        }
+
+        // A workspace with no windows can be tiled too, for the windows that open there next.
+        // Windows join from the bottom up, so the top one ends up as the one touched last.
+        const windows = global.display.sort_windows_by_stacking(
+            workspace.list_windows().filter(isTileable));
+        const tiling = this._startTiling(workspace, arrange);
+        for (const window of windows)
+            this._addToTiling(tiling, window);
+        this._layoutWhenReady(tiling);
+        return windows.length > 0;
+    }
+
     /**
      * Tiles the windows on the current workspace, or puts them back if it's tiled.
      *
@@ -938,19 +1167,20 @@ class WindowActions {
      * @returns {boolean} whether any window changed
      */
     ToggleTileWindows() {
-        const workspace = global.workspace_manager.get_active_workspace();
-        if (this._tilings.has(workspace)) {
-            this._untile(workspace, null);
-            return true;
-        }
+        return this._toggle(false);
+    }
 
-        // A workspace with no windows can be tiled too, for the windows that open there next.
-        const windows = workspace.list_windows().filter(isTileable);
-        const tiling = this._startTiling(workspace);
-        for (const window of windows)
-            this._addToTiling(tiling, window);
-        this._layoutWhenReady(tiling);
-        return windows.length > 0;
+    /**
+     * Arranges the windows on the current workspace, or puts them back if they are.
+     *
+     * Windows keep their original sizes, and are moved just enough not to overlap. They only shrink
+     * when they don't fit otherwise, and the ones touched longest ago are minimized when even that
+     * isn't enough. Moving or resizing a window makes the others make room for it.
+     *
+     * @returns {boolean} whether any window changed
+     */
+    ToggleArrangeWindows() {
+        return this._toggle(true);
     }
 
     /**

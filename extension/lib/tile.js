@@ -89,13 +89,13 @@ const MIN_SPLIT_SHARE = 0.2;
 const MAX_COLUMNS = 4;
 const MAX_ROWS = 3;
 
-const AXES = [
+export const AXES = [
     {start: 'x', size: 'width', most: MAX_COLUMNS},
     {start: 'y', size: 'height', most: MAX_ROWS},
 ];
 
 // The smallest a tile gets along an axis, so that the most tiles fit, with the gap between them.
-function smallestTile(axis, tiling) {
+export function smallestTile(axis, tiling) {
     return Math.floor(tiling.area[axis.size] / axis.most) - tiling.gap;
 }
 
@@ -107,7 +107,7 @@ function span(rects, {start, size}) {
 
 // Splits the windows in two along the line that best separates them, and recurses into each side.
 // Windows stay on the side their center is on, so they keep their order across the screen.
-function buildTree(items) {
+export function buildTree(items) {
     if (items.length === 1)
         return {index: items[0].index};
 

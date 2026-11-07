@@ -440,6 +440,7 @@ impl WaylandContext {
                 self.run_gnome_shortcut("screensaver", "Super_L+l", uinput_handler)
             }
             ActionType::ToggleTileWindows => spawn_extension_action("ToggleTileWindows"),
+            ActionType::ToggleArrangeWindows => spawn_extension_action("ToggleArrangeWindows"),
             ActionType::Terminal => self.open_terminal(),
             ActionType::VolumeUp => {
                 self.run_gnome_shortcut("volume-up", "XF86AudioRaiseVolume", uinput_handler)
@@ -836,6 +837,7 @@ mod tests {
     #[test]
     fn only_tiling_needs_the_extension() {
         assert!(ActionType::ToggleTileWindows.needs_gnome_extension());
+        assert!(ActionType::ToggleArrangeWindows.needs_gnome_extension());
         assert!(!ActionType::Maximize.needs_gnome_extension());
         assert!(!ActionType::Gnome("close".to_string()).needs_gnome_extension());
     }
@@ -843,6 +845,12 @@ mod tests {
     #[test]
     fn tile_windows_survives_saving() {
         let action = ActionType::ToggleTileWindows;
+        assert_eq!(ActionType::from_string(&action.to_string()), Some(action));
+    }
+
+    #[test]
+    fn arrange_windows_survives_saving() {
+        let action = ActionType::ToggleArrangeWindows;
         assert_eq!(ActionType::from_string(&action.to_string()), Some(action));
     }
 

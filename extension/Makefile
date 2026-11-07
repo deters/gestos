@@ -11,6 +11,7 @@ install: pack
 
 test:
 	gjs -m tests/tile.test.js
+	gjs -m tests/arrange.test.js
 
 clean:
 	rm -f $(PACK)

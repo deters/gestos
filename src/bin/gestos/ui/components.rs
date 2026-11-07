@@ -101,6 +101,7 @@ pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static 
         ActionType::Restore => ("window-restore-symbolic", "icon-bg-blue"),
         ActionType::ToggleFullscreen => ("view-fullscreen-symbolic", "icon-bg-blue"),
         ActionType::ToggleTileWindows => ("view-grid-symbolic", "icon-bg-blue"),
+        ActionType::ToggleArrangeWindows => ("view-dual-symbolic", "icon-bg-blue"),
         ActionType::Lower | ActionType::Raise => ("window-new-symbolic", "icon-bg-blue"),
         ActionType::WorkspaceLeft => ("go-previous-symbolic", "icon-bg-blue"),
         ActionType::WorkspaceRight => ("go-next-symbolic", "icon-bg-blue"),
@@ -273,6 +274,7 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
         }
         ActionType::ToggleFullscreen => "Toggle Fullscreen".to_string(),
         ActionType::ToggleTileWindows => "Toggle Tile Windows".to_string(),
+        ActionType::ToggleArrangeWindows => "Toggle Arrange Windows".to_string(),
         ActionType::ShowDesktop => "Show Desktop".to_string(),
         ActionType::LockScreen => "Lock Screen".to_string(),
         ActionType::Terminal => "Open Terminal".to_string(),

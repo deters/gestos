@@ -379,6 +379,12 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
             name: "Toggle Tile Windows".to_string(),
             tooltip: "Fit the windows on the workspace together, or put them back".to_string(),
         });
+        options.push(EditorActionOption {
+            category: 1,
+            action_type: ActionType::ToggleArrangeWindows,
+            name: "Toggle Arrange Windows".to_string(),
+            tooltip: "Keep the windows on the workspace from overlapping, at their own sizes, or put them back".to_string(),
+        });
     }
     options
 }
