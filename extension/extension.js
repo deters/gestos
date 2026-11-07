@@ -57,6 +57,11 @@ function isMoving(op) {
         op === Meta.GrabOp.KEYBOARD_MOVING;
 }
 
+// Gestos's layers over the desktop. GTK 4 can't mark them as anything but normal windows. The
+// overlay is fullscreen, which isn't tiled anyway. The app's gesture chooser is maximized, which
+// would otherwise make it a tile, and shows on GNOME when the extension's own card fails to open.
+const UNTILED_APP_IDS = ['io.github.deters.Gestos.Chooser', 'io.github.deters.Gestos.Overlay'];
+
 // Snapping a window to half the screen maximizes it in one direction.
 function isMaximizedAtAll(window) {
     return window.get_maximize_flags() !== 0;
@@ -64,7 +69,7 @@ function isMaximizedAtAll(window) {
 
 function isTileable(window) {
     // A maximized or snapped window can't be resized until it's restored, which tiling does.
-    return !window.minimized &&
+    return !window.minimized && !UNTILED_APP_IDS.includes(window.get_gtk_application_id()) &&
         window.get_window_type() === Meta.WindowType.NORMAL &&
         !window.is_fullscreen() && (isMaximizedAtAll(window) || window.allows_resize());
 }
