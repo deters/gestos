@@ -18,6 +18,10 @@ use crate::daemon::reload_daemon;
 use crate::ui::main_window::refresh_gesture_list;
 use gestos::protractor::Point2D;
 
+// The smallest the gesture editor gets, with room for the drawing and a few rows below it.
+const EDITOR_MIN_WIDTH: i32 = 520;
+const EDITOR_MIN_HEIGHT: i32 = 480;
+
 pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> String {
     match &opt.action_type {
         ActionType::Keypress(keys) => {
@@ -202,10 +206,12 @@ fn open_editor(
     let title_text = if target_gesture.is_some() { "Edit Gesture" } else { "Add Gesture" };
     dialog.set_title(Some(title_text));
     // A little smaller than the main window, so that it reads as being on top of it, without
-    // growing along with a maximized window.
+    // growing along with a maximized window, nor shrinking below what the trigger and its
+    // details need, however small the main window is.
+    dialog.set_size_request(EDITOR_MIN_WIDTH, EDITOR_MIN_HEIGHT);
     dialog.set_default_size(
-        (state.window.width() - 60).min(640),
-        (state.window.height() - 60).min(560),
+        (state.window.width() - 60).clamp(EDITOR_MIN_WIDTH, 640),
+        (state.window.height() - 60).clamp(EDITOR_MIN_HEIGHT, 560),
     );
 
     let esc_controller = gtk::EventControllerKey::new();
