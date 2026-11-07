@@ -147,7 +147,7 @@ configure_file(
 if get_option('gnome_extension')
   extension_dir = datadir / 'gnome-shell' / 'extensions' / 'gestos@deters.github.io'
   install_data('extension/extension.js', 'extension/prefs.js', 'extension/metadata.json', install_dir: extension_dir)
-  install_data('extension/lib/tile.js', 'extension/lib/arrange.js', install_dir: extension_dir / 'lib')
+  install_data('extension/lib/tile.js', install_dir: extension_dir / 'lib')
   install_data('extension/schemas/org.gnome.shell.extensions.gestos.gschema.xml', install_dir: extension_dir / 'schemas')
   # Compiled here, as extensions keep their own settings schema instead of sharing the system's.
   custom_target(
@@ -163,7 +163,6 @@ if get_option('gnome_extension')
   gjs = find_program('gjs', required: false)
   if gjs.found()
     test('gnome-extension', gjs, args: ['-m', files('extension/tests/tile.test.js')])
-    test('gnome-extension-arrange', gjs, args: ['-m', files('extension/tests/arrange.test.js')])
   endif
 endif
 

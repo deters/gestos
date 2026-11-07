@@ -4,9 +4,11 @@ Gives [Gestos](https://github.com/deters/gestos) window tiling, which GNOME has 
 
 ## Tiling
 
-**Toggle tile windows:** fits the windows on the current workspace together without overlaps, each near where it was and sized in proportion to the others' original sizes. No tile gets smaller than a quarter of the screen's width or a third of its height, so up to 12 windows fit, 4 across and 3 down. A window that says it can't get smaller than half the screen gets a tile like the others, as some apps say that while they open. Windows that are maximized or snapped to half the screen are restored first. Windows that open, close, or move in or out while it's tiled join or leave, and a workspace stays tiled with no windows left. Resizing a tiled window keeps it tiled: the edges you drag stay where you leave them, and the tiles beyond them make room. Opening or closing windows places the tiles again from the original sizes. A second use, or moving, maximizing, or snapping any of them, puts them all back.
+**Toggle tile windows:** keeps the windows on the current workspace from overlapping, at their own sizes. Windows are moved just enough to fit beside each other, in the order they have across the screen, and only shrink, along the side they don't fit, when moving isn't enough. No window gets smaller than a quarter of the screen's width or a third of its height, unless it's smaller already, and a window that says it can't get smaller than half the screen is believed to get as small as the others, as some apps say that while they open. Windows never grow past their original size, and get it back once there's room again.
 
-**Toggle arrange windows:** keeps the windows on the current workspace from overlapping, at their own sizes. Windows are moved just enough to fit beside each other, in the order they have across the screen, and only shrink, along the side they don't fit, when moving isn't enough. They never grow past their original size, and get it back once there's room again. Moving or resizing a window makes the others make room for it as you go, and the size and place you leave it at become its own. The window you moved last keeps its size and place where there's room for the others. When even the smallest sizes don't fit, the windows touched longest ago are minimized. They come back on their own once you leave room for them again, and showing one yourself makes room for it. Windows that open join where they open. Using Toggle Tile Windows on an arranged workspace tiles it instead, and the other way around. A second use, or maximizing or snapping any of them, puts them all back.
+Moving or resizing a window makes the others make room for it as you go, and the size and place you leave it at become its own. The window you moved last keeps its size and place where there's room for the others. When even the smallest sizes don't fit, the windows touched longest ago are minimized. They come back on their own once you leave room for them again, and showing one yourself makes room for it.
+
+Windows that are maximized when it starts are restored first. Windows that open, close, or move in or out while it's tiled join or leave, and a workspace stays tiled with no windows left. Maximizing a window, making it fullscreen, or snapping it to half the screen sets it aside, and the others take its room until it's back to normal, when it joins again. It stays tiled until you use it again, which puts them all back.
 
 ### Original sizes
 
@@ -48,8 +50,6 @@ gdbus call --session --dest org.gnome.Shell \
   --object-path /io/github/deters/Gestos/Extension \
   --method io.github.deters.Gestos.Extension.ToggleTileWindows
 ```
-
-Arranging works the same way, with `ToggleArrangeWindows`.
 
 ## Development
 

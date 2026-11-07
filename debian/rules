@@ -37,7 +37,6 @@ override_dh_auto_install:
 	install -D -m 644 extension/metadata.json debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/metadata.json
 	install -D -m 644 extension/prefs.js debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/prefs.js
 	install -D -m 644 extension/lib/tile.js debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/lib/tile.js
-	install -D -m 644 extension/lib/arrange.js debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/lib/arrange.js
 	install -D -m 644 extension/schemas/org.gnome.shell.extensions.gestos.gschema.xml debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/schemas/org.gnome.shell.extensions.gestos.gschema.xml
 	glib-compile-schemas debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/schemas
 

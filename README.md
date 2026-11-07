@@ -60,7 +60,7 @@ If you're updating an older install, run the install step again. It removes the 
 
 ### Tiling on GNOME
 
-Toggle Tile Windows and Toggle Arrange Windows need the “Gestos” GNOME extension, which comes with Gestos. After installing, log out and back in, then turn it on in Gestos's Preferences. Other desktops don't use it, and building with `-Dgnome_extension=false` leaves it out.
+Toggle Tile Windows needs the “Gestos” GNOME extension, which comes with Gestos. After installing, log out and back in, then turn it on in Gestos's Preferences. Other desktops don't use it, and building with `-Dgnome_extension=false` leaves it out.
 
 ## Security
 

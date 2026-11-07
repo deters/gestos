@@ -2,7 +2,7 @@
 
 import {exit} from 'system';
 
-import {fitSize, hasSize, isBelievableMinimum, keepInside, makeTiling, moveTileEdge, restoreRect, tileRects, tilingRects} from '../lib/tile.js';
+import {fitSize, hasSize, isBelievableMinimum, keepInside, restoreRect, tileWindows} from '../lib/tile.js';
 
 const rect = (x, y, width, height) => ({x, y, width, height});
 const bounds = rect(0, 0, 1000, 800);
@@ -18,70 +18,71 @@ const results = [
         [name, restoreRect(tile, {width: 300, height: 200}, pointerX), expected]),
 ];
 
+results.push(['leaves windows that fit alone',
+    tileWindows([rect(0, 0, 300, 200), rect(500, 100, 300, 400)], bounds),
+    [rect(0, 0, 300, 200), rect(500, 100, 300, 400)]]);
+results.push(['moves a window into the area', tileWindows([rect(-50, 700, 300, 200)], bounds),
+    [rect(0, 600, 300, 200)]]);
+results.push(['shrinks a window bigger than the area', tileWindows([rect(0, 0, 1400, 300)], bounds),
+    [rect(0, 0, 1000, 300)]]);
+
+// The first window is the one moved last, which stays, and the other one moves out of its way.
+results.push(['moves the other window out of the way',
+    tileWindows([rect(200, 100, 400, 300), rect(400, 100, 400, 300)], bounds),
+    [rect(200, 100, 400, 300), rect(600, 100, 400, 300)]]);
+results.push(['moves the window moved last only when there is no room for the other',
+    tileWindows([rect(500, 100, 400, 300), rect(300, 100, 400, 300)], bounds),
+    [rect(500, 100, 400, 300), rect(100, 100, 400, 300)]]);
+results.push(['moves the window moved last as little as there is no room',
+    tileWindows([rect(200, 100, 400, 300), rect(100, 100, 400, 300)], bounds),
+    [rect(400, 100, 400, 300), rect(0, 100, 400, 300)]]);
+results.push(['moves both windows before shrinking either, with a gap',
+    tileWindows([rect(200, 100, 400, 300), rect(400, 100, 400, 300)], bounds, 10),
+    [rect(180, 100, 400, 300), rect(590, 100, 400, 300)]]);
+
+results.push(['moves a window below when it overlaps more across',
+    tileWindows([rect(0, 0, 600, 300), rect(400, 200, 600, 500)], bounds),
+    [rect(0, 0, 600, 300), rect(400, 300, 600, 500)]]);
+const three = tileWindows([rect(0, 0, 500, 300), rect(300, 0, 400, 300), rect(600, 0, 400, 300)],
+    bounds);
+results.push(['shrinks the others in proportion', three.map(r => r.width), [500, 250, 250]]);
+
+// Windows get no smaller than a quarter of the width, as tiles do.
+// The one moved last keeps its 300, and the other three can't fit in the 700 left.
+const row = Array.from({length: 4}, (_, i) => rect(i * 200, 0, 300, 300));
+results.push(['minimizes the window touched longest ago',
+    tileWindows(row, bounds).map(r => r !== null),
+    [true, true, true, false]]);
+results.push(['minimizes a window that cannot get small enough',
+    tileWindows([rect(0, 0, 600, 300), rect(400, 0, 600, 300)], bounds, 0,
+        new Map([[1, {width: 500, height: 100}]])), [rect(0, 0, 600, 300), null]]);
+
 const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width &&
     a.y < b.y + b.height && b.y < a.y + a.height;
-const covers = (tiles, area) => tiles.reduce((sum, t) => sum + t.width * t.height, 0) ===
-    area.width * area.height;
-const fitsTogether = tiles =>
-    tiles.every((a, i) => tiles.every((b, j) => i === j || !overlaps(a, b))) && covers(tiles, bounds);
-
-const tileCases = [
-    ['fills the area with one window', [rect(100, 100, 300, 200)], [rect(0, 0, 1000, 800)]],
-    ['splits side by side windows by their widths', [rect(0, 0, 300, 200), rect(400, 0, 600, 200)],
-        [rect(0, 0, 333, 800), rect(333, 0, 667, 800)]],
-    ['splits stacked windows top and bottom', [rect(0, 500, 300, 200), rect(0, 0, 300, 400)],
-        [rect(0, 533, 1000, 267), rect(0, 0, 1000, 533)]],
-    ['keeps a small window usable', [rect(0, 0, 50, 50), rect(100, 0, 800, 50)],
-        [rect(0, 0, 250, 800), rect(250, 0, 750, 800)]],
-];
-results.push(...tileCases.map(([name, rects, expected]) =>
-    [name, tileRects(rects, bounds), expected]));
-
-const crowded = [rect(50, 100, 400, 300), rect(300, 200, 400, 300), rect(600, 50, 300, 500),
-    rect(100, 450, 500, 300)];
-results.push(['fits overlapping windows together', fitsTogether(tileRects(crowded, bounds)), true]);
-results.push(['keeps the gap between tiles and at the edges',
-    tileRects([rect(0, 0, 400, 800), rect(500, 0, 500, 800)], bounds, 10),
-    [rect(10, 10, 430, 780), rect(450, 10, 540, 780)]]);
-
-const resized = (rects, index, edge, position, gap = 0) => {
-    const tiling = makeTiling(rects, bounds, gap);
-    moveTileEdge(tiling, index, edge, position);
-    return tilingRects(tiling);
-};
-const threeTiles = [rect(50, 100, 400, 300), rect(550, 100, 400, 300), rect(300, 500, 400, 250)];
-results.push(['moves the dragged edge exactly', resized(threeTiles, 0, 'right', 700),
-    [rect(0, 0, 700, 436), rect(700, 0, 300, 436), rect(0, 436, 1000, 364)]]);
-results.push(['moves the neighbor edge from the other side', resized(threeTiles, 1, 'left', 300),
-    [rect(0, 0, 300, 436), rect(300, 0, 700, 436), rect(0, 436, 1000, 364)]]);
-results.push(['moves a split between groups', resized(threeTiles, 2, 'top', 300),
-    [rect(0, 0, 500, 300), rect(500, 0, 500, 300), rect(0, 300, 1000, 500)]]);
-results.push(['leaves an edge at the screen alone', resized(threeTiles, 0, 'left', 100),
-    tileRects(threeTiles, bounds)]);
-results.push(['keeps the gap while moving an edge', resized(threeTiles, 0, 'right', 690, 10)[1].x, 700]);
-
-// What any layout must do, with any gap and after any edges are dragged: no overlaps, every tile
-// inside the area and at least the smallest size, the gap kept between tiles, and with no gap, the
-// whole area filled.
 const inside = (t, area) => t.x >= area.x && t.y >= area.y &&
     t.x + t.width <= area.x + area.width && t.y + t.height <= area.y + area.height;
 const grownBy = (t, by) => rect(t.x - by, t.y - by, t.width + 2 * by, t.height + 2 * by);
-function problemsWith(tiles, gap) {
-    if (tiles.some(t => t.width < 100 || t.height < 100))
-        return 'a tile is smaller than 100 pixels';
-    if (tiles.some(t => !inside(t, grownBy(bounds, -gap))))
-        return 'a tile is outside the area';
-    const cells = tiles.map(t => grownBy(t, gap / 2 - 0.01));
+// What any arrangement must do: no window bigger than it was, none overlapping or closer than the
+// gap, all inside the area, the one moved last never minimized, and its size kept where it fits.
+function problemsWith(rects, placed, gap) {
+    const shown = placed.filter(p => p);
+    if (!placed[0])
+        return 'the window moved last is minimized';
+    if (placed.some((p, i) => p && (p.width > rects[i].width || p.height > rects[i].height)))
+        return 'a window got bigger';
+    if (rects[0].width <= bounds.width - 2 * gap && rects[0].height <= bounds.height - 2 * gap &&
+        (placed[0].width !== rects[0].width || placed[0].height !== rects[0].height))
+        return 'the window moved last changed size';
+    if (shown.some(p => !inside(p, grownBy(bounds, -gap))))
+        return 'a window is outside the area';
+    const cells = shown.map(p => grownBy(p, gap / 2 - 0.01));
     if (cells.some((a, i) => cells.some((b, j) => i < j && overlaps(a, b))))
-        return 'tiles overlap or are closer than the gap';
-    if (gap === 0 && tiles.reduce((sum, t) => sum + t.width * t.height, 0) !==
-        bounds.width * bounds.height)
-        return "the area isn't filled";
+        return 'windows overlap or are closer than the gap';
     return null;
 }
 
 // The same layouts on every run.
-let seed = 42;
+let seed = 7;
 const random = () => {
     seed = (seed * 1103515245 + 12345) % 2147483648;
     return seed / 2147483648;
@@ -90,30 +91,18 @@ const randomRect = () => rect(Math.round(random() * 1200 - 200), Math.round(rand
     Math.round(50 + random() * 900), Math.round(50 + random() * 700));
 const layouts = [];
 for (let i = 0; i < 300; i++)
-    layouts.push(Array.from({length: 1 + Math.floor(random() * 6)}, randomRect));
+    layouts.push(Array.from({length: 1 + Math.floor(random() * 8)}, randomRect));
 for (let i = 0; i < 30; i++) {
     const spot = randomRect();
     layouts.push(Array.from({length: 2 + Math.floor(random() * 4)}, () => ({...spot})));
 }
-
 for (const gap of [0, 10, 41]) {
-    const failed = layouts.map(rects => {
-        const tiling = makeTiling(rects, bounds, gap);
-        const placed = problemsWith(tilingRects(tiling), gap);
-        for (let drag = 0; drag < 4; drag++) {
-            const edge = ['left', 'right', 'top', 'bottom'][Math.floor(random() * 4)];
-            moveTileEdge(tiling, Math.floor(random() * rects.length), edge,
-                Math.round(random() * (edge === 'left' || edge === 'right' ? 1000 : 800)));
-        }
-        return [rects, placed ?? problemsWith(tilingRects(tiling), gap)];
-    }).find(([, problem]) => problem);
-    results.push([`fits every layout together with a gap of ${gap}, also after dragging edges`,
+    const failed = layouts
+        .map(rects => [rects, problemsWith(rects, tileWindows(rects, bounds, gap), gap)])
+        .find(([, problem]) => problem);
+    results.push([`arranges every layout with a gap of ${gap}`,
         failed ? `${failed[1]} in ${JSON.stringify(failed[0])}` : 'ok', 'ok']);
 }
-
-const withMinimum = tilingRects(makeTiling([rect(0, 0, 400, 800), rect(500, 0, 500, 800)], bounds, 0,
-    new Map([[1, {width: 700, height: 100}]])));
-results.push(["makes room for a window that can't get as small as its tile", withMinimum[1].width, 700]);
 
 // Some apps say the size they open at is their smallest one, which is likely when it's most of the
 // screen.
@@ -122,35 +111,6 @@ results.push(['believes a smallest size of up to half the screen',
         isBelievableMinimum({width: 900, height: 300}, bounds),
         isBelievableMinimum({width: 300, height: 700}, bounds)], [true, false, false]]);
 
-// Apps can say their windows get smaller than they can, so no tile gets smaller than a quarter of
-// the width and a third of the height, and grids go up to 4 across and 3 down.
-const many = Array.from({length: 12}, (_, i) => rect(i * 10, i * 10, 300, 200));
-const manyTiles = tileRects(many, bounds);
-results.push(['fits up to 12 windows in a grid of 4 by 3',
-    [new Set(manyTiles.map(t => t.x)).size, new Set(manyTiles.map(t => t.y)).size], [4, 3]]);
-const fiveTiles = tileRects(many.slice(0, 5), bounds);
-results.push(['keeps tiles at least a quarter wide and a third high',
-    fiveTiles.every(t => t.width >= 250 && t.height >= 266), true]);
-
-// Windows opened in a cascade, which can't get small enough to be stacked, go in a grid instead.
-const cascade = [rect(100, 100, 700, 500), rect(150, 150, 700, 500), rect(200, 200, 700, 500),
-    rect(250, 250, 700, 500)];
-const bigMinimums = new Map(cascade.map((_, i) => [i, {width: 528, height: 418}]));
-const inGrid = tilingRects(makeTiling(cascade, rect(0, 32, 1920, 1048), 0, bigMinimums));
-results.push(['puts big cascaded windows in a grid where they fit',
-    inGrid.every(t => t.width >= 528 && t.height >= 418) &&
-    inGrid.every((a, i) => inGrid.every((b, j) => i === j || !overlaps(a, b))), true]);
-
-results.push(['makes the grid as square as it can', inGrid.filter(t => t.y === inGrid[0].y).length, 2]);
-
-// Three that don't fit stacked: two share the top row, and the one that needs the most room gets
-// the whole bottom row.
-const three = [rect(100, 100, 700, 500), rect(150, 150, 700, 500), rect(200, 200, 700, 500)];
-const threeMinimums = new Map([[0, {width: 500, height: 400}], [1, {width: 900, height: 450}],
-    [2, {width: 500, height: 400}]]);
-const bigThree = tilingRects(makeTiling(three, rect(0, 32, 1920, 1048), 0, threeMinimums));
-results.push(['gives the widest tile to the window that needs the most room',
-    bigThree[1].width === 1920 && bigThree[0].width < 1920 && bigThree[2].width < 1920, true]);
 
 results.push(['has a size an app rounded', hasSize(rect(0, 0, 690, 410), rect(0, 0, 700, 419)), true]);
 results.push(['has not a size far from it', hasSize(rect(0, 0, 400, 300), rect(0, 0, 700, 419)), false]);
@@ -162,12 +122,6 @@ results.push(['leaves a rect that is inside alone',
 
 results.push(['fits a size that is too big inside the bounds',
     fitSize({width: 1400, height: 300}, bounds), {width: 1000, height: 300}]);
-// A window that says it can't get smaller than the screen gets no more than its whole side of
-// the split, and the other window still gets its own room.
-results.push(['keeps a smallest size bigger than the area within the area',
-    tilingRects(makeTiling([rect(0, 0, 500, 800), rect(500, 0, 500, 800)], bounds, 0,
-        new Map([[0, {width: 5000, height: 5000}]]))),
-    [rect(0, 0, 800, 800), rect(800, 0, 200, 800)]]);
 
 // The Shell gives rectangles as boxed structs, whose fields spreading doesn't copy.
 class BoxedRect {
