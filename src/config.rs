@@ -1,3 +1,4 @@
+use crate::key_steps::{describe_steps, format_steps, parse_steps, KeyStep};
 use crate::modifiers::Modifiers;
 use crate::protractor::Point2D;
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,8 @@ pub enum ActionType {
     Restore,
     ToggleMaximized,
     Keypress(String),
+    /// Shortcuts, text and pauses, in order. With no steps, it's the generic action to fill in.
+    Keyboard(Vec<KeyStep>),
     Execute(String),
     WorkspaceLeft,
     WorkspaceRight,
@@ -68,6 +71,7 @@ impl ActionType {
                 let normalized = arg.replace("_L", "").replace("_R", "");
                 Some(ActionType::Keypress(normalized))
             }
+            "keyboard" => Some(ActionType::Keyboard(parse_steps(&arg))),
             "exec" => Some(ActionType::Execute(arg)),
             "workspace-left" => Some(ActionType::WorkspaceLeft),
             "workspace-right" => Some(ActionType::WorkspaceRight),
@@ -159,7 +163,7 @@ impl ActionType {
     pub fn get_icon_name(&self) -> &'static str {
         match self {
             ActionType::Execute(_) => "utilities-terminal-symbolic",
-            ActionType::Keypress(_) => "input-keyboard-symbolic",
+            ActionType::Keypress(_) | ActionType::Keyboard(_) => "input-keyboard-symbolic",
             ActionType::Gnome(key) => gnome_icon_name(key),
             ActionType::Kde(_, _) => "preferences-system-symbolic",
             ActionType::Iconify => "window-minimize-symbolic",
@@ -205,6 +209,7 @@ impl ActionType {
             ActionType::Restore => "Restore Window".to_string(),
             ActionType::ToggleMaximized => "Toggle Maximize".to_string(),
             ActionType::Keypress(keys) => format!("Press keys: {}", keys),
+            ActionType::Keyboard(steps) => format!("Keyboard: {}", describe_steps(steps)),
             ActionType::Execute(cmd) => format!("Run: {}", cmd),
             ActionType::WorkspaceLeft => "Workspace Left".to_string(),
             ActionType::WorkspaceRight => "Workspace Right".to_string(),
@@ -253,6 +258,7 @@ impl std::fmt::Display for ActionType {
             ActionType::Restore => write!(f, "restore"),
             ActionType::ToggleMaximized => write!(f, "toggle-maximized"),
             ActionType::Keypress(arg) => write!(f, "keypress {}", arg),
+            ActionType::Keyboard(steps) => write!(f, "keyboard {}", format_steps(steps)),
             ActionType::Execute(arg) => write!(f, "exec {}", arg),
             ActionType::WorkspaceLeft => write!(f, "workspace-left"),
             ActionType::WorkspaceRight => write!(f, "workspace-right"),
@@ -1197,6 +1203,16 @@ mod tests {
     #[test]
     fn load_rejects_a_missing_file() {
         assert!(Configuration::load_from_file("/nonexistent/gestos.yaml").is_none());
+    }
+
+    #[test]
+    fn a_keyboard_action_survives_saving() {
+        let action = ActionType::Keyboard(vec![
+            KeyStep::Press("Control+L".to_string()),
+            KeyStep::Type("a; \"b\"".to_string()),
+            KeyStep::Wait(150),
+        ]);
+        assert_eq!(ActionType::from_string(&action.to_string()), Some(action));
     }
 
     #[test]

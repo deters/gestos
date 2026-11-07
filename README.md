@@ -23,7 +23,7 @@ That's it. Hold the right mouse button anywhere, draw your gesture, and let go. 
 
 ## Actions
 
-Gestos can manage windows and workspaces, control media and volume, take screenshots, lock the screen or log out, open apps, use the standard app shortcuts like Copy, Save, or Zoom In, and tile windows on GNOME. It can also run your GNOME or KDE shortcut actions, any keyboard shortcut, or a command.
+Gestos can manage windows and workspaces, control media and volume, take screenshots, lock the screen or log out, open apps, use the standard app shortcuts like Copy, Save, or Zoom In, and tile windows on GNOME. It can also run your GNOME or KDE shortcut actions, a command, or a keyboard action: any shortcuts, text to type and pauses, in the order you set.
 
 ## Install
 

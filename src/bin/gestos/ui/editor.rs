@@ -10,6 +10,8 @@ use gestos::config::generate_unique_id;
 use crate::state::{AppState, EditorActionOption};
 use crate::actions::{action_matches, action_needs_parameter};
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
+use crate::ui::keyboard_steps::build_steps_editor;
+use gestos::key_steps::{format_steps, parse_steps, KeyStep};
 use crate::ui::components::{draw_gesture_path, show_confirm_dialog};
 use crate::daemon::reload_daemon;
 use crate::ui::main_window::refresh_gesture_list;
@@ -25,6 +27,12 @@ pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> Strin
                 format!("{} ({})", opt.name, detail.trim())
             }
         }
+        // A single shortcut is named after its keys, as it always was. Longer actions would make
+        // long names, so they keep the action's own.
+        ActionType::Keyboard(_) => match parse_steps(detail).as_slice() {
+            [KeyStep::Press(keys)] => format!("{} ({})", opt.name, keys),
+            _ => opt.name.clone(),
+        },
         ActionType::Execute(_) if opt.category == 7 => {
             if detail.trim().is_empty() {
                 opt.name.clone()
@@ -139,10 +147,16 @@ fn show_action_parameter(
     entry: &gtk::Entry,
     shortcut_display: &gtk::Box,
     record_button: &gtk::Button,
+    steps_editor: &gtk::Box,
 ) {
-    // The list's own row, because hiding only its content leaves an empty strip.
+    // A keyboard action has its list of steps instead of the one value other actions take.
+    let has_steps = matches!(&opt.action_type, ActionType::Keyboard(_));
+    // The list's own rows, because hiding only their content leaves an empty strip.
     if let Some(list_row) = row.parent() {
-        list_row.set_visible(action_needs_parameter(opt));
+        list_row.set_visible(action_needs_parameter(opt) && !has_steps);
+    }
+    if let Some(list_row) = steps_editor.parent() {
+        list_row.set_visible(has_steps);
     }
 
     let is_keypress = matches!(&opt.action_type, ActionType::Keypress(_));
@@ -482,6 +496,13 @@ fn open_editor(
     action_details_row.append(&entry_container);
     settings_list.append(&action_details_row);
 
+    // Edits the details entry, which holds a keyboard action's steps as the gesture saves them.
+    let (steps_editor, load_steps) = build_steps_editor(&dialog, &action_details_entry);
+    settings_list.append(&steps_editor);
+    if let Some(list_row) = steps_editor.parent() {
+        list_row.set_visible(false);
+    }
+
     let selected_action: Rc<RefCell<Option<EditorActionOption>>> = Rc::new(RefCell::new(None));
 
     let update_default_name = Rc::new({
@@ -575,7 +596,21 @@ fn open_editor(
         Some(gesture) => {
             let option = option_for_gesture(gesture, &state_rc.borrow().action_options);
             match gesture.actions.first() {
-                Some(ActionType::Keypress(combo)) => action_details_entry.set_text(combo),
+                // A shortcut that isn't a standard one opens as a keyboard action of one step.
+                Some(ActionType::Keypress(combo)) => {
+                    let as_steps = option
+                        .as_ref()
+                        .is_some_and(|o| matches!(o.action_type, ActionType::Keyboard(_)));
+                    if as_steps {
+                        let steps = [KeyStep::Press(combo.clone())];
+                        action_details_entry.set_text(&format_steps(&steps));
+                    } else {
+                        action_details_entry.set_text(combo);
+                    }
+                }
+                Some(ActionType::Keyboard(steps)) => {
+                    action_details_entry.set_text(&format_steps(steps));
+                }
                 Some(ActionType::Execute(command))
                     if option.as_ref().is_some_and(action_needs_parameter) =>
                 {
@@ -605,6 +640,7 @@ fn open_editor(
             &action_details_entry,
             &shortcut_display_box,
             &record_btn,
+            &steps_editor,
         );
         // A chosen action is all a new gesture's default name needs.
         if preset_action.is_some() {
@@ -624,6 +660,7 @@ fn open_editor(
         settings_list.set_visible(has_details);
     }
 
+    load_steps();
     details_loaded.set(true);
 
     let usd_init = Rc::clone(&update_shortcut_display);
@@ -679,7 +716,15 @@ fn open_editor(
         let detail = action_details_entry.text().to_string();
 
         let action = match &opt.action_type {
-            ActionType::Keypress(keys) if keys.is_empty() => ActionType::Keypress(detail),
+            // One shortcut is saved as one, as standard shortcuts and older gestures are.
+            ActionType::Keyboard(_) => match parse_steps(&detail).as_slice() {
+                [] => {
+                    println!("Gesture save failed: The keyboard action has no steps.");
+                    return;
+                }
+                [KeyStep::Press(keys)] => ActionType::Keypress(keys.clone()),
+                steps => ActionType::Keyboard(steps.to_vec()),
+            },
             ActionType::Execute(_) if opt.category == 7 => ActionType::Execute(detail),
             ActionType::Click(_) => {
                 let btn = if detail.trim().is_empty() {

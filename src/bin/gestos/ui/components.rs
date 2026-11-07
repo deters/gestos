@@ -82,7 +82,9 @@ pub fn show_error_dialog<W: IsA<gtk::Window>>(parent: &W, message: &str) {
 }
 pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static str) {
     match action {
-        ActionType::Execute(_) => ("utilities-terminal-symbolic", "icon-bg-purple"),
+        // The two actions that can do what the others can't stand out.
+        ActionType::Execute(_) => ("utilities-terminal-symbolic", "icon-swiss-red"),
+        ActionType::Keyboard(_) => ("input-keyboard-symbolic", "icon-swiss-red"),
         ActionType::Keypress(_) => (
             "input-keyboard-symbolic",
             "icon-bg-orange",
@@ -244,11 +246,21 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
         ActionType::ToggleMaximized => "Toggle Maximized".to_string(),
         ActionType::Keypress(keys) => {
             if keys.is_empty() {
-                "Custom Keyboard Shortcut".to_string()
+                "Custom Keyboard Action".to_string()
             } else if let Some(name) = standard_shortcut_name(keys) {
                 name.to_string()
             } else {
-                format!("Custom Keyboard Shortcut ({})", keys)
+                format!("Custom Keyboard Action ({})", keys)
+            }
+        }
+        ActionType::Keyboard(steps) => {
+            if steps.is_empty() {
+                "Custom Keyboard Action".to_string()
+            } else {
+                format!(
+                    "Custom Keyboard Action ({})",
+                    gestos::key_steps::describe_steps(steps)
+                )
             }
         }
         ActionType::Execute(cmd) => {
