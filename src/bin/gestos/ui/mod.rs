@@ -2,6 +2,7 @@ pub mod components;
 pub mod shortcut_recorder;
 pub mod keyboard_steps;
 pub mod app_picker;
+pub mod gesture_canvas;
 pub mod editor;
 pub mod settings;
 pub mod main_window;

@@ -279,10 +279,9 @@ fn open_editor(
 
     let canvas_frame = gtk::Frame::new(None);
     canvas_frame.add_css_class("gesture-preview-frame");
-    canvas_frame.set_size_request(300, 150);
-    canvas_frame.set_vexpand(true);
 
-    let canvas = gtk::DrawingArea::new();
+    // As wide as the rows below, and as tall as half of that.
+    let canvas = crate::ui::gesture_canvas::GestureCanvas::new();
     let recorded_points: Rc<RefCell<Vec<Point2D>>> = Rc::new(RefCell::new(
         target_gesture
             .as_ref()
@@ -454,10 +453,9 @@ fn open_editor(
     modifiers_list.add_css_class("boxed-list");
     modifiers_list.set_selection_mode(gtk::SelectionMode::None);
     modifiers_list.append(&modifiers_row);
-    scroll_content.append(&modifiers_list);
-
     let apps_list = build_apps_list(&dialog, Rc::clone(&gesture_apps), Rc::clone(&check_conflict));
     scroll_content.append(&apps_list);
+    scroll_content.append(&modifiers_list);
 
     // For actions that need the GNOME extension, which isn't always there.
     let extension_label = gtk::Label::new(None);
