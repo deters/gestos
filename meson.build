@@ -22,49 +22,12 @@ else
   build_type = 'release'
 endif
 
-# Source files to track for rebuilds
-cargo_sources = files(
-  'Cargo.toml',
-  'Cargo.lock',
-  'src/lib.rs',
-  'src/chooser.rs',
-  'src/config.rs',
-  'src/gesture.rs',
-  'src/input_client.rs',
-  'src/input_protocol.rs',
-  'src/ipc.rs',
-  'src/keyboards.rs',
-  'src/keymap.rs',
-  'src/keys.rs',
-  'src/modifiers.rs',
-  'src/protractor.rs',
-  'src/uinput.rs',
-  'src/wayland.rs',
-  'src/bin/gestosd.rs',
-  'src/bin/gestos-input.rs',
-  'src/bin/gestos/actions.rs',
-  'src/bin/gestos/ui/shortcut_recorder.rs',
-  'src/bin/gestos/ui/overlay.rs',
-  'src/bin/gestos/ui/main_window.rs',
-  'src/bin/gestos/ui/mod.rs',
-  'src/bin/gestos/ui/components.rs',
-  'src/bin/gestos/ui/editor.rs',
-  'src/bin/gestos/ui/gesture_chooser.rs',
-  'src/bin/gestos/ui/settings.rs',
-  'src/bin/gestos/ui/gesture_status.rs',
-  'src/bin/gestos/system.rs',
-  'src/bin/gestos/daemon.rs',
-  'src/bin/gestos/extension.rs',
-  'src/bin/gestos/state.rs',
-  'src/bin/gestos/suggestions.rs',
-  'src/bin/gestos/main.rs',
-)
-
-# Custom target for Cargo build
+# Cargo knows which sources changed, so it's always asked, rather than meson keeping a list of
+# them that falls behind as files are added.
 cargo_build = custom_target(
   'cargo-build',
   build_by_default: true,
-  input: cargo_sources,
+  build_always_stale: true,
   output: ['gestosd', 'gestos', 'gestos-input'],
   console: true,
   install: true,
