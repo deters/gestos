@@ -119,9 +119,10 @@ pub fn active_layout() -> Option<LayoutName> {
     command_output("localectl", &["status"]).as_deref().and_then(parse_localectl)
 }
 
-/// Which physical key and shift level produce each symbol on one layout.
+/// Which physical key and shift level produce each symbol on one layout, and each character.
 pub struct LayoutKeys {
     symbols: HashMap<u32, (u16, u32)>,
+    chars: HashMap<char, (u16, u32)>,
 }
 
 impl LayoutKeys {
@@ -140,6 +141,7 @@ impl LayoutKeys {
         };
 
         let mut symbols: HashMap<u32, (u16, u32)> = HashMap::new();
+        let mut chars: HashMap<char, (u16, u32)> = HashMap::new();
         // Safe because the pointers stay valid during these calls, the key's symbol array is read
         // within the bounds xkbcommon reports, and each object is released exactly once.
         unsafe {
@@ -172,10 +174,17 @@ impl LayoutKeys {
                     }
                     for symbol in std::slice::from_raw_parts(syms, count as usize) {
                         let key = (keycode - XKB_KEYCODE_OFFSET) as u16;
-                        let entry = symbols.entry(*symbol).or_insert((key, level));
                         // The easiest way to type it wins.
-                        if level < entry.1 {
-                            *entry = (key, level);
+                        let keep = |entry: &mut (u16, u32)| {
+                            if level < entry.1 {
+                                *entry = (key, level);
+                            }
+                        };
+                        keep(symbols.entry(*symbol).or_insert((key, level)));
+                        if let Some(c) = char::from_u32((xkb.xkb_keysym_to_utf32)(*symbol))
+                            .filter(|c| !c.is_control())
+                        {
+                            keep(chars.entry(c).or_insert((key, level)));
                         }
                     }
                 }
@@ -183,7 +192,7 @@ impl LayoutKeys {
             (xkb.xkb_keymap_unref)(keymap);
             (xkb.xkb_context_unref)(context);
         }
-        Some(LayoutKeys { symbols })
+        Some(LayoutKeys { symbols, chars })
     }
 
     /// The key that types a symbol, and any shift level it needs. Names are exact, because
@@ -206,6 +215,22 @@ impl LayoutKeys {
             (xkb.xkb_keysym_from_name)(name.as_ptr(), xkb_keysym_flags::XKB_KEYSYM_NO_FLAGS)
         };
         let (key, level) = *self.symbols.get(&(symbol as u32))?;
+        Some((
+            key,
+            level == SHIFT_LEVEL || level == SHIFT_ALTGR_LEVEL,
+            level == ALTGR_LEVEL || level == SHIFT_ALTGR_LEVEL,
+        ))
+    }
+
+    /// The key that types a character, and any shift level it needs. Line breaks and tabs are
+    /// typed with their keys.
+    pub fn lookup_char(&self, c: char) -> Option<(u16, bool, bool)> {
+        match c {
+            '\n' => return self.lookup("Return"),
+            '\t' => return self.lookup("Tab"),
+            _ => {}
+        }
+        let (key, level) = *self.chars.get(&c)?;
         Some((
             key,
             level == SHIFT_LEVEL || level == SHIFT_ALTGR_LEVEL,
@@ -319,6 +344,21 @@ mod tests {
         let Some(brazilian) = layout("br") else { return };
         assert_eq!(key(&brazilian, "c"), KeyCode::KEY_C.0);
         assert_eq!(key(&brazilian, "ccedilla"), KeyCode::KEY_SEMICOLON.0);
+    }
+
+    #[test]
+    fn characters_are_typed_the_way_the_layout_has_them() {
+        let Some(us) = layout("us") else { return };
+        assert_eq!(us.lookup_char('a'), Some((KeyCode::KEY_A.0, false, false)));
+        assert_eq!(us.lookup_char('A'), Some((KeyCode::KEY_A.0, true, false)));
+        assert_eq!(us.lookup_char('1'), Some((KeyCode::KEY_1.0, false, false)));
+        assert_eq!(us.lookup_char(' '), Some((KeyCode::KEY_SPACE.0, false, false)));
+        assert_eq!(us.lookup_char('\n'), Some((KeyCode::KEY_ENTER.0, false, false)));
+        assert_eq!(us.lookup_char('ç'), None);
+        let Some(brazilian) = layout("br") else { return };
+        assert_eq!(brazilian.lookup_char('Ç'), Some((KeyCode::KEY_SEMICOLON.0, true, false)));
+        let Some(french) = layout("fr") else { return };
+        assert_eq!(french.lookup_char('a'), Some((KeyCode::KEY_Q.0, false, false)));
     }
 
     #[test]

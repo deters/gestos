@@ -17,9 +17,11 @@ pub fn action_matches(a: &ActionType, opt: &EditorActionOption) -> bool {
                 opt.category == 7
             }
         }
-        // The generic Keyboard Shortcut has no keys of its own, so it matches any.
-        (ActionType::Keypress(k1), ActionType::Keypress(k2)) => {
-            opt.category == 0 && (k2.is_empty() || k1 == k2)
+        (ActionType::Keypress(k1), ActionType::Keypress(k2)) => opt.category == 0 && k1 == k2,
+        // The generic Keyboard Action has no steps of its own, so it matches any, and a single
+        // shortcut that isn't a standard one is a keyboard action with one step.
+        (ActionType::Keyboard(_) | ActionType::Keypress(_), ActionType::Keyboard(steps)) => {
+            opt.category == 0 && steps.is_empty()
         }
         (ActionType::Click(_), ActionType::Click(_)) => opt.category == 0,
         (at1, at2) => at1 == at2,
@@ -28,10 +30,10 @@ pub fn action_matches(a: &ActionType, opt: &EditorActionOption) -> bool {
 
 /// Whether an action needs a value from the user. Most don't: GNOME and KDE actions, custom
 /// GNOME shortcuts and standard shortcuts are complete as they are. Only the generic Keyboard
-/// Shortcut takes keys, and only the generic Run Command takes a command.
+/// Action takes keys, and only the generic Run Command takes a command.
 pub fn action_needs_parameter(opt: &EditorActionOption) -> bool {
     match &opt.action_type {
-        ActionType::Keypress(keys) => keys.is_empty(),
+        ActionType::Keyboard(steps) => steps.is_empty(),
         ActionType::Click(_) => true,
         ActionType::Execute(_) => opt.category == 7,
         _ => false,
@@ -133,7 +135,7 @@ pub fn standard_shortcut_name(keys: &str) -> Option<String> {
 }
 
 pub fn get_static_action_options() -> Vec<EditorActionOption> {
-    // Before the generic Keyboard Shortcut, so that a gesture with these keys finds its own name.
+    // Before the generic Keyboard Action, so that a gesture with these keys finds its own name.
     let mut options: Vec<EditorActionOption> = STANDARD_SHORTCUTS
         .iter()
         .map(|(name, keys, tooltip)| EditorActionOption {
@@ -147,9 +149,9 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
         // Input Emulation (0)
         EditorActionOption {
             category: 0,
-            action_type: ActionType::Keypress(String::new()),
-            name: "Custom Keyboard Shortcut".to_string(),
-            tooltip: "Simulate keys like Control_L+Alt_L+t".to_string(),
+            action_type: ActionType::Keyboard(Vec::new()),
+            name: "Custom Keyboard Action".to_string(),
+            tooltip: "Press shortcuts, type text and wait, in any order".to_string(),
         },
         // Window Management (1)
         EditorActionOption {
@@ -579,7 +581,7 @@ mod tests {
 
     #[test]
     fn only_keys_clicks_and_run_command_need_a_parameter() {
-        assert!(action_needs_parameter(&option(0, ActionType::Keypress(String::new()))));
+        assert!(action_needs_parameter(&option(0, ActionType::Keyboard(Vec::new()))));
         assert!(action_needs_parameter(&option(0, ActionType::Click(None))));
         assert!(action_needs_parameter(&option(7, ActionType::Execute(String::new()))));
 
@@ -602,7 +604,15 @@ mod tests {
             options.iter().find(|opt| action_matches(&action, opt)).unwrap().name.clone()
         };
         assert_eq!(find("Control+C"), "Copy (Ctrl+C)");
-        assert_eq!(find("Control+Alt+T"), "Custom Keyboard Shortcut");
+        assert_eq!(find("Control+Alt+T"), "Custom Keyboard Action");
+    }
+
+    #[test]
+    fn a_keyboard_action_finds_the_generic_one() {
+        let options = get_static_action_options();
+        let action = ActionType::Keyboard(vec![gestos::key_steps::KeyStep::Wait(10)]);
+        let option = options.iter().find(|opt| action_matches(&action, opt)).unwrap();
+        assert_eq!(option.name, "Custom Keyboard Action");
     }
 
     #[test]

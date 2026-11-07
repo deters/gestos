@@ -304,6 +304,8 @@ fn spawn_gesture_actions(
         for action in &actions {
             if let ActionType::Click(btn) = action {
                 input.click(btn.unwrap_or(1));
+            } else if let ActionType::Keyboard(steps) = action {
+                input.run_steps(steps);
             } else {
                 wayland_ctx.execute_action(action, &|keys_str| input.keypress_string(keys_str));
             }

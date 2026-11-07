@@ -5,6 +5,7 @@ pub mod gesture;
 pub mod input_client;
 pub mod input_protocol;
 pub mod ipc;
+pub mod key_steps;
 pub mod keyboards;
 #[cfg(target_os = "linux")]
 pub mod keymap;

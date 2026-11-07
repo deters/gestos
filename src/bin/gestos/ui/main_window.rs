@@ -59,8 +59,10 @@ fn suggestion_row(
     row_box.set_margin_top(12);
     row_box.set_margin_bottom(12);
 
-    let (icon_name, _) = get_action_category_icon(&option.action_type);
-    row_box.append(&gtk::Image::from_icon_name(icon_name));
+    let (icon_name, icon_class) = get_action_category_icon(&option.action_type);
+    let icon = gtk::Image::from_icon_name(icon_name);
+    icon.add_css_class(icon_class);
+    row_box.append(&icon);
     let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
     text.set_hexpand(true);
     text.set_valign(gtk::Align::Center);
@@ -406,6 +408,7 @@ pub fn build_ui(app: &gtk::Application) {
          .context-title { font-size: 1.5em; font-weight: bold; }\n\
          .gesture-row { padding: 6px; }\n\
          .icon-holder { padding: 4px; }\n\
+         .icon-swiss-red { color: #da291c; }\n\
          .action-label { font-size: 0.9em; opacity: 0.7; }\n\
          .status-dot-running { color: #10b981; }\n\
          .status-dot-stopped { color: #6b7280; }\n\

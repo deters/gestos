@@ -1,8 +1,9 @@
 //! The daemon's end of the connection to the `gestos-input` service.
 
 use crate::input_protocol::Request;
+use crate::key_steps::KeyStep;
 use crate::modifiers::Modifiers;
-use crate::keys::parse_key_combo_on;
+use crate::keys::{name_to_keycode, parse_key_combo_on};
 use crate::uinput::trigger_button_code;
 use std::io::Write;
 use std::os::unix::net::UnixStream;
@@ -10,6 +11,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 const HELD_REPLY_TIMEOUT: Duration = Duration::from_millis(200);
+// How long each typed key is held, and the pause before the next one. Apps miss keys that come
+// faster than they read them.
+const TYPED_KEY_HOLD: Duration = Duration::from_millis(8);
+const TYPED_KEY_GAP: Duration = Duration::from_millis(8);
 
 #[derive(Clone)]
 pub struct InputClient {
@@ -100,6 +105,63 @@ impl InputClient {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+
+    /// Types text with the keys the layout has for each character, Shift and AltGr included. A
+    /// character the layout can't type is skipped, so the rest still comes out.
+    pub fn type_text(&self, text: &str) {
+        let layout = crate::keymap::current_layout_keys();
+        for c in text.chars() {
+            let Some((key, shift, altgr)) = layout
+                .as_deref()
+                .and_then(|layout| layout.lookup_char(c))
+                .or_else(|| us_char_key(c))
+            else {
+                eprintln!("gestos: Can't type '{}' on this keyboard layout", c);
+                continue;
+            };
+            let mut codes = Vec::new();
+            if shift {
+                codes.push(evdev::KeyCode::KEY_LEFTSHIFT.0);
+            }
+            if altgr {
+                codes.push(evdev::KeyCode::KEY_RIGHTALT.0);
+            }
+            codes.push(key);
+            for &code in &codes {
+                self.key(code, true);
+            }
+            std::thread::sleep(TYPED_KEY_HOLD);
+            for &code in codes.iter().rev() {
+                self.key(code, false);
+            }
+            std::thread::sleep(TYPED_KEY_GAP);
+        }
+    }
+
+    /// Runs a keyboard action's steps in order.
+    pub fn run_steps(&self, steps: &[KeyStep]) {
+        for step in steps {
+            match step {
+                KeyStep::Press(keys) => self.keypress_string(keys),
+                KeyStep::Type(text) => self.type_text(text),
+                KeyStep::Wait(millis) => {
+                    std::thread::sleep(Duration::from_millis(u64::from(*millis)));
+                }
+            }
+        }
+    }
+}
+
+/// Where a character is on a US layout, for when the layout in use can't be read.
+fn us_char_key(c: char) -> Option<(u16, bool, bool)> {
+    let name = match c {
+        ' ' => "space".to_string(),
+        '\n' => "Return".to_string(),
+        '\t' => "Tab".to_string(),
+        c if c.is_ascii_alphanumeric() => c.to_ascii_lowercase().to_string(),
+        _ => return None,
+    };
+    Some((name_to_keycode(&name)?, c.is_ascii_uppercase(), false))
 }
 
 #[cfg(test)]
@@ -149,6 +211,34 @@ mod tests {
             panic!("{requests:?}");
         };
         assert_eq!(requests[3], Request::Key { code: first, pressed: false });
+    }
+
+    #[test]
+    fn steps_press_type_and_wait_in_order() {
+        let (client, mut service) = client();
+        let started = Instant::now();
+        client.run_steps(&[
+            KeyStep::Wait(30),
+            KeyStep::Type("A".to_string()),
+            KeyStep::Press("F1".to_string()),
+        ]);
+        assert!(started.elapsed() >= Duration::from_millis(30));
+        let requests = received(&mut service, 6);
+        let Request::Key { code: shift, pressed: true } = requests[0] else {
+            panic!("{requests:?}");
+        };
+        let Request::Key { code: a, pressed: true } = requests[1] else {
+            panic!("{requests:?}");
+        };
+        assert_eq!(requests[2], Request::Key { code: a, pressed: false });
+        assert_eq!(requests[3], Request::Key { code: shift, pressed: false });
+        assert_eq!(requests[4], Request::Key { code: evdev::KeyCode::KEY_F1.0, pressed: true });
+    }
+
+    #[test]
+    fn a_character_with_no_key_is_skipped() {
+        assert_eq!(us_char_key('é'), None);
+        assert_eq!(us_char_key('Q'), Some((evdev::KeyCode::KEY_Q.0, true, false)));
     }
 
     #[test]

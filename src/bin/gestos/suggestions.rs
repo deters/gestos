@@ -10,6 +10,10 @@ fn action_identity(action: &ActionType) -> Option<String> {
     match action {
         ActionType::Keypress(keys) if keys.is_empty() => None,
         ActionType::Keypress(keys) => Some(format!("keypress:{keys}")),
+        ActionType::Keyboard(steps) if steps.is_empty() => None,
+        ActionType::Keyboard(steps) => {
+            Some(format!("keyboard:{}", gestos::key_steps::format_steps(steps)))
+        }
         ActionType::Click(_) => None,
         ActionType::Execute(command) if command.is_empty() => None,
         ActionType::Execute(command) => Some(format!("execute:{command}")),
@@ -81,6 +85,19 @@ fn match_rank(option: &EditorActionOption, query: &str) -> Option<u8> {
     }
 }
 
+/// The generic Run Command and Custom Keyboard Action can do what any other action does, so
+/// they're always offered, after what the search found.
+fn is_open_ended(option: &EditorActionOption) -> bool {
+    match &option.action_type {
+        ActionType::Execute(command) => command.is_empty(),
+        ActionType::Keyboard(steps) => steps.is_empty(),
+        _ => false,
+    }
+}
+
+// The rank of an open-ended action the search didn't find, which puts it last.
+const NOT_FOUND: u8 = u8::MAX;
+
 fn is_listed(option: &EditorActionOption) -> bool {
     match &option.action_type {
         ActionType::Abort => false,
@@ -105,7 +122,9 @@ pub fn find_suggestions(
             if query.is_empty() {
                 Some((0, option))
             } else {
-                match_rank(option, &query).map(|rank| (rank, option))
+                match_rank(option, &query)
+                    .or_else(|| is_open_ended(option).then_some(NOT_FOUND))
+                    .map(|rank| (rank, option))
             }
         })
         .collect();
@@ -125,9 +144,11 @@ pub fn find_suggestions(
         // Keyboard shortcuts stay together after the other actions, with the generic one first.
         let (is_shortcut, is_named_shortcut) = match &option.action_type {
             ActionType::Keypress(keys) => (true, !keys.is_empty()),
+            ActionType::Keyboard(steps) => (true, !steps.is_empty()),
             _ => (false, false),
         };
         (
+            *rank == NOT_FOUND,
             is_shortcut,
             shared_rank,
             matches!(option.action_type, ActionType::Gnome(_)),
@@ -253,14 +274,20 @@ mod tests {
     fn parameter_actions_stay_available_however_often_they_are_used() {
         let options = vec![
             option("Run Command (Execute)", ActionType::Execute(String::new())),
-            option("Keyboard Shortcut", ActionType::Keypress(String::new())),
+            option("Keyboard Action", ActionType::Keyboard(Vec::new())),
         ];
         let gestures = [
             gesture(ActionType::Execute("firefox".to_string())),
             gesture(ActionType::Keypress("Alt+Left".to_string())),
         ];
-        assert_eq!(find_suggestions(&options, &gestures, "run").len(), 1);
-        assert_eq!(find_suggestions(&options, &gestures, "keyboard").len(), 1);
+        assert_eq!(
+            names(&find_suggestions(&options, &gestures, "run")),
+            ["Run Command (Execute)", "Keyboard Action"]
+        );
+        assert_eq!(
+            names(&find_suggestions(&options, &gestures, "keyboard")),
+            ["Keyboard Action", "Run Command (Execute)"]
+        );
     }
 
     #[test]
@@ -329,18 +356,36 @@ mod tests {
 
 
     #[test]
+    fn run_command_and_keyboard_action_are_always_offered_last() {
+        let options = [
+            option("Copy", ActionType::Keypress("Control+C".to_string())),
+            option("Custom Keyboard Action", ActionType::Keyboard(Vec::new())),
+            option("Run Command (Execute)", ActionType::Execute(String::new())),
+            option("Close Window", ActionType::Kill),
+        ];
+        assert_eq!(
+            names(&find_suggestions(&options, &[], "close")),
+            ["Close Window", "Run Command (Execute)", "Custom Keyboard Action"]
+        );
+        assert_eq!(
+            names(&find_suggestions(&options, &[], "keyboard")),
+            ["Custom Keyboard Action", "Run Command (Execute)"]
+        );
+    }
+
+    #[test]
     fn keyboard_shortcuts_stay_together_after_the_other_actions() {
         let keys = |keys: &str| ActionType::Keypress(keys.to_string());
         let options = [
             option("Copy", keys("Control+C")),
-            option("Keyboard Shortcut", keys("")),
+            option("Keyboard Action", ActionType::Keyboard(Vec::new())),
             option("Zoom In", keys("Control+plus")),
             option("Close Window", ActionType::Kill),
             gnome("Volume up", "volume-up"),
         ];
         assert_eq!(
             names(&find_suggestions(&options, &[], "")),
-            ["Close Window", "Volume up", "Keyboard Shortcut", "Copy", "Zoom In"]
+            ["Close Window", "Volume up", "Keyboard Action", "Copy", "Zoom In"]
         );
 
         let close = [
