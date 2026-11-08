@@ -503,7 +503,13 @@ fn open_editor(
     let apps_list = gtk::ListBox::new();
     apps_list.add_css_class("boxed-list");
     apps_list.set_selection_mode(gtk::SelectionMode::None);
-    append_apps_rows(&apps_list, &dialog, Rc::clone(&gesture_apps), Rc::clone(&check_conflict));
+    append_apps_rows(
+        &apps_list,
+        &dialog,
+        Rc::clone(&gesture_apps),
+        Rc::clone(&check_conflict),
+        &state_rc.borrow().extension_status,
+    );
     scroll_content.append(&apps_list);
 
     // For actions that need the GNOME extension, which isn't always there.

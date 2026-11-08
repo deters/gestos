@@ -34,23 +34,27 @@ fn call_extension(conn: &zbus::blocking::Connection, shell: &str, method: &str) 
 
 /// The app of the focused window, from the GNOME extension, by its desktop file ID. `None` when no
 /// window is focused, or the extension can't say, such as when it isn't running.
-pub fn focused_app_in_gnome_extension() -> Option<String> {
-    let conn = zbus::blocking::Connection::session().ok()?;
-    focused_app_from(&conn, GNOME_SHELL_NAME)
+/// The app with focus, or None with none, as on the desktop. An error if the extension can't be
+/// asked, as when it's off, or out of date.
+pub fn focused_app_in_gnome_extension() -> zbus::Result<Option<String>> {
+    let conn = zbus::blocking::Connection::session()?;
+    ask_focused_app(&conn, GNOME_SHELL_NAME)
+}
+
+fn ask_focused_app(conn: &zbus::blocking::Connection, shell: &str) -> zbus::Result<Option<String>> {
+    let reply = conn.call_method(
+        Some(shell),
+        GESTOS_EXTENSION_PATH,
+        Some(GESTOS_EXTENSION_INTERFACE),
+        "FocusedApp",
+        &(),
+    )?;
+    let app: String = reply.body().deserialize()?;
+    Ok((!app.is_empty()).then_some(app))
 }
 
 fn focused_app_from(conn: &zbus::blocking::Connection, shell: &str) -> Option<String> {
-    let reply = conn
-        .call_method(
-            Some(shell),
-            GESTOS_EXTENSION_PATH,
-            Some(GESTOS_EXTENSION_INTERFACE),
-            "FocusedApp",
-            &(),
-        )
-        .ok()?;
-    let app: String = reply.body().deserialize().ok()?;
-    (!app.is_empty()).then_some(app)
+    ask_focused_app(conn, shell).ok().flatten()
 }
 
 // How long an app gets to come to the front before the steps after it are left out, and how often

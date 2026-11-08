@@ -5,6 +5,7 @@
 use gtk::prelude::*;
 use gtk::{gio, glib};
 use gtk4 as gtk;
+use crate::extension::ExtensionStatus;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -49,6 +50,22 @@ fn installed_apps() -> Vec<String> {
     apps.into_iter().map(|(_, id)| id).collect()
 }
 
+/// What keeps a gesture limited to some apps from running, if anything: the daemon only knows the
+/// app in use from GNOME's extension, so elsewhere such a gesture never runs.
+pub fn apps_note(status: &ExtensionStatus) -> Option<&'static str> {
+    match status {
+        ExtensionStatus::Running => None,
+        ExtensionStatus::Unavailable => {
+            Some("Only works on GNOME: here, a gesture limited to apps doesn't run")
+        }
+        // Named as GNOME's Extensions app lists it, so it can be found there.
+        ExtensionStatus::Outdated(_) => {
+            Some("Needs the \u{201c}Gestos\u{201d} GNOME extension to be updated")
+        }
+        _ => Some("Needs the \u{201c}Gestos\u{201d} GNOME extension, which tells the app in use"),
+    }
+}
+
 /// The rows for the apps a gesture works in, at the end of a list that can hold other rows too,
 /// such as the rest of its trigger.
 struct AppRows {
@@ -57,15 +74,20 @@ struct AppRows {
     apps: Rc<RefCell<Vec<String>>>,
     changed: Rc<dyn Fn()>,
     rows: RefCell<Vec<gtk::ListBoxRow>>,
+    /// Apps can only be added where they'd work, and ones added elsewhere can still be removed.
+    can_add: bool,
+    note: Option<&'static str>,
 }
 
 /// Adds the apps in `apps` to the end of `list`, under a title row with a button to add more.
-/// `changed` is called after the user adds or removes one.
+/// `changed` is called after the user adds or removes one. `status` is the GNOME extension's,
+/// which says which app is in use.
 pub fn append_apps_rows(
     list: &gtk::ListBox,
     parent: &gtk::Window,
     apps: Rc<RefCell<Vec<String>>>,
     changed: Rc<dyn Fn()>,
+    status: &ExtensionStatus,
 ) {
     let app_rows = Rc::new(AppRows {
         list: list.clone(),
@@ -73,6 +95,8 @@ pub fn append_apps_rows(
         apps,
         changed,
         rows: RefCell::new(Vec::new()),
+        can_add: *status != ExtensionStatus::Unavailable,
+        note: apps_note(status),
     });
     app_rows.fill();
 }
@@ -108,6 +132,7 @@ impl AppRows {
         add.update_property(&[gtk::accessible::Property::Label("Add App…")]);
         add.add_css_class("flat");
         add.set_valign(gtk::Align::Center);
+        add.set_sensitive(self.can_add);
         let adding = Rc::clone(self);
         add.connect_clicked(move |_| {
             let picked = Rc::clone(&adding);
@@ -120,6 +145,16 @@ impl AppRows {
         });
         title_row.append(&add);
         self.append(&title_row, false);
+
+        if let Some(note) = self.note {
+            let label = gtk::Label::new(Some(note));
+            label.add_css_class("dim-label");
+            label.add_css_class("settings-row");
+            label.set_halign(gtk::Align::Start);
+            label.set_xalign(0.0);
+            label.set_wrap(true);
+            self.append(&label, false);
+        }
 
         let apps = self.apps.borrow().clone();
         for (i, id) in apps.iter().enumerate() {
@@ -260,4 +295,20 @@ pub fn app_icons(apps: &[String]) -> gtk::Box {
         icons.append(&icon);
     }
     icons
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::extension::OldCopy;
+
+    #[test]
+    fn apps_need_no_note_only_with_the_extension_running() {
+        assert_eq!(apps_note(&ExtensionStatus::Running), None);
+        assert!(apps_note(&ExtensionStatus::Unavailable).unwrap().contains("Only works on GNOME"));
+        assert!(apps_note(&ExtensionStatus::Off).unwrap().contains("GNOME extension"));
+        assert!(apps_note(&ExtensionStatus::Outdated(OldCopy::Replaced))
+            .unwrap()
+            .contains("updated"));
+    }
 }

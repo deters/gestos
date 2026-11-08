@@ -397,10 +397,21 @@ fn prefer_app_gestures(candidates: Vec<Gesture>) -> Vec<Gesture> {
 #[cfg(target_os = "linux")]
 fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> Option<String> {
     let limited = config.gestures.iter().any(|g| !g.is_deleted && !g.apps.is_empty());
-    if !limited || !wayland_ctx.is_gnome {
+    if !limited {
         return None;
     }
-    gestos::wayland::focused_app_in_gnome_extension()
+    let asked = if wayland_ctx.is_gnome {
+        gestos::wayland::focused_app_in_gnome_extension().ok()
+    } else {
+        None
+    };
+    if asked.is_none() {
+        println!(
+            "Gestures limited to some apps can't run, as the app in use isn't known. That \
+             takes GNOME, with the \u{201c}Gestos\u{201d} extension turned on."
+        );
+    }
+    asked.flatten()
 }
 
 #[cfg(target_os = "linux")]
