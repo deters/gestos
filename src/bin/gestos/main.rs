@@ -2,6 +2,7 @@ mod state;
 mod suggestions;
 mod actions;
 mod daemon;
+mod debug_info;
 mod extension;
 mod system;
 mod ui;
@@ -39,6 +40,10 @@ fn main() {
     );
 
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--debug-info") {
+        print!("{}", debug_info::report());
+        return;
+    }
     if args.iter().any(|arg| arg == "--start") {
         std::process::exit(daemon::run_command(true));
     }

@@ -84,7 +84,7 @@ impl ExtensionStatus {
 
 /// The copies of the extension installed, in the order GNOME looks for them: the user's own data
 /// folder first, then the system's.
-fn installed_copies() -> Vec<PathBuf> {
+pub fn installed_copies() -> Vec<PathBuf> {
     std::iter::once(gtk::glib::user_data_dir())
         .chain(gtk::glib::system_data_dirs())
         .map(|dir| dir.join("gnome-shell/extensions").join(UUID))
@@ -97,7 +97,7 @@ fn installed_path() -> Option<PathBuf> {
     installed_copies().into_iter().next()
 }
 
-fn copy_is_current(copy: &Path) -> bool {
+pub fn copy_is_current(copy: &Path) -> bool {
     std::fs::read_to_string(copy.join("metadata.json"))
         .is_ok_and(|metadata| shell::metadata_is_current(&metadata))
 }

@@ -213,68 +213,6 @@ enum DaemonSignal {
     ActionExecuted(String, String, String),
 }
 
-#[cfg(target_os = "linux")]
-const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
-#[cfg(target_os = "linux")]
-const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
-#[cfg(target_os = "linux")]
-const GESTURE_NOTIFICATION_DURATION: Duration = Duration::from_secs(1);
-
-/// Shows which gesture ran, replacing the notification `replaces` if it's still up, and returns
-/// its id. Transient, so that it stays out of the desktop's list of notifications.
-#[cfg(target_os = "linux")]
-fn show_gesture_notification(
-    conn: &zbus::blocking::Connection,
-    service: &str,
-    replaces: u32,
-    gesture_name: &str,
-    action_desc: &str,
-    icon_name: &str,
-) -> zbus::Result<u32> {
-    let mut hints = std::collections::HashMap::new();
-    hints.insert("transient", zbus::zvariant::Value::from(true));
-    let reply = conn.call_method(
-        Some(service),
-        NOTIFICATIONS_PATH,
-        Some(NOTIFICATIONS_NAME),
-        "Notify",
-        &(
-            "Gestos",
-            replaces,
-            icon_name,
-            gesture_name,
-            action_desc,
-            Vec::<&str>::new(),
-            hints,
-            GESTURE_NOTIFICATION_DURATION.as_millis() as i32,
-        ),
-    )?;
-    reply.body().deserialize()
-}
-
-/// Closes the notification after its time is up, unless a newer one has replaced it. Desktops
-/// may ignore the time asked for, as GNOME can.
-#[cfg(target_os = "linux")]
-fn close_gesture_notification_later(
-    conn: zbus::blocking::Connection,
-    id: u32,
-    latest: std::sync::Arc<std::sync::atomic::AtomicU64>,
-    shown: u64,
-) {
-    std::thread::spawn(move || {
-        std::thread::sleep(GESTURE_NOTIFICATION_DURATION);
-        if latest.load(Ordering::SeqCst) == shown {
-            let _ = conn.call_method(
-                Some(NOTIFICATIONS_NAME),
-                NOTIFICATIONS_PATH,
-                Some(NOTIFICATIONS_NAME),
-                "CloseNotification",
-                &(id,),
-            );
-        }
-    });
-}
-
 /// Emits D-Bus signals on their own thread, because a stalled bus must never hold up pointer
 /// forwarding. If the queue fills up, the event loop drops signals instead of waiting.
 #[cfg(target_os = "linux")]
@@ -287,31 +225,7 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
         let path = "/io/github/deters/Gestos/Daemon";
         let iface = "io.github.deters.Gestos.Daemon";
         let dest = None::<zbus::names::BusName>;
-        let latest_notification = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let mut notification_id = 0;
         for signal in receiver {
-            if let DaemonSignal::ActionExecuted(name, desc, icon) = &signal {
-                let shown = latest_notification.fetch_add(1, Ordering::SeqCst) + 1;
-                match show_gesture_notification(
-                    &conn,
-                    NOTIFICATIONS_NAME,
-                    notification_id,
-                    name,
-                    desc,
-                    icon,
-                ) {
-                    Ok(id) => {
-                        notification_id = id;
-                        close_gesture_notification_later(
-                            conn.clone(),
-                            id,
-                            std::sync::Arc::clone(&latest_notification),
-                            shown,
-                        );
-                    }
-                    Err(e) => eprintln!("gestosd: Could not show a notification: {}", e),
-                }
-            }
             let _ = match signal {
                 DaemonSignal::GestureStarted(x, y) => {
                     conn.emit_signal(dest.clone(), path, iface, "GestureStarted", &(x, y))
@@ -469,7 +383,6 @@ fn dispatch_gesture(
         return;
     }
 
-    let reduce_notifications = config.reduce_notifications;
     let app = focused_app(config, wayland_ctx);
     let templates = gesture_templates(config, modifiers, app.as_deref());
     let candidates: Vec<Gesture> = gestos::protractor::match_gesture_candidates(points, &templates)
@@ -480,7 +393,7 @@ fn dispatch_gesture(
 
     match candidates.len() {
         0 => println!("Gesture failed: did not match any known template."),
-        1 => run_gesture(&candidates[0], reduce_notifications, input, signals, wayland_ctx),
+        1 => run_gesture(&candidates[0], input, signals, wayland_ctx),
         _ => {
             let signals = signals.clone();
             let wayland_ctx = wayland_ctx.clone();
@@ -495,13 +408,7 @@ fn dispatch_gesture(
                         println!("Waiting {} ms for focus to return.", delay.as_millis());
                         std::thread::sleep(delay);
                     }
-                    run_gesture(
-                        &gesture,
-                        reduce_notifications,
-                        &input,
-                        &signals,
-                        &wayland_ctx,
-                    );
+                    run_gesture(&gesture, &input, &signals, &wayland_ctx);
                 } else {
                     println!("No gesture was chosen.");
                 }
@@ -573,17 +480,10 @@ fn choose_gesture(mut candidates: Vec<Gesture>, is_gnome: bool) -> Option<(Gestu
     }
 }
 
-/// Says which gesture ran. The notification and the overlay's popup both come from this signal,
-/// so leaving it out quiets them both.
+/// Says which gesture ran, for whatever listens. Running a gesture isn't worth a notification:
+/// those are for errors.
 #[cfg(target_os = "linux")]
-fn announce_gesture(
-    gesture: &Gesture,
-    reduce_notifications: bool,
-    signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
-) {
-    if reduce_notifications {
-        return;
-    }
+fn announce_gesture(gesture: &Gesture, signals: &std::sync::mpsc::SyncSender<DaemonSignal>) {
     let action_desc = gesture.action_description();
     let icon_name = gesture
         .actions
@@ -600,14 +500,13 @@ fn announce_gesture(
 #[cfg(target_os = "linux")]
 fn run_gesture(
     gesture: &Gesture,
-    reduce_notifications: bool,
     input: &InputClient,
     signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
     wayland_ctx: &WaylandContext,
 ) {
     println!("Matched gesture: {}", gesture.name);
 
-    announce_gesture(gesture, reduce_notifications, signals);
+    announce_gesture(gesture, signals);
 
     spawn_gesture_actions(
         gesture.actions.clone(),
@@ -1017,6 +916,70 @@ fn migrate_legacy_files() {
     );
 }
 
+/// The right button, which draws gestures unless another is picked.
+const DEFAULT_BUTTON: i32 = 3;
+const MOUSE_SCHEMA: &str = "org.gnome.desktop.peripherals.mouse";
+
+/// Whether the desktop swaps the left and right buttons, if it says. Only the desktop swaps them:
+/// devices still report each button where it is.
+fn left_handed() -> Option<bool> {
+    let output = Command::new("gsettings")
+        .args(["get", MOUSE_SCHEMA, "left-handed"])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim() == "true")
+}
+
+/// The button a device reports for one picked as the user sees it, so that "right" is always
+/// the button that isn't the main one.
+fn physical_button(button: i32, left_handed: bool) -> i32 {
+    match (left_handed, button) {
+        (true, 1) => 3,
+        (true, 3) => 1,
+        _ => button,
+    }
+}
+
+/// Starts over when the buttons are swapped or put back, as the button to listen to and the
+/// mice that have it are only found at the start.
+fn restart_when_hand_changes(started_left_handed: bool) {
+    std::thread::spawn(move || {
+        let mut command = Command::new("gsettings");
+        command
+            .args(["monitor", MOUSE_SCHEMA, "left-handed"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        // It goes away with the daemon, instead of lingering until the next change.
+        unsafe {
+            std::os::unix::process::CommandExt::pre_exec(&mut command, || {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                Ok(())
+            });
+        }
+        let Ok(mut monitor) = command.spawn() else {
+            return;
+        };
+        let Some(changes) = monitor.stdout.take() else { return };
+        for _ in std::io::BufRead::lines(std::io::BufReader::new(changes)) {
+            if left_handed() == Some(started_left_handed) {
+                continue;
+            }
+            println!("gestosd: The mouse buttons were swapped. Restarting...");
+            kill_children();
+            let _ = monitor.kill();
+            // Started as it was started the first time, as the binary may have been replaced.
+            let mut args = std::env::args_os();
+            let program = args.next().unwrap_or_else(|| "gestosd".into());
+            let error = std::os::unix::process::CommandExt::exec(Command::new(program).args(args));
+            eprintln!("gestosd: Could not restart: {error}");
+            std::process::exit(1);
+        }
+    });
+}
+
 fn parse_number_arg(flag: &str, value: &str) -> i32 {
     value.parse().unwrap_or_else(|_| {
         eprintln!("Error: {} needs a number, got '{}'.", flag, value);
@@ -1027,7 +990,7 @@ fn parse_number_arg(flag: &str, value: &str) -> i32 {
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut devices = Vec::new();
-    let mut button = 3;
+    let mut button = None;
     let mut sensitivity = 30;
     let mut help = false;
     let mut custom_config = None;
@@ -1037,7 +1000,7 @@ fn main() {
             help = true;
         } else if arg == "-b" || arg == "--button" {
             if let Some(val) = args.next() {
-                button = parse_number_arg("--button", &val);
+                button = Some(parse_number_arg("--button", &val));
             }
         } else if arg == "-s" || arg == "--sensitivity" {
             if let Some(val) = args.next() {
@@ -1050,7 +1013,7 @@ fn main() {
         } else if arg.starts_with("--device=") {
             devices.push(arg.trim_start_matches("--device=").to_string());
         } else if arg.starts_with("--button=") {
-            button = parse_number_arg("--button", arg.trim_start_matches("--button="));
+            button = Some(parse_number_arg("--button", arg.trim_start_matches("--button=")));
         } else if arg.starts_with("--sensitivity=") {
             sensitivity =
                 parse_number_arg("--sensitivity", arg.trim_start_matches("--sensitivity="));
@@ -1071,12 +1034,27 @@ fn main() {
         println!("OPTIONS:");
         println!("  -d, --device <DEVICENAME>  : Device to grab (can specify multiple times)");
         println!("  -b, --button <BUTTON>      : Button used to draw the gesture");
-        println!("                              Default: '3' (Right Click)");
+        println!("                              Default: the one in the config file, or");
+        println!("                              '3' (Right Click)");
         println!("  -s, --sensitivity <VAL>    : Distance between recorded points, in tenths");
         println!("                              of a pixel. Default: '30' (3 pixels)");
         println!("  -h, --help                 : Help");
         return;
     }
+
+    let config_path = custom_config
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(gestos::config::get_default_config_path);
+    // The button given on the command line comes first, as the device numbers it. The one picked
+    // in the app, or the right one, follows the desktop's hand.
+    let left_handed = if button.is_some() { None } else { left_handed() };
+    let button = button.unwrap_or_else(|| {
+        let picked = Configuration::load_from_file(&config_path)
+            .and_then(|config| config.button)
+            .unwrap_or(DEFAULT_BUTTON);
+        physical_button(picked, left_handed == Some(true))
+    });
 
     if gestos::uinput::trigger_button_code(button).is_none() {
         eprintln!("Error: trigger {} is not a mouse button.", button);
@@ -1091,10 +1069,10 @@ fn main() {
 
     migrate_legacy_files();
 
-    let config_path = custom_config
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(gestos::config::get_default_config_path);
+    if let Some(left_handed) = left_handed {
+        restart_when_hand_changes(left_handed);
+    }
+
     let _ = CONFIG_PATH.set(config_path.clone());
 
     // Resolve target device list
@@ -1190,71 +1168,6 @@ mod tests {
         }
     }
 
-    struct FakeNotifications {
-        calls: std::sync::Arc<std::sync::Mutex<Vec<(u32, String, String, String, i32, bool)>>>,
-    }
-
-    #[interface(name = "org.freedesktop.Notifications")]
-    impl FakeNotifications {
-        #[allow(clippy::too_many_arguments)]
-        fn notify(
-            &self,
-            _app: String,
-            replaces: u32,
-            icon: String,
-            summary: String,
-            body: String,
-            _actions: Vec<String>,
-            hints: std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
-            timeout: i32,
-        ) -> u32 {
-            let transient = hints
-                .get("transient")
-                .and_then(|value| bool::try_from(value).ok())
-                .unwrap_or(false);
-            self.calls
-                .lock()
-                .unwrap()
-                .push((replaces, icon, summary, body, timeout, transient));
-            replaces + 7
-        }
-    }
-
-    #[test]
-    fn a_gesture_notification_says_what_ran_for_one_second() {
-        let Some(client) = session_bus() else { return };
-        let name = test_name("Notifications");
-        let calls = std::sync::Arc::default();
-        let service = FakeNotifications {
-            calls: std::sync::Arc::clone(&calls),
-        };
-        let _service = zbus::blocking::connection::Builder::session()
-            .and_then(|b| b.name(name.clone()))
-            .and_then(|b| b.serve_at(NOTIFICATIONS_PATH, service))
-            .and_then(|b| b.build())
-            .unwrap();
-
-        let first =
-            show_gesture_notification(&client, &name, 0, "Back", "Press keys: Alt+Left", "go-icon")
-                .unwrap();
-        assert_eq!(first, 7);
-        show_gesture_notification(&client, &name, first, "Close", "Close Window", "x").unwrap();
-
-        let calls = calls.lock().unwrap();
-        assert_eq!(
-            calls[0],
-            (
-                0,
-                "go-icon".to_string(),
-                "Back".to_string(),
-                "Press keys: Alt+Left".to_string(),
-                1000,
-                true
-            )
-        );
-        assert_eq!(calls[1].0, 7, "the newer notification replaces the older one");
-    }
-
     fn session_bus() -> Option<zbus::blocking::Connection> {
         let conn = zbus::blocking::Connection::session().ok();
         if conn.is_none() {
@@ -1333,14 +1246,20 @@ mod tests {
     }
 
     #[test]
-    fn reduced_notifications_leave_out_the_gesture_announcement() {
+    fn left_handed_mice_draw_with_the_other_side() {
+        assert_eq!(physical_button(3, false), 3);
+        assert_eq!(physical_button(3, true), 1);
+        assert_eq!(physical_button(1, true), 3);
+        assert_eq!(physical_button(2, true), 2);
+        assert_eq!(physical_button(8, true), 8);
+    }
+
+    #[test]
+    fn running_a_gesture_announces_it() {
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
         let gesture = sample_gesture("plain", "");
 
-        announce_gesture(&gesture, true, &sender);
-        assert!(receiver.try_recv().is_err());
-
-        announce_gesture(&gesture, false, &sender);
+        announce_gesture(&gesture, &sender);
         assert!(matches!(
             receiver.try_recv(),
             Ok(DaemonSignal::ActionExecuted(name, _, _)) if name == "plain"
@@ -1398,7 +1317,7 @@ mod tests {
         let mut config = Configuration {
             gestures: vec![sample_gesture("held", "ctrl")],
             user_config_path: PathBuf::new(),
-            reduce_notifications: false,
+            button: None,
         };
         let (signals, received) = std::sync::mpsc::sync_channel(16);
         let (mut wake_reader, _wake_writer) = UnixStream::pair().unwrap();
@@ -1463,7 +1382,7 @@ mod tests {
                 sample_gesture("ctrl-alt", "ctrl+alt"),
             ],
             user_config_path: PathBuf::new(),
-            reduce_notifications: false,
+            button: None,
         };
         let names = |modifiers: &str| -> Vec<String> {
             gesture_templates(&config, Modifiers::parse(modifiers), None)
@@ -1484,7 +1403,7 @@ mod tests {
         let config = Configuration {
             gestures: vec![sample_gesture("close", ""), close_tab],
             user_config_path: PathBuf::new(),
-            reduce_notifications: false,
+            button: None,
         };
         let names = |app: Option<&str>| -> Vec<String> {
             gesture_templates(&config, Modifiers::default(), app)

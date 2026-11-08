@@ -97,34 +97,6 @@ pub fn start_overlay_if_enabled() {
     }
 }
 
-pub fn set_overlay_enabled(enabled: bool) {
-    if let Some(path) = get_overlay_autostart_file_path() {
-        if enabled {
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let content = "[Desktop Entry]\n\
-                           Type=Application\n\
-                           Name=Gestos Overlay\n\
-                           Comment=Gesture visualization overlay\n\
-                           Exec=gestos --overlay\n\
-                           Icon=gestos\n\
-                           Terminal=false\n\
-                           X-GNOME-Autostart-enabled=true\n";
-            let _ = std::fs::write(&path, content);
-
-            // Start the overlay process immediately
-            let _ = Command::new("gestos").arg("--overlay").spawn();
-        } else {
-            if path.exists() {
-                let _ = std::fs::remove_file(&path);
-            }
-            // Kill any running overlay instance
-            stop_overlay();
-        }
-    }
-}
-
 pub fn get_osd_enabled_file_path() -> std::path::PathBuf {
     let base = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         std::path::PathBuf::from(xdg)
@@ -151,14 +123,6 @@ pub fn is_osd_enabled() -> bool {
         let content = std::fs::read_to_string(path).unwrap_or_default();
         content.trim() == "true"
     }
-}
-
-pub fn set_osd_enabled(enabled: bool) {
-    let path = get_osd_enabled_file_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(&path, if enabled { "true" } else { "false" });
 }
 
 #[cfg(test)]
