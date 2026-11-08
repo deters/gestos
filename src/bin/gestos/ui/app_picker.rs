@@ -1,5 +1,6 @@
-//! The apps a gesture works in, as a list in its trigger: one row for each app, with a button to
-//! remove it, and a row to add one from the installed apps. With no apps, it works in all of them.
+//! The apps a gesture works in, as a list in its trigger: a title row with a button to add one from
+//! the installed apps, and one row for each app, with a button to remove it. With no apps, it works
+//! in all of them.
 
 use gtk::prelude::*;
 use gtk::{gio, glib};
@@ -7,7 +8,10 @@ use gtk4 as gtk;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+// The size of app icons in the dialog that picks one, in the list of chosen ones, and in the list
+// of gestures.
 const ICON_SIZE: i32 = 32;
+const ROW_ICON_SIZE: i32 = 24;
 const LIST_ICON_SIZE: i32 = 16;
 
 /// An installed app, by the desktop file ID gestures use for it, like `org.mozilla.firefox`.
@@ -45,93 +49,109 @@ fn installed_apps() -> Vec<String> {
     apps.into_iter().map(|(_, id)| id).collect()
 }
 
-/// The list of apps, kept in `apps`. `changed` is called after the user adds or removes one.
-pub fn build_apps_list(
+/// The rows for the apps a gesture works in, at the end of a list that can hold other rows too,
+/// such as the rest of its trigger.
+struct AppRows {
+    list: gtk::ListBox,
+    parent: gtk::Window,
+    apps: Rc<RefCell<Vec<String>>>,
+    changed: Rc<dyn Fn()>,
+    rows: RefCell<Vec<gtk::ListBoxRow>>,
+}
+
+/// Adds the apps in `apps` to the end of `list`, under a title row with a button to add more.
+/// `changed` is called after the user adds or removes one.
+pub fn append_apps_rows(
+    list: &gtk::ListBox,
     parent: &gtk::Window,
     apps: Rc<RefCell<Vec<String>>>,
     changed: Rc<dyn Fn()>,
-) -> gtk::ListBox {
-    let list = gtk::ListBox::new();
-    list.add_css_class("boxed-list");
-    list.set_selection_mode(gtk::SelectionMode::None);
-    fill(&list, parent, &apps, &changed);
-    // The add row is the last one, and the only one that can be activated.
-    let parent = parent.clone();
-    list.connect_row_activated(move |list, _| {
-        let (list, picker_parent) = (list.clone(), parent.clone());
-        let (apps, changed) = (Rc::clone(&apps), Rc::clone(&changed));
-        let taken = apps.borrow().clone();
-        open_app_picker(&parent, &taken, move |id| {
-            apps.borrow_mut().push(id);
-            fill(&list, &picker_parent, &apps, &changed);
-            changed();
-        });
+) {
+    let app_rows = Rc::new(AppRows {
+        list: list.clone(),
+        parent: parent.clone(),
+        apps,
+        changed,
+        rows: RefCell::new(Vec::new()),
     });
-    list
+    app_rows.fill();
 }
 
-fn fill(
-    list: &gtk::ListBox,
-    parent: &gtk::Window,
-    apps: &Rc<RefCell<Vec<String>>>,
-    changed: &Rc<dyn Fn()>,
-) {
-    while let Some(row) = list.first_child() {
-        list.remove(&row);
+impl AppRows {
+    fn append(&self, child: &impl IsA<gtk::Widget>, activatable: bool) {
+        let row = gtk::ListBoxRow::new();
+        row.set_activatable(activatable);
+        row.set_child(Some(child));
+        self.list.append(&row);
+        self.rows.borrow_mut().push(row);
     }
 
-    let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    title_row.add_css_class("settings-row");
-    let title = gtk::Label::new(Some("Apps"));
-    title.set_halign(gtk::Align::Start);
-    title.set_hexpand(true);
-    title_row.append(&title);
-    if apps.borrow().is_empty() {
-        let all = gtk::Label::new(Some("All Apps"));
-        all.add_css_class("dim-label");
-        title_row.append(&all);
-    }
-    list.append(&title_row);
-    if let Some(row) = title_row.parent().and_downcast::<gtk::ListBoxRow>() {
-        row.set_activatable(false);
-    }
+    fn fill(self: &Rc<Self>) {
+        for row in self.rows.borrow_mut().drain(..) {
+            self.list.remove(&row);
+        }
 
-    for (i, id) in apps.borrow().iter().enumerate() {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        row.add_css_class("settings-row");
-        row.append(&app_icon(id, ICON_SIZE));
-        let name = gtk::Label::new(Some(&app_name(id)));
-        name.set_halign(gtk::Align::Start);
-        name.set_hexpand(true);
-        row.append(&name);
-        let remove = gtk::Button::from_icon_name("user-trash-symbolic");
-        remove.set_tooltip_text(Some("Remove"));
-        remove.add_css_class("flat");
-        remove.set_valign(gtk::Align::Center);
-        let (list_remove, parent_remove) = (list.clone(), parent.clone());
-        let (apps_remove, changed_remove) = (Rc::clone(apps), Rc::clone(changed));
-        remove.connect_clicked(move |_| {
-            apps_remove.borrow_mut().remove(i);
-            fill(&list_remove, &parent_remove, &apps_remove, &changed_remove);
-            changed_remove();
+        let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        title_row.add_css_class("settings-row");
+        let title = gtk::Label::new(Some("Valid Apps"));
+        title.set_halign(gtk::Align::Start);
+        title.set_hexpand(true);
+        title_row.append(&title);
+        if self.apps.borrow().is_empty() {
+            let all = gtk::Label::new(Some("Valid in All Apps"));
+            all.add_css_class("dim-label");
+            title_row.append(&all);
+        }
+        // At the top of the list, as GNOME's lists can add items. It opens a dialog.
+        let add = gtk::Button::from_icon_name("list-add-symbolic");
+        add.set_tooltip_text(Some("Add App…"));
+        add.update_property(&[gtk::accessible::Property::Label("Add App…")]);
+        add.add_css_class("flat");
+        add.set_valign(gtk::Align::Center);
+        let adding = Rc::clone(self);
+        add.connect_clicked(move |_| {
+            let picked = Rc::clone(&adding);
+            let taken = adding.apps.borrow().clone();
+            open_app_picker(&adding.parent, &taken, move |id| {
+                picked.apps.borrow_mut().push(id);
+                picked.fill();
+                (picked.changed)();
+            });
         });
-        row.append(&remove);
-        list.append(&row);
-        if let Some(row) = row.parent().and_downcast::<gtk::ListBoxRow>() {
-            row.set_activatable(false);
+        title_row.append(&add);
+        self.append(&title_row, false);
+
+        let apps = self.apps.borrow().clone();
+        for (i, id) in apps.iter().enumerate() {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+            row.add_css_class("settings-row");
+            row.append(&app_icon(id, ROW_ICON_SIZE));
+            let name = gtk::Label::new(Some(&app_name(id)));
+            name.set_halign(gtk::Align::Start);
+            name.set_hexpand(true);
+            row.append(&name);
+            let remove = gtk::Button::from_icon_name("user-trash-symbolic");
+            remove.set_tooltip_text(Some("Remove"));
+            remove.add_css_class("flat");
+            remove.set_valign(gtk::Align::Center);
+            let removed = Rc::clone(self);
+            remove.connect_clicked(move |_| {
+                removed.apps.borrow_mut().remove(i);
+                removed.fill();
+                (removed.changed)();
+            });
+            row.append(&remove);
+            self.append(&row, false);
         }
     }
-
-    // A button row, as GNOME's lists add items. It opens a dialog, so its label ends in "…".
-    let add_label = gtk::Label::with_mnemonic("_Add App…");
-    add_label.add_css_class("settings-row");
-    let add_row = gtk::ListBoxRow::new();
-    add_row.set_child(Some(&add_label));
-    list.append(&add_row);
 }
 
 /// A dialog to pick one of the installed apps, with a search. Picking one closes it.
-fn open_app_picker(parent: &gtk::Window, taken: &[String], picked: impl Fn(String) + 'static) {
+pub fn open_app_picker(
+    parent: &gtk::Window,
+    taken: &[String],
+    picked: impl Fn(String) + 'static,
+) {
     let dialog = gtk::Window::new();
     dialog.set_transient_for(Some(parent));
     dialog.set_modal(true);

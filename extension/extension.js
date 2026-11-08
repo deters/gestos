@@ -24,6 +24,10 @@ const INTERFACE_XML = `
     <method name="FocusedApp">
       <arg type="s" direction="out" name="app"/>
     </method>
+    <method name="OpenApp">
+      <arg type="s" direction="in" name="app"/>
+      <arg type="b" direction="out" name="found"/>
+    </method>
     <method name="ChooseGesture">
       <arg type="a(ssad)" direction="in" name="gestures"/>
       <arg type="i" direction="out" name="choice"/>
@@ -1152,6 +1156,21 @@ class WindowActions {
     FocusedApp() {
         const window = global.display.focus_window;
         return window ? appIdOf(window)?.replace(/\.desktop$/, '') ?? '' : '';
+    }
+
+    /**
+     * Opens an app, or brings its window to the front if it's open, as clicking it in the dash
+     * does. The Shell lets nothing else bring a window to the front.
+     *
+     * @param {string} app - the app's desktop file ID without the extension
+     * @returns {boolean} whether the app is installed
+     */
+    OpenApp(app) {
+        const found = Shell.AppSystem.get_default().lookup_app(`${app}.desktop`);
+        // Outside of an input event the Shell's current time is 0, which counts as older than
+        // anything the user did, so a window that's open wouldn't be given focus.
+        found?.activate_full(-1, global.display.get_current_time_roundtrip());
+        return found !== null;
     }
 
     /**

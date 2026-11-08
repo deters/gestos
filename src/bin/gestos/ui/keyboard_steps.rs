@@ -1,5 +1,5 @@
-//! The steps of a Custom Keyboard Action: shortcuts to press, text to type and pauses, in a list
-//! that steps are added to, moved in and removed from. They're kept as text in the editor's
+//! The steps of a Custom Action: apps to open, shortcuts to press, text to type and pauses, in a
+//! list that steps are added to, moved in and removed from. They're kept as text in the editor's
 //! details entry, which is what the gesture saves.
 
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
@@ -15,6 +15,8 @@ const WAIT_STEP_MILLIS: f64 = 50.0;
 const NEW_WAIT_MILLIS: u32 = 200;
 // How tall the box for text to type is before it holds more than about three lines.
 const TYPE_BOX_HEIGHT: i32 = 72;
+// The size of the icon of an app to open.
+const OPEN_ICON_SIZE: i32 = 24;
 
 struct StepsEditor {
     parent: gtk::Window,
@@ -42,12 +44,31 @@ pub fn build_steps_editor(parent: &gtk::Window, details: &gtk::Entry) -> (gtk::B
         focus_new_text: Cell::new(false),
     });
 
-    let add_buttons = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    // Four buttons don't always fit on one line, so they wrap.
+    let add_buttons = gtk::FlowBox::new();
+    add_buttons.set_selection_mode(gtk::SelectionMode::None);
+    add_buttons.set_column_spacing(6);
+    add_buttons.set_row_spacing(6);
+    add_buttons.set_max_children_per_line(4);
     add_buttons.set_halign(gtk::Align::Start);
+
+    // An app comes up first, so that the steps after it go to it.
+    let open = gtk::Button::with_mnemonic("Open an _App");
+    let opening = Rc::clone(&editor);
+    open.connect_clicked(move |_| {
+        let picked = Rc::clone(&opening);
+        crate::ui::app_picker::open_app_picker(&opening.parent, &[], move |app| {
+            picked.steps.borrow_mut().push(KeyStep::Open(app));
+            picked.changed();
+            picked.rebuild();
+        });
+    });
+    add_buttons.insert(&open, -1);
+
     for (label, step) in [
         ("Press a _Shortcut", KeyStep::Press(String::new())),
         ("_Type a Text", KeyStep::Type(String::new())),
-        ("Add _Pause", KeyStep::Wait(NEW_WAIT_MILLIS)),
+        ("Add a _Pause", KeyStep::Wait(NEW_WAIT_MILLIS)),
     ] {
         let button = gtk::Button::with_mnemonic(label);
         let editor = Rc::clone(&editor);
@@ -62,7 +83,7 @@ pub fn build_steps_editor(parent: &gtk::Window, details: &gtk::Entry) -> (gtk::B
                 editor.record(editor.steps.borrow().len() - 1);
             }
         });
-        add_buttons.append(&button);
+        add_buttons.insert(&button, -1);
     }
     container.append(&add_buttons);
 
@@ -102,6 +123,7 @@ impl StepsEditor {
             KeyStep::Press(_) => "Press",
             KeyStep::Type(_) => "Type",
             KeyStep::Wait(_) => "Wait",
+            KeyStep::Open(_) => "Open",
         }));
         kind.add_css_class("dim-label");
         kind.set_width_chars(6);
@@ -112,6 +134,12 @@ impl StepsEditor {
         content.set_hexpand(true);
         content.set_valign(gtk::Align::Center);
         match step {
+            KeyStep::Open(app) => {
+                content.append(&crate::ui::app_picker::app_icon(app, OPEN_ICON_SIZE));
+                let name = gtk::Label::new(Some(&crate::ui::app_picker::app_name(app)));
+                name.set_xalign(0.0);
+                content.append(&name);
+            }
             KeyStep::Press(keys) => {
                 content.append(&keycaps(keys));
                 let record = gtk::Button::from_icon_name("media-record-symbolic");

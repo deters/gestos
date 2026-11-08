@@ -19,7 +19,7 @@ pub fn action_matches(a: &ActionType, opt: &EditorActionOption) -> bool {
         }
         (ActionType::Keypress(k1), ActionType::Keypress(k2)) => opt.category == 0 && k1 == k2,
         // The generic Keyboard Action has no steps of its own, so it matches any, and a single
-        // shortcut that isn't a standard one is a keyboard action with one step.
+        // shortcut that isn't a standard one is a custom action with one step.
         (ActionType::Keyboard(_) | ActionType::Keypress(_), ActionType::Keyboard(steps)) => {
             opt.category == 0 && steps.is_empty()
         }
@@ -150,8 +150,8 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
         EditorActionOption {
             category: 0,
             action_type: ActionType::Keyboard(Vec::new()),
-            name: "Custom Keyboard Action".to_string(),
-            tooltip: "Press shortcuts, type text and wait, in any order".to_string(),
+            name: "Custom Action".to_string(),
+            tooltip: "Open apps, press shortcuts, type text and wait, in any order".to_string(),
         },
         // Window Management (1)
         EditorActionOption {
@@ -360,8 +360,8 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
         EditorActionOption {
             category: 7,
             action_type: ActionType::Execute(String::new()),
-            name: "Run Command (Execute)".to_string(),
-            tooltip: "Run custom shell command".to_string(),
+            name: "Run Command in Shell".to_string(),
+            tooltip: "Run any command a shell accepts".to_string(),
         },
         EditorActionOption {
             category: 7,
@@ -604,7 +604,7 @@ mod tests {
             options.iter().find(|opt| action_matches(&action, opt)).unwrap().name.clone()
         };
         assert_eq!(find("Control+C"), "Copy (Ctrl+C)");
-        assert_eq!(find("Control+Alt+T"), "Custom Keyboard Action");
+        assert_eq!(find("Control+Alt+T"), "Custom Action");
     }
 
     #[test]
@@ -612,7 +612,7 @@ mod tests {
         let options = get_static_action_options();
         let action = ActionType::Keyboard(vec![gestos::key_steps::KeyStep::Wait(10)]);
         let option = options.iter().find(|opt| action_matches(&action, opt)).unwrap();
-        assert_eq!(option.name, "Custom Keyboard Action");
+        assert_eq!(option.name, "Custom Action");
     }
 
     #[test]

@@ -1,6 +1,7 @@
-//! A keyboard action's steps: shortcuts to press, text to type, and pauses, in the order given.
-//! They're written on one line, like `press Control+L; type "gestos"; wait 200; press Return`,
-//! as gestures keep their actions as text.
+//! A custom action's steps: apps to open, shortcuts to press, text to type, and pauses, in the
+//! order given. They're written on one line, like
+//! `open org.mozilla.firefox; press Control+L; type "gestos"; press Return`, as gestures keep
+//! their actions as text.
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum KeyStep {
@@ -10,6 +11,9 @@ pub enum KeyStep {
     Type(String),
     /// A pause, in milliseconds, for an app to catch up.
     Wait(u32),
+    /// An app, by its desktop file ID, opened or brought to the front, which the steps after it
+    /// then go to.
+    Open(String),
 }
 
 /// The most a single pause can be, so that a typo can't leave a gesture running for hours.
@@ -50,6 +54,7 @@ fn parse_step(step: &str) -> Option<KeyStep> {
     let rest = rest.trim();
     match kind.to_lowercase().as_str() {
         "press" if !rest.is_empty() => Some(KeyStep::Press(rest.to_string())),
+        "open" if !rest.is_empty() => Some(KeyStep::Open(rest.to_string())),
         "type" => unquote(rest).map(KeyStep::Type),
         "wait" => {
             let millis = rest.parse::<u32>().ok()?;
@@ -99,12 +104,13 @@ pub fn format_steps(steps: &[KeyStep]) -> String {
             KeyStep::Press(keys) => format!("press {keys}"),
             KeyStep::Type(text) => format!("type {}", quote(text)),
             KeyStep::Wait(millis) => format!("wait {millis}"),
+            KeyStep::Open(app) => format!("open {app}"),
         })
         .collect::<Vec<_>>()
         .join("; ")
 }
 
-/// The steps as people read them: `Control+L, type “gestos”, wait 200 ms, Return`.
+/// The steps as people read them: `open Firefox, Control+L, type “gestos”, wait 200 ms`.
 pub fn describe_steps(steps: &[KeyStep]) -> String {
     steps
         .iter()
@@ -112,9 +118,17 @@ pub fn describe_steps(steps: &[KeyStep]) -> String {
             KeyStep::Press(keys) => keys.clone(),
             KeyStep::Type(text) => format!("type “{text}”"),
             KeyStep::Wait(millis) => format!("wait {millis} ms"),
+            KeyStep::Open(app) => format!("open {}", app_name(app)),
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// An app's name, or its ID if it isn't installed.
+pub fn app_name(id: &str) -> String {
+    use gio::prelude::AppInfoExt;
+    gio::DesktopAppInfo::new(&format!("{id}.desktop"))
+        .map_or_else(|| id.to_string(), |info| info.display_name().to_string())
 }
 
 #[cfg(test)]
@@ -147,6 +161,24 @@ mod tests {
             [KeyStep::Press("Alt+Tab".to_string()), KeyStep::Wait(5)]
         );
         assert_eq!(parse_steps(""), []);
+    }
+
+    #[test]
+    fn an_app_to_open_survives_saving() {
+        let steps = vec![
+            KeyStep::Open("org.mozilla.firefox".to_string()),
+            KeyStep::Press("Control+T".to_string()),
+        ];
+        let text = format_steps(&steps);
+        assert_eq!(text, "open org.mozilla.firefox; press Control+T");
+        assert_eq!(parse_steps(&text), steps);
+        assert_eq!(parse_steps("open "), []);
+    }
+
+    #[test]
+    fn an_app_that_isnt_installed_is_described_by_its_id() {
+        let steps = [KeyStep::Open("no.such.App".to_string())];
+        assert_eq!(describe_steps(&steps), "open no.such.App");
     }
 
     #[test]

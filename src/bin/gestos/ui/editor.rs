@@ -11,16 +11,39 @@ use crate::state::{AppState, EditorActionOption};
 use crate::actions::{action_matches, action_needs_parameter};
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
 use crate::ui::keyboard_steps::build_steps_editor;
-use crate::ui::app_picker::build_apps_list;
+use crate::ui::app_picker::append_apps_rows;
 use gestos::key_steps::{format_steps, parse_steps, KeyStep};
 use crate::ui::components::{draw_gesture_path, show_confirm_dialog};
 use crate::daemon::reload_daemon;
 use crate::ui::main_window::refresh_gesture_list;
 use gestos::protractor::Point2D;
 
-// The smallest the gesture editor gets, with room for the drawing and a few rows below it.
-const EDITOR_MIN_WIDTH: i32 = 520;
+// The width of the editor's content, as the main window's lists have, and the margins around it.
+const EDITOR_CONTENT_WIDTH: i32 = 500;
+const EDITOR_SIDE_MARGIN: i32 = 24;
+// The smallest the gesture editor gets: its content and margins wide, with room for the drawing
+// and a few rows below it.
+const EDITOR_MIN_WIDTH: i32 = EDITOR_CONTENT_WIDTH + 2 * EDITOR_SIDE_MARGIN;
 const EDITOR_MIN_HEIGHT: i32 = 480;
+
+/// Whether a custom action's name is one made from the action, rather than one the user gave it.
+/// Names from before the action was renamed count too.
+fn is_automatic_name(name: &str, action_name: &str) -> bool {
+    let name = name.trim();
+    name.is_empty() || name.starts_with(action_name) || name.starts_with("Custom Keyboard Action")
+}
+
+/// A gesture name from what was searched for, with its first letter capitalized, unless the search
+/// was for the action itself.
+pub fn name_from_search(query: &str, action_name: &str) -> Option<String> {
+    let query = query.trim();
+    if query.is_empty() || crate::suggestions::search_matches(action_name, query) {
+        return None;
+    }
+    let mut letters = query.chars();
+    let first = letters.next()?;
+    Some(first.to_uppercase().chain(letters).collect())
+}
 
 pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> String {
     match &opt.action_type {
@@ -152,9 +175,9 @@ fn show_action_parameter(
     entry: &gtk::Entry,
     shortcut_display: &gtk::Box,
     record_button: &gtk::Button,
-    steps_editor: &gtk::Box,
+    steps_editor: &gtk::Widget,
 ) {
-    // A keyboard action has its list of steps instead of the one value other actions take.
+    // A custom action has its list of steps instead of the one value other actions take.
     let has_steps = matches!(&opt.action_type, ActionType::Keyboard(_));
     // The list's own rows, because hiding only their content leaves an empty strip.
     if let Some(list_row) = row.parent() {
@@ -205,14 +228,12 @@ fn open_editor(
     dialog.set_destroy_with_parent(true);
     let title_text = if target_gesture.is_some() { "Edit Gesture" } else { "Add Gesture" };
     dialog.set_title(Some(title_text));
-    // A little smaller than the main window, so that it reads as being on top of it, without
-    // growing along with a maximized window, nor shrinking below what the trigger and its
-    // details need, however small the main window is.
+    // A little narrower than the main window, so that it reads as being on top of it, and as tall
+    // as what's in it, up to a fifth taller than that. It doesn't grow along with a maximized
+    // window, nor shrink below what the trigger and its details need.
     dialog.set_size_request(EDITOR_MIN_WIDTH, EDITOR_MIN_HEIGHT);
-    dialog.set_default_size(
-        (state.window.width() - 60).clamp(EDITOR_MIN_WIDTH, 640),
-        (state.window.height() - 60).clamp(EDITOR_MIN_HEIGHT, 560),
-    );
+    dialog.set_default_size((state.window.width() - 60).clamp(EDITOR_MIN_WIDTH, 640), -1);
+    let max_height = ((state.window.height() - 60) * 6 / 5).clamp(EDITOR_MIN_HEIGHT, 672);
 
     let esc_controller = gtk::EventControllerKey::new();
     let dialog_esc = dialog.clone();
@@ -234,10 +255,9 @@ fn open_editor(
     dialog_header.set_title_widget(Some(&dialog_title));
     dialog.set_titlebar(Some(&dialog_header));
 
+    // The scrolling area reaches the window's sides, so its scrollbar stays clear of the content.
     let main_box = gtk::Box::new(gtk::Orientation::Vertical, 18);
     main_box.add_css_class("dialog-content");
-    main_box.set_margin_start(18);
-    main_box.set_margin_end(18);
     main_box.set_margin_top(18);
     main_box.set_margin_bottom(18);
     dialog.set_child(Some(&main_box));
@@ -248,6 +268,9 @@ fn open_editor(
     scrolled.set_vscrollbar_policy(gtk::PolicyType::Automatic);
     scrolled.set_vexpand(true);
     scrolled.set_hexpand(true);
+    // The window takes the height of what's in it, and only scrolls past the most it opens at.
+    scrolled.set_propagate_natural_height(true);
+    scrolled.set_max_content_height(max_height);
     main_box.append(&scrolled);
 
     let scroll_content = gtk::Box::new(gtk::Orientation::Vertical, 12);
@@ -276,9 +299,6 @@ fn open_editor(
     path_section_label.set_halign(gtk::Align::Start);
     path_section_label.add_css_class("section-header");
     scroll_content.append(&path_section_label);
-
-    let canvas_frame = gtk::Frame::new(None);
-    canvas_frame.add_css_class("gesture-preview-frame");
 
     // As wide as the rows below, and as tall as half of that.
     let canvas = crate::ui::gesture_canvas::GestureCanvas::new();
@@ -315,6 +335,8 @@ fn open_editor(
     conflict_label.set_halign(gtk::Align::Start);
     conflict_label.add_css_class("warning-label");
     conflict_label.set_wrap(true);
+    // Wrapped to the box's width, rather than asking for room for all of it on one line.
+    conflict_label.set_max_width_chars(1);
     conflict_box.append(&conflict_label);
 
     let modifier_toggles = ModifierToggles::new(
@@ -324,13 +346,21 @@ fn open_editor(
             .unwrap_or_default(),
     );
 
+    // Shown over the drawing area while there's no gesture in it.
+    let draw_hint = gtk::Label::new(Some("Draw the gesture here"));
+    draw_hint.add_css_class("dim-label");
+    draw_hint.set_can_target(false);
+    draw_hint.set_visible(recorded_points.borrow().len() < 2);
+
     let canvas_clone = canvas.clone();
     let pts_drag = Rc::clone(&recorded_points);
     let rec_drag = Rc::clone(&is_recording);
     let conflict_box_begin = conflict_box.clone();
     let toggles_begin = modifier_toggles.clone();
+    let hint_begin = draw_hint.clone();
     drag.connect_drag_begin(move |gesture, start_x, start_y| {
         *rec_drag.borrow_mut() = true;
+        hint_begin.set_visible(false);
         // Nothing held keeps what the toggles say, so they can be set before drawing.
         let held = held_modifiers(gesture.current_event_state());
         if !held.is_empty() {
@@ -432,8 +462,11 @@ fn open_editor(
     let canvas_clone3 = canvas.clone();
     let rec_drag3 = Rc::clone(&is_recording);
     let check_drag_end = Rc::clone(&check_conflict);
+    let pts_hint = Rc::clone(&recorded_points);
+    let hint_end = draw_hint.clone();
     drag.connect_drag_end(move |_, _, _| {
         *rec_drag3.borrow_mut() = false;
+        hint_end.set_visible(pts_hint.borrow().len() < 2);
         canvas_clone3.queue_draw();
         println!("GUI: Gesture drawing finished.");
         check_drag_end();
@@ -449,13 +482,31 @@ fn open_editor(
         button.set_tooltip_text(Some("Hold this key while drawing the gesture to use it"));
         modifiers_row.append(button);
     }
-    let modifiers_list = gtk::ListBox::new();
-    modifiers_list.add_css_class("boxed-list");
-    modifiers_list.set_selection_mode(gtk::SelectionMode::None);
-    modifiers_list.append(&modifiers_row);
-    let apps_list = build_apps_list(&dialog, Rc::clone(&gesture_apps), Rc::clone(&check_conflict));
+    // The keys to hold and the shape to draw are one gesture, so they share a list: the keys on
+    // top, the shape right below them.
+    let gesture_list = gtk::ListBox::new();
+    gesture_list.add_css_class("boxed-list");
+    gesture_list.set_selection_mode(gtk::SelectionMode::None);
+    let modifiers_list_row = gtk::ListBoxRow::new();
+    modifiers_list_row.set_activatable(false);
+    modifiers_list_row.set_child(Some(&modifiers_row));
+    gesture_list.append(&modifiers_list_row);
+    canvas.add_controller(drag);
+    let canvas_row = gtk::ListBoxRow::new();
+    canvas_row.set_activatable(false);
+    let canvas_overlay = gtk::Overlay::new();
+    canvas_overlay.set_child(Some(&canvas));
+    canvas_overlay.add_overlay(&draw_hint);
+    canvas_row.set_child(Some(&canvas_overlay));
+    gesture_list.append(&canvas_row);
+    scroll_content.append(&gesture_list);
+    scroll_content.append(&conflict_box);
+
+    let apps_list = gtk::ListBox::new();
+    apps_list.add_css_class("boxed-list");
+    apps_list.set_selection_mode(gtk::SelectionMode::None);
+    append_apps_rows(&apps_list, &dialog, Rc::clone(&gesture_apps), Rc::clone(&check_conflict));
     scroll_content.append(&apps_list);
-    scroll_content.append(&modifiers_list);
 
     // For actions that need the GNOME extension, which isn't always there.
     let extension_label = gtk::Label::new(None);
@@ -465,11 +516,6 @@ fn open_editor(
     extension_label.set_wrap(true);
     extension_label.set_visible(false);
     scroll_content.append(&extension_label);
-
-    canvas.add_controller(drag);
-    canvas_frame.set_child(Some(&canvas));
-    scroll_content.append(&canvas_frame);
-    scroll_content.append(&conflict_box);
 
     // --- ACTION SETTINGS SECTION ---
     let settings_section_label = gtk::Label::new(Some("Action Details"));
@@ -481,6 +527,42 @@ fn open_editor(
     settings_list.add_css_class("boxed-list");
     settings_list.set_selection_mode(gtk::SelectionMode::None);
     scroll_content.append(&settings_list);
+
+    // A custom action can't say what it's for, so it can have a name of its own. Other actions
+    // are named after what they do.
+    let name_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    name_row.add_css_class("settings-row");
+    let name_label = gtk::Label::with_mnemonic("_Name");
+    name_label.set_mnemonic_widget(Some(&name_entry));
+    name_row.append(&name_label);
+    name_entry.set_hexpand(true);
+    name_row.append(&name_entry);
+    let name_list_row = gtk::ListBoxRow::new();
+    name_list_row.set_activatable(false);
+    name_list_row.set_child(Some(&name_row));
+    name_list_row.set_visible(false);
+    settings_list.append(&name_list_row);
+
+    // What the gesture does comes first, with its note about the extension, and then what
+    // triggers it.
+    scroll_content.reorder_child_after(&settings_section_label, None::<&gtk::Widget>);
+    scroll_content.reorder_child_after(&settings_list, Some(&settings_section_label));
+    scroll_content.reorder_child_after(&extension_label, Some(&settings_list));
+
+    // Each part is as wide as the main window's lists, centered, with the same margins. Text is
+    // wrapped to that width, and starts at its left.
+    extension_label.set_max_width_chars(1);
+    let mut part = scroll_content.first_child();
+    while let Some(widget) = part {
+        widget.set_width_request(EDITOR_CONTENT_WIDTH);
+        widget.set_halign(gtk::Align::Center);
+        widget.set_margin_start(EDITOR_SIDE_MARGIN);
+        widget.set_margin_end(EDITOR_SIDE_MARGIN);
+        if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+            label.set_xalign(0.0);
+        }
+        part = widget.next_sibling();
+    }
 
 
 
@@ -518,8 +600,16 @@ fn open_editor(
     action_details_row.append(&entry_container);
     settings_list.append(&action_details_row);
 
-    // Edits the details entry, which holds a keyboard action's steps as the gesture saves them.
-    let (steps_editor, load_steps) = build_steps_editor(&dialog, &action_details_entry);
+    // Edits the details entry, which holds a custom action's steps as the gesture saves them.
+    let (steps_box, load_steps) = build_steps_editor(&dialog, &action_details_entry);
+    // Its buttons and text would ask for room for all of them on one line, making Action Details
+    // wider than the parts around it. Held this way, it asks only for its smallest width, takes
+    // the width the others have, and wraps to it, with all of its height.
+    let steps_editor = gtk::ScrolledWindow::new();
+    steps_editor.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
+    steps_editor.set_propagate_natural_height(true);
+    steps_editor.set_child(Some(&steps_box));
+    let steps_editor: gtk::Widget = steps_editor.upcast();
     settings_list.append(&steps_editor);
     if let Some(list_row) = steps_editor.parent() {
         list_row.set_visible(false);
@@ -605,10 +695,18 @@ fn open_editor(
     let details_loaded = Rc::new(Cell::new(false));
     let details_loaded_changed = Rc::clone(&details_loaded);
     let name_follows_details = Rc::clone(&is_name_customized);
+    let name_entry_details = name_entry.clone();
+    let action_details = Rc::clone(&selected_action);
     action_details_entry.connect_changed(move |_| {
-        // Loading a gesture isn't a change, but editing its keys or command changes its action.
+        // Loading a gesture isn't a change, but editing its keys or command changes its action,
+        // and a name made from them follows. A custom action's own name stays, as it has a field
+        // for it: only one still made from the action follows its steps.
         if details_loaded_changed.get() {
-            *name_follows_details.borrow_mut() = false;
+            let own_name = action_details.borrow().as_ref().is_some_and(|opt| {
+                matches!(opt.action_type, ActionType::Keyboard(_))
+                    && !is_automatic_name(&name_entry_details.text(), &opt.name)
+            });
+            *name_follows_details.borrow_mut() = own_name;
         }
         udn_clone4();
         usd_clone_change();
@@ -618,7 +716,7 @@ fn open_editor(
         Some(gesture) => {
             let option = option_for_gesture(gesture, &state_rc.borrow().action_options);
             match gesture.actions.first() {
-                // A shortcut that isn't a standard one opens as a keyboard action of one step.
+                // A shortcut that isn't a standard one opens as a custom action of one step.
                 Some(ActionType::Keypress(combo)) => {
                     let as_steps = option
                         .as_ref()
@@ -655,6 +753,7 @@ fn open_editor(
     }
     if let Some(opt) = initial_opt {
         *selected_action.borrow_mut() = Some(opt.clone());
+        name_list_row.set_visible(matches!(opt.action_type, ActionType::Keyboard(_)));
         show_action_parameter(
             &opt,
             &action_details_row,
@@ -667,6 +766,17 @@ fn open_editor(
         // A chosen action is all a new gesture's default name needs.
         if preset_action.is_some() {
             update_default_name();
+        }
+        // A new custom action is named after what was searched for, as that's what it's for:
+        // searching "new tab" and creating one names it "New tab". A search that found the action
+        // by its own name says nothing about what it's for.
+        let query = state_rc.borrow().search_entry.text();
+        if let Some(name) = preset_action
+            .as_ref()
+            .filter(|preset| matches!(preset.action_type, ActionType::Keyboard(_)))
+            .and_then(|preset| name_from_search(&query, &preset.name))
+        {
+            name_entry.set_text(&name);
         }
         dialog.set_title(Some(&opt.name));
         dialog_title.set_text(&opt.name);
@@ -712,10 +822,6 @@ fn open_editor(
     save_btn.connect_clicked(move |_| {
         let modifiers = toggles_save.get();
         let name = name_entry.text().to_string();
-        if name.trim().is_empty() {
-            println!("Gesture save failed: Name is empty.");
-            return;
-        }
 
         let pts = recorded_points.borrow();
         if pts.len() < 2 {
@@ -737,12 +843,19 @@ fn open_editor(
             return;
         };
         let detail = action_details_entry.text().to_string();
+        // A name left empty goes back to the one made from the action.
+        let name = if name.trim().is_empty() {
+            *is_name_customized_save.borrow_mut() = false;
+            get_default_gesture_name(&opt, &detail)
+        } else {
+            name
+        };
 
         let action = match &opt.action_type {
             // One shortcut is saved as one, as standard shortcuts and older gestures are.
             ActionType::Keyboard(_) => match parse_steps(&detail).as_slice() {
                 [] => {
-                    println!("Gesture save failed: The keyboard action has no steps.");
+                    println!("Gesture save failed: The custom action has no steps.");
                     return;
                 }
                 [KeyStep::Press(keys)] => ActionType::Keypress(keys.clone()),
@@ -843,9 +956,12 @@ fn open_editor(
     dialog_header.pack_end(&save_btn);
 
     if let Some(ref gest) = target_gesture {
-        let delete_btn = gtk::Button::with_mnemonic("_Delete Gesture");
+        // It asks first, so its label ends in "…". It comes last in the content, as GNOME's own
+        // apps place their destructive buttons, with room above it to set it apart.
+        let delete_btn = gtk::Button::with_mnemonic("_Delete Gesture…");
         delete_btn.add_css_class("destructive-action");
         delete_btn.set_halign(gtk::Align::Center);
+        delete_btn.set_margin_top(18);
 
         let state_clone = Rc::clone(state_rc);
         let target_id = gest.id.clone();
@@ -878,7 +994,7 @@ fn open_editor(
                 },
             );
         });
-        main_box.append(&delete_btn);
+        scroll_content.append(&delete_btn);
     }
 
     dialog.set_default_widget(Some(&save_btn));
@@ -887,6 +1003,25 @@ fn open_editor(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_custom_actions_own_name_is_kept() {
+        let action = "Custom Action";
+        assert!(is_automatic_name("Custom Action", action));
+        assert!(is_automatic_name("Custom Action (Control+T)", action));
+        assert!(is_automatic_name("Custom Keyboard Action (Alt+F4)", action));
+        assert!(is_automatic_name("  ", action));
+        assert!(!is_automatic_name("New tab", action));
+    }
+
+    #[test]
+    fn a_new_custom_action_is_named_after_the_search() {
+        let action = "Custom Action";
+        assert_eq!(name_from_search("  new tab ", action).as_deref(), Some("New tab"));
+        assert_eq!(name_from_search("custom", action), None);
+        assert_eq!(name_from_search("custom act", action), None);
+        assert_eq!(name_from_search("", action), None);
+    }
     use super::*;
 
     fn gesture(id: &str, name: &str) -> Gesture {

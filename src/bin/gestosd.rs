@@ -305,7 +305,10 @@ fn spawn_gesture_actions(
             if let ActionType::Click(btn) = action {
                 input.click(btn.unwrap_or(1));
             } else if let ActionType::Keyboard(steps) = action {
-                input.run_steps(steps);
+                let is_gnome = wayland_ctx.is_gnome;
+                input.run_steps(steps, &|app| {
+                    gestos::wayland::open_app_for_steps(app, is_gnome)
+                });
             } else {
                 wayland_ctx.execute_action(action, &|keys_str| input.keypress_string(keys_str));
             }

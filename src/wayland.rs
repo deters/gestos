@@ -53,6 +53,77 @@ fn focused_app_from(conn: &zbus::blocking::Connection, shell: &str) -> Option<St
     (!app.is_empty()).then_some(app)
 }
 
+// How long an app gets to come to the front before the steps after it are left out, and how often
+// that's checked.
+const OPEN_APP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const OPEN_APP_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+// Where nothing can say which app has focus, how long an app gets to open.
+const OPEN_APP_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Opens an app, or brings its window to the front if it's open, for a custom action's next
+/// steps, and says whether it's ready for them. On GNOME the extension opens it, as the Shell
+/// lets nothing else bring a window to the front, and it's ready once it has focus. If it doesn't
+/// get it, a notification says the rest didn't run. Elsewhere it's started, and given a moment.
+pub fn open_app_for_steps(app: &str, is_gnome: bool) -> bool {
+    if is_gnome {
+        if let Ok(conn) = zbus::blocking::Connection::session() {
+            if let Ok(found) = open_app_in(&conn, GNOME_SHELL_NAME, app) {
+                if !found {
+                    let name = crate::key_steps::app_name(app);
+                    let _ = notify(
+                        &conn,
+                        NOTIFICATIONS_NAME,
+                        &format!("{name} isn\u{2019}t installed"),
+                        "The rest of the gesture didn\u{2019}t run.",
+                    );
+                    return false;
+                }
+                return wait_for_focus(&conn, GNOME_SHELL_NAME, NOTIFICATIONS_NAME, app);
+            }
+        }
+    }
+    let launched = gio::DesktopAppInfo::new(&format!("{app}.desktop"))
+        .is_some_and(|info| info.launch(&[], None::<&gio::AppLaunchContext>).is_ok());
+    if launched {
+        std::thread::sleep(OPEN_APP_WAIT);
+    }
+    launched
+}
+
+fn open_app_in(conn: &zbus::blocking::Connection, shell: &str, app: &str) -> zbus::Result<bool> {
+    let reply = conn.call_method(
+        Some(shell),
+        GESTOS_EXTENSION_PATH,
+        Some(GESTOS_EXTENSION_INTERFACE),
+        "OpenApp",
+        &(app,),
+    )?;
+    reply.body().deserialize()
+}
+
+fn wait_for_focus(
+    conn: &zbus::blocking::Connection,
+    shell: &str,
+    notifications: &str,
+    app: &str,
+) -> bool {
+    let deadline = std::time::Instant::now() + OPEN_APP_TIMEOUT;
+    while std::time::Instant::now() < deadline {
+        if focused_app_from(conn, shell).as_deref() == Some(app) {
+            return true;
+        }
+        std::thread::sleep(OPEN_APP_POLL);
+    }
+    let name = crate::key_steps::app_name(app);
+    let _ = notify(
+        conn,
+        notifications,
+        &format!("{name} didn\u{2019}t come to the front"),
+        "The rest of the gesture didn\u{2019}t run.",
+    );
+    false
+}
+
 /// Asks the GNOME extension which of several gestures was meant, on a card the Shell draws at the
 /// pointer. `None` means the user cancelled. An error means the extension can't ask, such as when
 /// it isn't running, or is a version from before it could.
@@ -901,6 +972,14 @@ mod tests {
             self.0.focused_app.lock().unwrap().clone()
         }
 
+        fn open_app(&self, app: String) -> bool {
+            let known = app != "org.example.Missing";
+            if known {
+                *self.0.focused_app.lock().unwrap() = app;
+            }
+            known
+        }
+
         fn choose_gesture(&self, gestures: Vec<(String, String, Vec<f64>)>) -> i32 {
             *self.0.chooser_points.lock().unwrap() =
                 gestures.into_iter().map(|(_, _, points)| points).collect();
@@ -1009,6 +1088,21 @@ mod tests {
         assert_eq!(focused_app_from(&conn, &name), None);
         *shell.focused_app.lock().unwrap() = "org.mozilla.firefox".to_string();
         assert_eq!(focused_app_from(&conn, &name).as_deref(), Some("org.mozilla.firefox"));
+    }
+
+    #[test]
+    fn an_app_opened_by_the_extension_is_ready_once_it_has_focus() {
+        let Ok(conn) = zbus::blocking::Connection::session() else { return };
+        let shell = FakeShell::default();
+        let name = format!("io.github.deters.GestosTestOpen.P{}", std::process::id());
+        let _service = zbus::blocking::connection::Builder::session()
+            .and_then(|b| b.name(name.clone()))
+            .and_then(|b| b.serve_at(GESTOS_EXTENSION_PATH, FakeExtension(shell.clone())))
+            .and_then(|b| b.build())
+            .unwrap();
+        assert!(open_app_in(&conn, &name, "org.mozilla.firefox").unwrap());
+        assert!(wait_for_focus(&conn, &name, &name, "org.mozilla.firefox"));
+        assert!(!open_app_in(&conn, &name, "org.example.Missing").unwrap());
     }
 
     #[test]

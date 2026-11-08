@@ -208,7 +208,7 @@ impl ActionType {
             ActionType::Restore => "Restore Window".to_string(),
             ActionType::ToggleMaximized => "Toggle Maximize".to_string(),
             ActionType::Keypress(keys) => format!("Press keys: {}", keys),
-            ActionType::Keyboard(steps) => format!("Keyboard: {}", describe_steps(steps)),
+            ActionType::Keyboard(steps) => format!("Custom action: {}", describe_steps(steps)),
             ActionType::Execute(cmd) => format!("Run: {}", cmd),
             ActionType::WorkspaceLeft => "Workspace Left".to_string(),
             ActionType::WorkspaceRight => "Workspace Right".to_string(),

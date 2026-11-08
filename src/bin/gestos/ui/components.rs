@@ -246,26 +246,26 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
         ActionType::ToggleMaximized => "Toggle Maximized".to_string(),
         ActionType::Keypress(keys) => {
             if keys.is_empty() {
-                "Custom Keyboard Action".to_string()
+                "Custom Action".to_string()
             } else if let Some(name) = standard_shortcut_name(keys) {
                 name.to_string()
             } else {
-                format!("Custom Keyboard Action ({})", keys)
+                format!("Custom Action ({})", keys)
             }
         }
         ActionType::Keyboard(steps) => {
             if steps.is_empty() {
-                "Custom Keyboard Action".to_string()
+                "Custom Action".to_string()
             } else {
                 format!(
-                    "Custom Keyboard Action ({})",
+                    "Custom Action ({})",
                     gestos::key_steps::describe_steps(steps)
                 )
             }
         }
         ActionType::Execute(cmd) => {
             if cmd.is_empty() {
-                "Run Command (Execute)".to_string()
+                "Run Command in Shell".to_string()
             } else {
                 format!("Run Command: {}", cmd)
             }
@@ -334,7 +334,19 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     drag_handle.set_valign(gtk::Align::Center);
     main_hbox.append(&drag_handle);
 
-    let has_keypress = if !gesture.actions.is_empty() {
+    // A custom action named by the user shows that name. Others are named after their action, as
+    // "Custom Action", followed by its keys or steps, or as "Custom Keyboard Action" from before.
+    let is_keyboard_action = matches!(
+        gesture.actions.first(),
+        Some(ActionType::Keyboard(_)) | Some(ActionType::Keypress(_))
+    ) && !gesture.actions.first().is_some_and(|action| {
+        matches!(action, ActionType::Keypress(keys) if standard_shortcut_name(keys).is_some())
+    });
+    let named = is_keyboard_action
+        && !gesture.name.starts_with("Custom Action")
+        && !gesture.name.starts_with("Custom Keyboard Action");
+
+    let has_keypress = if !gesture.actions.is_empty() && !named {
         // A standard shortcut shows its name, like the other actions.
         if let ActionType::Keypress(ref keys) = gesture.actions[0] {
             standard_shortcut_name(keys).is_none().then_some(keys)
@@ -395,7 +407,9 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         }
         vbox.append(&row_hbox);
     } else {
-        let action_desc = if let Some(ActionType::Gnome(_) | ActionType::Kde(_, _)) =
+        let action_desc = if named {
+            gesture.name.clone()
+        } else if let Some(ActionType::Gnome(_) | ActionType::Kde(_, _)) =
             gesture.actions.first()
         {
             // The name picked when creating it, since the action itself is only an internal key.

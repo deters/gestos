@@ -85,7 +85,7 @@ fn match_rank(option: &EditorActionOption, query: &str) -> Option<u8> {
     }
 }
 
-/// The generic Run Command and Custom Keyboard Action can do what any other action does, so
+/// The generic Run Command in Shell and Custom Action can do what any other action does, so
 /// they're always offered, after what the search found.
 fn is_open_ended(option: &EditorActionOption) -> bool {
     match &option.action_type {
@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn parameter_actions_stay_available_however_often_they_are_used() {
         let options = vec![
-            option("Run Command (Execute)", ActionType::Execute(String::new())),
+            option("Run Command in Shell", ActionType::Execute(String::new())),
             option("Keyboard Action", ActionType::Keyboard(Vec::new())),
         ];
         let gestures = [
@@ -283,11 +283,11 @@ mod tests {
         ];
         assert_eq!(
             names(&find_suggestions(&options, &gestures, "run")),
-            ["Run Command (Execute)", "Keyboard Action"]
+            ["Run Command in Shell", "Keyboard Action"]
         );
         assert_eq!(
             names(&find_suggestions(&options, &gestures, "keyboard")),
-            ["Keyboard Action", "Run Command (Execute)"]
+            ["Keyboard Action", "Run Command in Shell"]
         );
     }
 
@@ -357,20 +357,20 @@ mod tests {
 
 
     #[test]
-    fn run_command_and_keyboard_action_are_always_offered_last() {
+    fn run_command_and_custom_action_are_always_offered_last() {
         let options = [
             option("Copy", ActionType::Keypress("Control+C".to_string())),
-            option("Custom Keyboard Action", ActionType::Keyboard(Vec::new())),
-            option("Run Command (Execute)", ActionType::Execute(String::new())),
+            option("Custom Action", ActionType::Keyboard(Vec::new())),
+            option("Run Command in Shell", ActionType::Execute(String::new())),
             option("Close Window", ActionType::Kill),
         ];
         assert_eq!(
             names(&find_suggestions(&options, &[], "close")),
-            ["Close Window", "Run Command (Execute)", "Custom Keyboard Action"]
+            ["Close Window", "Run Command in Shell", "Custom Action"]
         );
         assert_eq!(
-            names(&find_suggestions(&options, &[], "keyboard")),
-            ["Custom Keyboard Action", "Run Command (Execute)"]
+            names(&find_suggestions(&options, &[], "custom")),
+            ["Custom Action", "Run Command in Shell"]
         );
     }
 

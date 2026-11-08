@@ -145,14 +145,21 @@ impl InputClient {
         std::thread::sleep(TYPED_KEY_GAP);
     }
 
-    /// Runs a keyboard action's steps in order.
-    pub fn run_steps(&self, steps: &[KeyStep]) {
+    /// Runs a custom action's steps in order. `open_app` opens an app or brings it to the front,
+    /// which only the desktop can do, and says whether it then has focus. If it doesn't, the steps
+    /// after it would go to some other window, so they're left out.
+    pub fn run_steps(&self, steps: &[KeyStep], open_app: &dyn Fn(&str) -> bool) {
         for step in steps {
             match step {
                 KeyStep::Press(keys) => self.keypress_string(keys),
                 KeyStep::Type(text) => self.type_text(text),
                 KeyStep::Wait(millis) => {
                     std::thread::sleep(Duration::from_millis(u64::from(*millis)));
+                }
+                KeyStep::Open(app) => {
+                    if !open_app(app) {
+                        return;
+                    }
                 }
             }
         }
@@ -224,11 +231,14 @@ mod tests {
     fn steps_press_type_and_wait_in_order() {
         let (client, mut service) = client();
         let started = Instant::now();
-        client.run_steps(&[
-            KeyStep::Wait(30),
-            KeyStep::Type("A".to_string()),
-            KeyStep::Press("F1".to_string()),
-        ]);
+        client.run_steps(
+            &[
+                KeyStep::Wait(30),
+                KeyStep::Type("A".to_string()),
+                KeyStep::Press("F1".to_string()),
+            ],
+            &|_| true,
+        );
         assert!(started.elapsed() >= Duration::from_millis(30));
         let requests = received(&mut service, 6);
         let Request::Key { code: shift, pressed: true } = requests[0] else {
@@ -240,6 +250,25 @@ mod tests {
         assert_eq!(requests[2], Request::Key { code: a, pressed: false });
         assert_eq!(requests[3], Request::Key { code: shift, pressed: false });
         assert_eq!(requests[4], Request::Key { code: evdev::KeyCode::KEY_F1.0, pressed: true });
+    }
+
+    #[test]
+    fn steps_after_an_app_that_doesnt_come_up_are_left_out() {
+        let (client, mut service) = client();
+        let opened = std::cell::RefCell::new(Vec::new());
+        client.run_steps(
+            &[
+                KeyStep::Open("org.example.Missing".to_string()),
+                KeyStep::Press("F1".to_string()),
+            ],
+            &|app| {
+                opened.borrow_mut().push(app.to_string());
+                false
+            },
+        );
+        assert_eq!(*opened.borrow(), ["org.example.Missing"]);
+        client.send(&Request::QueryHeld);
+        assert_eq!(received(&mut service, 1), [Request::QueryHeld]);
     }
 
     #[test]

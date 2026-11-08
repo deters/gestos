@@ -135,6 +135,7 @@ fn update_extension(state_rc: &Rc<RefCell<AppState>>) {
 fn suggestion_row(
     option: &crate::state::EditorActionOption,
     status: &crate::extension::ExtensionStatus,
+    query: &str,
 ) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -150,7 +151,15 @@ fn suggestion_row(
     let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
     text.set_hexpand(true);
     text.set_valign(gtk::Align::Center);
-    let name = gtk::Label::new(Some(&option.name));
+    // A custom action created from a search is named after it, so it offers to create that.
+    let title = match &option.action_type {
+        gestos::config::ActionType::Keyboard(steps) if steps.is_empty() => {
+            crate::ui::editor::name_from_search(query, &option.name)
+                .map(|name| format!("Create New Action: \u{201c}{name}\u{201d}"))
+        }
+        _ => None,
+    };
+    let name = gtk::Label::new(Some(title.as_deref().unwrap_or(&option.name)));
     name.set_xalign(0.0);
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
     text.append(&name);
@@ -179,7 +188,7 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
     let query = state.search_entry.text().to_string();
     let found = find_suggestions(&state.action_options, &state.config.gestures, &query);
     for option in &found {
-        state.suggestion_list.append(&suggestion_row(option, &state.extension_status));
+        state.suggestion_list.append(&suggestion_row(option, &state.extension_status, &query));
     }
 
     state
