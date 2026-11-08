@@ -1,22 +1,15 @@
-# Gestos 6.3.0
+# Gestos 6.4.0
 
 ## Added
 
-- **Custom Keyboard Action** replaces Custom Keyboard Shortcut. It presses shortcuts, types text and pauses, in any order you set. Text can have several lines, and accented letters are typed with your keyboard layout's dead keys. A single shortcut works as before.
-- **Tile Automatically**, in Preferences, tiles every workspace, also new ones.
-- **Gestos tells you when its GNOME extension is out of date**, and how to update it: by logging out and back in, or by removing an old copy in your home folder.
+- **Gestures for some apps.** A gesture can be limited to the apps you pick, in its trigger. It then only works in them, and when a drawing matches both, the app's own gesture wins, so the same shape can do something else in some apps. This needs the GNOME extension.
+- **Custom Action can open an app** before its other steps, or bring its window to the front if it's open, and the steps after it go to that app.
+- **Custom actions have names.** A new one is named after what you searched for, offered as Create New Action in the results, and you can change it.
 
 ## Changed
 
-- **Tiling keeps windows at their own sizes.** Windows move just enough not to overlap, and only shrink when moving isn't enough. Moving or resizing a window makes the others make room for it, and windows minimized for lack of room come back once there's room again.
-- **Tiling stays on** until you turn it off, also after logging out and back in. Maximizing a window, making it fullscreen, or snapping it sets it aside until it's back to normal.
-- **On GNOME, the card that asks which gesture you meant** appears at the pointer, styled like GNOME's menus, and your window keeps its focus.
-- **Run Command and Custom Keyboard Action are always offered** when you search for an action, as they can do what the others can't.
-- **The shortcut recorder records any key**, Escape, Backspace, Tab and Enter included.
-
-## Fixed
-
-- **Gestos's own windows aren't tiled.**
-- **The daemon can be started through D-Bus.**
+- **Custom Keyboard Action is now Custom Action**, and **Run Command is now Run Command in Shell**.
+- **The gesture editor** shows what the action does first, then what triggers it: the modifier keys and the drawing together, and the apps it works in. Its parts are as wide as the main window's lists, it opens as tall as what's in it, and Delete Gesture… comes last.
+- **Starting and stopping gestures** from the app icon's menu no longer shows a notification. Only a failure to start does.
 
 Log out and back in after updating, so GNOME loads the new extension.
