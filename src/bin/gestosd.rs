@@ -116,24 +116,76 @@ impl DaemonDbus {
     async fn action_executed(&self, ctxt: &zbus::object_server::SignalContext<'_>, gesture_name: String, action_desc: String, icon_name: String) -> zbus::Result<()>;
 }
 
-fn find_mouse_device() -> Option<PathBuf> {
-    let input_dir = Path::new("/dev/input/by-path");
-    if !input_dir.exists() {
+/// Whether a bit is set in a capability bitmap as sysfs shows it: hex words of the kernel's
+/// `long`, the highest first.
+fn has_capability(bitmap: &str, bit: usize) -> bool {
+    let word_bits = usize::BITS as usize;
+    bitmap
+        .split_whitespace()
+        .rev()
+        .nth(bit / word_bits)
+        .and_then(|word| usize::from_str_radix(word, 16).ok())
+        .is_some_and(|word| word & (1 << (bit % word_bits)) != 0)
+}
+
+/// What kind of pointer an input device is, from its capabilities in sysfs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Pointer {
+    /// A mouse, trackball or trackpoint, which moves by relative steps.
+    Relative,
+    /// A touchpad or tablet, which reports where it's touched.
+    Absolute,
+}
+
+/// The kind of pointer a device in sysfs is, if it has the trigger button. Gestos's own virtual
+/// devices, which forward a grabbed mouse, are left out, or one would grab what it forwards.
+fn pointer_kind(device: &Path, trigger_code: u16) -> Option<Pointer> {
+    let resolved = fs::canonicalize(device).ok()?;
+    if resolved.to_string_lossy().contains("/devices/virtual/input/") {
         return None;
     }
-    let mut fallback = None;
-    if let Ok(entries) = fs::read_dir(input_dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.contains("event-mouse") {
-                return Some(input_dir.join(name));
-            }
-            if name.contains("-mouse") && fallback.is_none() {
-                fallback = Some(input_dir.join(name));
-            }
-        }
+    let capability = |name: &str| {
+        fs::read_to_string(device.join("device/capabilities").join(name)).unwrap_or_default()
+    };
+    if !has_capability(&capability("key"), trigger_code as usize) {
+        return None;
     }
-    fallback
+    // X and Y are the first two axes, of either kind.
+    let has_axes = |bitmap: String| has_capability(&bitmap, 0) && has_capability(&bitmap, 1);
+    if has_axes(capability("rel")) {
+        Some(Pointer::Relative)
+    } else if has_axes(capability("abs")) {
+        Some(Pointer::Absolute)
+    } else {
+        None
+    }
+}
+
+/// The devices to draw gestures with: every mouse with the trigger button, as a laptop's touchpad
+/// or a second mouse can come first. Touchpads are only used when there's no mouse, as forwarding
+/// one leaves out what makes it a touchpad, like multitouch.
+fn find_pointer_devices(sys_input: &Path, trigger_code: u16) -> Vec<String> {
+    let mut found: Vec<(u32, Pointer)> = fs::read_dir(sys_input)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let number = name.strip_prefix("event")?.parse().ok()?;
+            Some((number, pointer_kind(&entry.path(), trigger_code)?))
+        })
+        .collect();
+    found.sort_by_key(|(number, _)| *number);
+    let kind = if found.iter().any(|(_, kind)| *kind == Pointer::Relative) {
+        Pointer::Relative
+    } else {
+        Pointer::Absolute
+    };
+    found
+        .into_iter()
+        .filter(|(_, k)| *k == kind)
+        .map(|(number, _)| format!("/dev/input/event{number}"))
+        .collect()
 }
 
 /// Everything that touches input devices happens in the gestos-input service. Its socket is
@@ -1036,10 +1088,10 @@ fn main() {
 
     // Resolve target device list
     if devices.is_empty() {
-        if let Some(default_mouse) = find_mouse_device() {
-            devices.push(default_mouse.to_string_lossy().into_owned());
-        } else {
-            eprintln!("Could not find default evdev mouse device.");
+        let trigger_code = gestos::uinput::trigger_button_code(button).unwrap_or_default();
+        devices = find_pointer_devices(Path::new("/sys/class/input"), trigger_code);
+        if devices.is_empty() {
+            eprintln!("Could not find a mouse with button {}.", button);
             std::process::exit(1);
         }
     }
@@ -1480,6 +1532,100 @@ mod tests {
         assert_eq!(
             restart_backoff(Duration::from_secs(30), CHILD_STABLE_RUNTIME),
             (Duration::from_secs(1), Duration::from_secs(2))
+        );
+    }
+
+    #[test]
+    fn capability_bits_count_from_the_last_word() {
+        // BTN_RIGHT is 0x111: bit 17 of the fifth 64-bit word, in a mouse's key bitmap.
+        let mouse_keys = "70000 0 0 0 0";
+        assert!(has_capability(mouse_keys, 0x111));
+        assert!(has_capability(mouse_keys, 0x110));
+        assert!(!has_capability(mouse_keys, 0x113));
+        assert!(has_capability("143", 0));
+        assert!(has_capability("143", 1));
+        assert!(!has_capability("140", 0));
+        assert!(!has_capability("", 0));
+    }
+
+    /// A sysfs tree of input devices, like /sys/class/input, that goes away after the test.
+    struct FakeSysfs(PathBuf);
+
+    impl FakeSysfs {
+        fn new(test: &str) -> Self {
+            let root = std::env::temp_dir()
+                .join(format!("gestosd-sysfs-{}-{}", test, std::process::id()));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir_all(root.join("class")).unwrap();
+            FakeSysfs(root)
+        }
+
+        fn class(&self) -> PathBuf {
+            self.0.join("class")
+        }
+
+        fn add(&self, event: u32, under: &str, key: &str, rel: &str, abs: &str) {
+            let node = self.0.join(under).join(format!("input{event}/event{event}"));
+            let capabilities = node.join("device/capabilities");
+            fs::create_dir_all(&capabilities).unwrap();
+            for (name, bitmap) in [("key", key), ("rel", rel), ("abs", abs)] {
+                fs::write(capabilities.join(name), format!("{bitmap}\n")).unwrap();
+            }
+            std::os::unix::fs::symlink(&node, self.class().join(format!("event{event}")))
+                .unwrap();
+        }
+    }
+
+    impl Drop for FakeSysfs {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const MOUSE_KEYS: &str = "1f0000 0 0 0 0";
+    const MOUSE_AXES: &str = "143";
+    const XY: &str = "3";
+    const KEYBOARD_KEYS: &str = "fffffffffffffffe";
+
+    #[test]
+    fn every_mouse_with_the_trigger_button_is_used() {
+        let sysfs = FakeSysfs::new("mice");
+        sysfs.add(3, "devices/pci/usb1", MOUSE_KEYS, MOUSE_AXES, "0");
+        sysfs.add(12, "devices/pci/usb2", MOUSE_KEYS, MOUSE_AXES, "0");
+        sysfs.add(4, "devices/platform/i8042", KEYBOARD_KEYS, "0", "0");
+        assert_eq!(
+            find_pointer_devices(&sysfs.class(), 0x111),
+            ["/dev/input/event3", "/dev/input/event12"]
+        );
+    }
+
+    #[test]
+    fn a_touchpad_is_only_used_without_a_mouse() {
+        let sysfs = FakeSysfs::new("touchpad");
+        // Its buttons, and the touch and finger counts a touchpad has.
+        sysfs.add(5, "devices/platform/i8042", "420 30000 0 0 0 0", "0", XY);
+        assert_eq!(find_pointer_devices(&sysfs.class(), 0x111), ["/dev/input/event5"]);
+        sysfs.add(9, "devices/pci/usb1", MOUSE_KEYS, MOUSE_AXES, "0");
+        assert_eq!(find_pointer_devices(&sysfs.class(), 0x111), ["/dev/input/event9"]);
+    }
+
+    #[test]
+    fn a_mouse_without_the_trigger_button_is_left_out() {
+        let sysfs = FakeSysfs::new("buttons");
+        sysfs.add(3, "devices/pci/usb1", MOUSE_KEYS, MOUSE_AXES, "0");
+        assert!(find_pointer_devices(&sysfs.class(), 0x116).is_empty());
+    }
+
+    #[test]
+    fn gestos_own_forwarders_are_left_out() {
+        let sysfs = FakeSysfs::new("virtual");
+        sysfs.add(3, "devices/pci/usb1", MOUSE_KEYS, MOUSE_AXES, "0");
+        sysfs.add(20, "devices/virtual/input", MOUSE_KEYS, MOUSE_AXES, "0");
+        // Bluetooth LE mice are virtual too, but under uhid, and count.
+        sysfs.add(21, "devices/virtual/misc/uhid/0005:046D:B023.0001", MOUSE_KEYS, MOUSE_AXES, "0");
+        assert_eq!(
+            find_pointer_devices(&sysfs.class(), 0x111),
+            ["/dev/input/event3", "/dev/input/event21"]
         );
     }
 }
