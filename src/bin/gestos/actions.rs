@@ -18,14 +18,23 @@ pub fn action_matches(a: &ActionType, opt: &EditorActionOption) -> bool {
             }
         }
         (ActionType::Keypress(k1), ActionType::Keypress(k2)) => opt.category == 0 && k1 == k2,
-        // The generic Keyboard Action has no steps of its own, so it matches any, and a single
-        // shortcut that isn't a standard one is a custom action with one step.
-        (ActionType::Keyboard(_) | ActionType::Keypress(_), ActionType::Keyboard(steps)) => {
-            opt.category == 0 && steps.is_empty()
+        // The generic Custom Action has no steps of its own, so it matches any, and a single
+        // shortcut that isn't a standard one is a custom action with one step. One that only
+        // opens an app is that app's own action instead, which edits more simply.
+        (ActionType::Keyboard(_) | ActionType::Keypress(_), ActionType::Keyboard(steps))
+            if steps.is_empty() =>
+        {
+            opt.category == 0 && !only_opens_an_app(a)
         }
         (ActionType::Click(_), ActionType::Click(_)) => opt.category == 0,
         (at1, at2) => at1 == at2,
     }
+}
+
+/// Whether an action does nothing but open an app, which is that app's own action.
+pub fn only_opens_an_app(action: &ActionType) -> bool {
+    matches!(action, ActionType::Keyboard(steps)
+        if matches!(steps.as_slice(), [gestos::key_steps::KeyStep::Open(_)]))
 }
 
 /// Whether an action needs a value from the user. Most don't: GNOME and KDE actions, custom
@@ -386,6 +395,29 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
     options
 }
 
+/// An action to open each app in GNOME's app grid, or bring it to the front: a custom action of one
+/// step, which more can be added to.
+pub fn app_action_options() -> Vec<EditorActionOption> {
+    let mut apps: Vec<(String, String)> = gio::AppInfo::all()
+        .into_iter()
+        .filter(|info| info.should_show())
+        .filter_map(|info| {
+            let id = info.id()?.trim_end_matches(".desktop").to_string();
+            Some((info.display_name().to_string(), id))
+        })
+        .collect();
+    apps.sort_by_key(|(name, _)| name.to_lowercase());
+    apps.dedup_by(|a, b| a.1 == b.1);
+    apps.into_iter()
+        .map(|(name, id)| EditorActionOption {
+            category: 0,
+            action_type: ActionType::Keyboard(vec![gestos::key_steps::KeyStep::Open(id)]),
+            name: format!("Open {name}"),
+            tooltip: format!("Open {name}, or bring it to the front"),
+        })
+        .collect()
+}
+
 pub fn fetch_kde_action_options() -> Vec<EditorActionOption> {
     let mut options = Vec::new();
 
@@ -605,6 +637,20 @@ mod tests {
         };
         assert_eq!(find("Control+C"), "Copy (Ctrl+C)");
         assert_eq!(find("Control+Alt+T"), "Custom Action");
+    }
+
+    #[test]
+    fn opening_an_app_finds_that_apps_action() {
+        let open = ActionType::Keyboard(vec![gestos::key_steps::KeyStep::Open("org.x.App".into())]);
+        let mut options = get_static_action_options();
+        options.push(EditorActionOption {
+            category: 0,
+            action_type: open.clone(),
+            name: "Open App".to_string(),
+            tooltip: String::new(),
+        });
+        let option = options.iter().find(|opt| action_matches(&open, opt)).unwrap();
+        assert_eq!(option.name, "Open App");
     }
 
     #[test]

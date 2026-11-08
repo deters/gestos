@@ -26,6 +26,11 @@ const EDITOR_SIDE_MARGIN: i32 = 24;
 const EDITOR_MIN_WIDTH: i32 = EDITOR_CONTENT_WIDTH + 2 * EDITOR_SIDE_MARGIN;
 const EDITOR_MIN_HEIGHT: i32 = 480;
 
+/// Whether an option is the generic Custom Action, whose steps are filled in.
+fn is_custom_action(option: &EditorActionOption) -> bool {
+    matches!(&option.action_type, ActionType::Keyboard(steps) if steps.is_empty())
+}
+
 /// Whether a custom action's name is one made from the action, rather than one the user gave it.
 /// Names from before the action was renamed count too.
 fn is_automatic_name(name: &str, action_name: &str) -> bool {
@@ -85,10 +90,20 @@ fn option_for_gesture(
     options: &[EditorActionOption],
 ) -> Option<EditorActionOption> {
     let action = gesture.actions.first()?;
+    // A custom action whose app's own action is gone, as when the app was uninstalled, edits as a
+    // custom action, where the app can be changed.
+    let custom = || {
+        options
+            .iter()
+            .find(|option| is_custom_action(option))
+            .filter(|_| matches!(action, ActionType::Keyboard(_)))
+            .cloned()
+    };
     options
         .iter()
         .find(|option| action_matches(action, option))
         .cloned()
+        .or_else(custom)
         .or_else(|| {
             Some(EditorActionOption {
                 // The category for Run Command, the one kind whose details depend on it.
@@ -177,8 +192,9 @@ fn show_action_parameter(
     record_button: &gtk::Button,
     show_steps: &dyn Fn(bool),
 ) {
-    // A custom action has its list of steps instead of the one value other actions take.
-    let has_steps = matches!(&opt.action_type, ActionType::Keyboard(_));
+    // A custom action has its list of steps instead of the one value other actions take. An app's
+    // own action, which only opens it, has none to show.
+    let has_steps = is_custom_action(opt);
     // The list's own rows, because hiding only their content leaves an empty strip.
     if let Some(list_row) = row.parent() {
         list_row.set_visible(action_needs_parameter(opt) && !has_steps);
@@ -272,6 +288,7 @@ fn open_editor(
     main_box.append(&scrolled);
 
     let scroll_content = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    scroll_content.set_margin_bottom(EDITOR_SIDE_MARGIN);
     scrolled.set_child(Some(&scroll_content));
 
     let name_entry = gtk::Entry::new();
@@ -532,8 +549,8 @@ fn open_editor(
     settings_list.set_selection_mode(gtk::SelectionMode::None);
     scroll_content.append(&settings_list);
 
-    // A custom action can't say what it's for, so it can have a name of its own. Other actions
-    // are named after what they do.
+    // A custom action can't say what it's for, so it can have a name of its own, in a box above
+    // its steps, as it names the whole gesture. Other actions are named after what they do.
     let name_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     name_row.add_css_class("settings-row");
     let name_label = gtk::Label::with_mnemonic("_Name");
@@ -544,13 +561,18 @@ fn open_editor(
     let name_list_row = gtk::ListBoxRow::new();
     name_list_row.set_activatable(false);
     name_list_row.set_child(Some(&name_row));
-    name_list_row.set_visible(false);
-    settings_list.append(&name_list_row);
+    let name_list = gtk::ListBox::new();
+    name_list.add_css_class("boxed-list");
+    name_list.set_selection_mode(gtk::SelectionMode::None);
+    name_list.append(&name_list_row);
+    name_list.set_visible(false);
+    scroll_content.append(&name_list);
 
     // What the gesture does comes first, with its note about the extension, and then what
     // triggers it.
     scroll_content.reorder_child_after(&settings_section_label, None::<&gtk::Widget>);
-    scroll_content.reorder_child_after(&settings_list, Some(&settings_section_label));
+    scroll_content.reorder_child_after(&name_list, Some(&settings_section_label));
+    scroll_content.reorder_child_after(&settings_list, Some(&name_list));
     scroll_content.reorder_child_after(&extension_label, Some(&settings_list));
 
     // Each part is as wide as the main window's lists, centered, with the same margins. Text is
@@ -608,6 +630,13 @@ fn open_editor(
     let (show_steps, load_steps) =
         append_steps_rows(&settings_list, &dialog, &action_details_entry);
     show_steps(false);
+    // An app's own action can do more, as a custom action. That's optional, so it's a quiet button
+    // at the end, rather than a part of its own.
+    let customize_btn = gtk::Button::with_mnemonic("_Customize Action…");
+    customize_btn.add_css_class("flat");
+    customize_btn.set_halign(gtk::Align::Center);
+    customize_btn.set_visible(false);
+    scroll_content.append(&customize_btn);
 
     let selected_action: Rc<RefCell<Option<EditorActionOption>>> = Rc::new(RefCell::new(None));
 
@@ -747,7 +776,7 @@ fn open_editor(
     }
     if let Some(opt) = initial_opt {
         *selected_action.borrow_mut() = Some(opt.clone());
-        name_list_row.set_visible(matches!(opt.action_type, ActionType::Keyboard(_)));
+        name_list.set_visible(is_custom_action(&opt));
         show_action_parameter(
             &opt,
             &action_details_row,
@@ -767,7 +796,7 @@ fn open_editor(
         let query = state_rc.borrow().search_entry.text();
         if let Some(name) = preset_action
             .as_ref()
-            .filter(|preset| matches!(preset.action_type, ActionType::Keyboard(_)))
+            .filter(|preset| is_custom_action(preset))
             .and_then(|preset| name_from_search(&query, &preset.name))
         {
             name_entry.set_text(&name);
@@ -780,10 +809,62 @@ fn open_editor(
         );
         extension_label.set_text(note.unwrap_or_default());
         extension_label.set_visible(note.is_some());
-        // Most actions have nothing to fill in, which leaves this section empty.
+        // Most actions have nothing to fill in, which leaves this section empty. An app's own
+        // action can become a custom action, to do more once the app is open.
+        customize_btn.set_visible(crate::actions::only_opens_an_app(&opt.action_type));
         let has_details = action_needs_parameter(&opt);
         settings_section_label.set_visible(has_details);
         settings_list.set_visible(has_details);
+    }
+
+    // Turns an app's own action into a custom action with its one step, which more are added to,
+    // keeping the gesture's name.
+    {
+        let custom = state_rc
+            .borrow()
+            .action_options
+            .iter()
+            .find(|option| is_custom_action(option))
+            .cloned();
+        let selected_action = Rc::clone(&selected_action);
+        let action_details_row = action_details_row.clone();
+        let action_details_label = action_details_label.clone();
+        let action_details_entry = action_details_entry.clone();
+        let shortcut_display_box = shortcut_display_box.clone();
+        let record_btn = record_btn.clone();
+        let show_steps = Rc::clone(&show_steps);
+        let load_steps = Rc::clone(&load_steps);
+        let name_list = name_list.clone();
+        let customize_btn_click = customize_btn.clone();
+        let settings_section_label = settings_section_label.clone();
+        let settings_list = settings_list.clone();
+        let dialog = dialog.clone();
+        let dialog_title = dialog_title.clone();
+        customize_btn.connect_clicked(move |_| {
+            let Some(custom) = custom.clone() else { return };
+            let steps = match selected_action.borrow().as_ref().map(|opt| &opt.action_type) {
+                Some(ActionType::Keyboard(steps)) => steps.clone(),
+                _ => return,
+            };
+            *selected_action.borrow_mut() = Some(custom.clone());
+            action_details_entry.set_text(&format_steps(&steps));
+            load_steps();
+            customize_btn_click.set_visible(false);
+            settings_section_label.set_visible(true);
+            settings_list.set_visible(true);
+            name_list.set_visible(true);
+            show_action_parameter(
+                &custom,
+                &action_details_row,
+                &action_details_label,
+                &action_details_entry,
+                &shortcut_display_box,
+                &record_btn,
+                &*show_steps,
+            );
+            dialog.set_title(Some(&custom.name));
+            dialog_title.set_text(&custom.name);
+        });
     }
 
     load_steps();
@@ -846,8 +927,11 @@ fn open_editor(
         };
 
         let action = match &opt.action_type {
-            // One shortcut is saved as one, as standard shortcuts and older gestures are.
-            ActionType::Keyboard(_) => match parse_steps(&detail).as_slice() {
+            // One shortcut is saved as one, as standard shortcuts and older gestures are. An app's
+            // own action has its one step already, and is saved as it is.
+            ActionType::Keyboard(steps) if steps.is_empty() => match parse_steps(&detail)
+                .as_slice()
+            {
                 [] => {
                     println!("Gesture save failed: The custom action has no steps.");
                     return;

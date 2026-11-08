@@ -6,7 +6,10 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use gestos::config::{Configuration, Gesture};
 use crate::state::AppState;
-use crate::actions::{fetch_gnome_action_options, fetch_kde_action_options, get_static_action_options};
+use crate::actions::{
+    app_action_options, fetch_gnome_action_options, fetch_kde_action_options,
+    get_static_action_options,
+};
 use crate::suggestions::{find_suggestions, search_matches};
 use crate::ui::components::get_action_category_icon;
 use crate::ui::editor::{open_gesture_editor, open_gesture_editor_for_action};
@@ -144,9 +147,15 @@ fn suggestion_row(
     row_box.set_margin_top(12);
     row_box.set_margin_bottom(12);
 
-    let (icon_name, icon_class) = get_action_category_icon(&option.action_type);
-    let icon = gtk::Image::from_icon_name(icon_name);
-    icon.add_css_class(icon_class);
+    let icon = match crate::ui::app_picker::opened_app(&option.action_type) {
+        Some(app) => crate::ui::app_picker::app_icon(app, 16),
+        None => {
+            let (icon_name, icon_class) = get_action_category_icon(&option.action_type);
+            let icon = gtk::Image::from_icon_name(icon_name);
+            icon.add_css_class(icon_class);
+            icon
+        }
+    };
     row_box.append(&icon);
     let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
     text.set_hexpand(true);
@@ -438,6 +447,7 @@ pub fn build_ui(app: &gtk::Application) {
         let mut options = get_static_action_options();
         options.extend(fetch_gnome_action_options());
         options.extend(fetch_kde_action_options());
+        options.extend(app_action_options());
         options
     });
     let state_options = Rc::clone(&state);

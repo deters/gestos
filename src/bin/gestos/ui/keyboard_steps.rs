@@ -19,11 +19,23 @@ const TYPE_BOX_HEIGHT: i32 = 72;
 // The size of the icon of an app to open.
 const OPEN_ICON_SIZE: i32 = 24;
 
-// The icon for each kind of step, on the button that adds it and on its rows.
+// The icon for each kind of step, on its rows.
 const OPEN_ICON: &str = "view-app-grid-symbolic";
 const PRESS_ICON: &str = "input-keyboard-symbolic";
 const TYPE_ICON: &str = "insert-text-symbolic";
 const WAIT_ICON: &str = "alarm-symbolic";
+
+// How many characters wide the name of each step is, to fit the longest.
+const STEP_NAME_CHARS: i32 = 9;
+
+fn step_name(step: &KeyStep) -> &'static str {
+    match step {
+        KeyStep::Open(_) => "Open App",
+        KeyStep::Press(_) => "Shortcut",
+        KeyStep::Type(_) => "Type",
+        KeyStep::Wait(_) => "Pause",
+    }
+}
 
 fn step_icon(step: &KeyStep) -> &'static str {
     match step {
@@ -78,8 +90,13 @@ pub fn append_steps_rows(
 
     // Each opens what it needs, so those that open a dialog say so with "…". An app comes up
     // first, so that the steps after it go to it.
-    let add_button = |icon: &str, tooltip: &str| {
-        let button = gtk::Button::from_icon_name(icon);
+    // A "+" and a word, so it's clear they add a step, and which.
+    let add_button = |word: &str, tooltip: &str| {
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        content.append(&gtk::Image::from_icon_name("list-add-symbolic"));
+        content.append(&gtk::Label::new(Some(word)));
+        let button = gtk::Button::new();
+        button.set_child(Some(&content));
         button.set_tooltip_text(Some(tooltip));
         button.update_property(&[gtk::accessible::Property::Label(tooltip)]);
         button.add_css_class("flat");
@@ -88,25 +105,25 @@ pub fn append_steps_rows(
         button
     };
     let opening = Rc::clone(&editor);
-    add_button(OPEN_ICON, "Open an App…").connect_clicked(move |_| {
+    add_button("App", "Open an App…").connect_clicked(move |_| {
         let picked = Rc::clone(&opening);
         crate::ui::app_picker::open_app_picker(&opening.parent, &[], move |app| {
             picked.add(KeyStep::Open(app));
         });
     });
     let pressing = Rc::clone(&editor);
-    add_button(PRESS_ICON, "Press a Shortcut…").connect_clicked(move |_| {
+    add_button("Shortcut", "Press a Shortcut…").connect_clicked(move |_| {
         pressing.add(KeyStep::Press(String::new()));
         // Keys are only known once they're pressed, so a new keys step asks for them.
         pressing.record(pressing.steps.borrow().len() - 1);
     });
     let typing = Rc::clone(&editor);
-    add_button(TYPE_ICON, "Type a Text").connect_clicked(move |_| {
+    add_button("Type", "Type a Text").connect_clicked(move |_| {
         typing.focus_new_text.set(true);
         typing.add(KeyStep::Type(String::new()));
     });
     let waiting = Rc::clone(&editor);
-    add_button(WAIT_ICON, "Add a Pause").connect_clicked(move |_| {
+    add_button("Pause", "Add a Pause").connect_clicked(move |_| {
         waiting.add(KeyStep::Wait(NEW_WAIT_MILLIS));
     });
 
@@ -165,10 +182,15 @@ impl StepsEditor {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         row.add_css_class("settings-row");
 
-        let kind = gtk::Image::from_icon_name(step_icon(step));
+        // Its icon and name, the same width on every row, so the steps line up.
+        let icon = gtk::Image::from_icon_name(step_icon(step));
+        icon.add_css_class("dim-label");
+        icon.set_valign(gtk::Align::Center);
+        row.append(&icon);
+        let kind = gtk::Label::new(Some(step_name(step)));
         kind.add_css_class("dim-label");
-        kind.set_valign(gtk::Align::Center);
-        kind.set_margin_end(6);
+        kind.set_width_chars(STEP_NAME_CHARS);
+        kind.set_xalign(0.0);
         row.append(&kind);
 
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);

@@ -1,14 +1,16 @@
 //! The area a gesture is drawn in: as wide as it's given, and always as tall as a fixed share of
-//! that, so that a taller window leaves its room to what's below.
+//! that, so that a taller window leaves its room to what's below. Its parents can measure it for
+//! more width than they give it, so its height stops growing at the widest it's shown.
 
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk4 as gtk;
 
-// How much wider than tall it is, and the smallest it gets.
+// How much wider than tall it is, and the smallest and largest width its height follows.
 const RATIO: f64 = 2.0;
 const MIN_WIDTH: i32 = 300;
+const MAX_WIDTH: i32 = 500;
 
 mod imp {
     use super::*;
@@ -35,7 +37,7 @@ mod imp {
             match orientation {
                 gtk::Orientation::Horizontal => (MIN_WIDTH, MIN_WIDTH, -1, -1),
                 _ => {
-                    let width = if for_size < 0 { MIN_WIDTH } else { for_size.max(MIN_WIDTH) };
+                    let width = if for_size < 0 { MIN_WIDTH } else { for_size.clamp(MIN_WIDTH, MAX_WIDTH) };
                     let height = (f64::from(width) / RATIO).round() as i32;
                     (height, height, -1, -1)
                 }

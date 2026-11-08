@@ -369,8 +369,15 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         icon_box.add_css_class("icon-holder");
         icon_box.add_css_class(bg_class);
         icon_box.set_valign(gtk::Align::Center);
-        let icon = gtk::Image::from_icon_name(icon_name);
-        icon.set_icon_size(gtk::IconSize::Large);
+        // A gesture that only opens an app shows that app's icon.
+        let icon = match gesture.actions.first().and_then(crate::ui::app_picker::opened_app) {
+            Some(app) => crate::ui::app_picker::app_icon(app, 32),
+            None => {
+                let icon = gtk::Image::from_icon_name(icon_name);
+                icon.set_icon_size(gtk::IconSize::Large);
+                icon
+            }
+        };
         icon_box.append(&icon);
         main_hbox.append(&icon_box);
     }

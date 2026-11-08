@@ -35,6 +35,17 @@ pub fn app_icon(id: &str, size: i32) -> gtk::Image {
     image
 }
 
+/// The app an action only opens, which shows with that app's icon.
+pub fn opened_app(action: &gestos::config::ActionType) -> Option<&str> {
+    match action {
+        gestos::config::ActionType::Keyboard(steps) => match steps.as_slice() {
+            [gestos::key_steps::KeyStep::Open(app)] => Some(app),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// The installed apps that show in the app grid, by name, as their IDs.
 fn installed_apps() -> Vec<String> {
     let mut apps: Vec<(String, String)> = gio::AppInfo::all()
@@ -121,11 +132,14 @@ impl AppRows {
         title.set_halign(gtk::Align::Start);
         title.set_hexpand(true);
         title_row.append(&title);
-        if self.apps.borrow().is_empty() {
-            let all = gtk::Label::new(Some("Valid in All Apps"));
-            all.add_css_class("dim-label");
-            title_row.append(&all);
-        }
+        let scope = if self.apps.borrow().is_empty() {
+            "Valid in All Apps"
+        } else {
+            "Valid Only in the Following Apps"
+        };
+        let scope = gtk::Label::new(Some(scope));
+        scope.add_css_class("dim-label");
+        title_row.append(&scope);
         // At the top of the list, as GNOME's lists can add items. It opens a dialog.
         let add = gtk::Button::from_icon_name("list-add-symbolic");
         add.set_tooltip_text(Some("Add App…"));

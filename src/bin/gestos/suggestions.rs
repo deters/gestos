@@ -142,16 +142,25 @@ pub fn find_suggestions(
             .and_then(|identity| best_ranks.get(&identity).copied())
             .unwrap_or(*rank);
         // Keyboard shortcuts stay together after the other actions, with the generic one first.
+        let opens_app = crate::ui::app_picker::opened_app(&option.action_type).is_some();
         let (is_shortcut, is_named_shortcut) = match &option.action_type {
             ActionType::Keypress(keys) => (true, !keys.is_empty()),
+            _ if opens_app => (false, false),
             ActionType::Keyboard(steps) => (true, !steps.is_empty()),
             _ => (false, false),
+        };
+        // Gestos's own actions come first, then GNOME's, then one to open each app, as there are
+        // many of those.
+        let group = match &option.action_type {
+            _ if opens_app => 2,
+            ActionType::Gnome(_) => 1,
+            _ => 0,
         };
         (
             *rank == NOT_FOUND,
             is_shortcut,
             shared_rank,
-            matches!(option.action_type, ActionType::Gnome(_)),
+            group,
             is_named_shortcut,
             option.name.to_lowercase(),
         )
@@ -371,6 +380,29 @@ mod tests {
         assert_eq!(
             names(&find_suggestions(&options, &[], "custom")),
             ["Custom Action", "Run Command in Shell"]
+        );
+    }
+
+    #[test]
+    fn opening_an_app_is_listed_after_the_desktops_actions() {
+        let open = |app: &str| {
+            ActionType::Keyboard(vec![gestos::key_steps::KeyStep::Open(app.to_string())])
+        };
+        let options = [
+            option("Copy", ActionType::Keypress("Control+C".to_string())),
+            option("Open Text Editor", open("org.gnome.TextEditor")),
+            option("Close Window", ActionType::Kill),
+            gnome("Volume up", "volume-up"),
+        ];
+        assert_eq!(
+            names(&find_suggestions(&options, &[], "")),
+            ["Close Window", "Volume up", "Open Text Editor", "Copy"]
+        );
+        // Once a gesture opens it, it isn't offered again.
+        let used = [gesture(open("org.gnome.TextEditor"))];
+        assert_eq!(
+            names(&find_suggestions(&options, &used, "")),
+            ["Close Window", "Volume up", "Copy"]
         );
     }
 
