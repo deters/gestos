@@ -1,6 +1,7 @@
-//! The steps of a Custom Action: apps to open, shortcuts to press, text to type and pauses, in a
-//! list that steps are added to, moved in and removed from. They're kept as text in the editor's
-//! details entry, which is what the gesture saves.
+//! The steps of a Custom Action: apps to open, shortcuts to press, text to type and pauses. They
+//! are rows of the action's list: a title row with a button to add each kind of step, and a row
+//! for each step, which can be moved and removed. They're kept as text in the editor's details
+//! entry, which is what the gesture saves.
 
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
 use gestos::key_steps::{format_steps, parse_steps, KeyStep, MAX_WAIT_MILLIS};
@@ -18,76 +19,102 @@ const TYPE_BOX_HEIGHT: i32 = 72;
 // The size of the icon of an app to open.
 const OPEN_ICON_SIZE: i32 = 24;
 
+// The icon for each kind of step, on the button that adds it and on its rows.
+const OPEN_ICON: &str = "view-app-grid-symbolic";
+const PRESS_ICON: &str = "input-keyboard-symbolic";
+const TYPE_ICON: &str = "insert-text-symbolic";
+const WAIT_ICON: &str = "alarm-symbolic";
+
+fn step_icon(step: &KeyStep) -> &'static str {
+    match step {
+        KeyStep::Open(_) => OPEN_ICON,
+        KeyStep::Press(_) => PRESS_ICON,
+        KeyStep::Type(_) => TYPE_ICON,
+        KeyStep::Wait(_) => WAIT_ICON,
+    }
+}
+
 struct StepsEditor {
     parent: gtk::Window,
     details: gtk::Entry,
-    rows: gtk::Box,
+    list: gtk::ListBox,
+    title_row: gtk::ListBoxRow,
+    rows: RefCell<Vec<gtk::ListBoxRow>>,
+    shown: Cell<bool>,
     steps: RefCell<Vec<KeyStep>>,
     // Whether the text box of a text step just added takes the focus, to type in right away.
     focus_new_text: Cell<bool>,
 }
 
-/// The list of steps, and what fills it from the details entry once that holds the gesture's
-/// steps.
-pub fn build_steps_editor(parent: &gtk::Window, details: &gtk::Entry) -> (gtk::Box, Rc<dyn Fn()>) {
-    let container = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    container.add_css_class("settings-row");
-
-    let rows = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    container.append(&rows);
+/// Adds the steps to the end of `list`, as GNOME's lists add items: a title row with a button for
+/// each kind of step, and a row for each. Returns what shows or hides them, and what fills them
+/// from the details entry once that holds the gesture's steps.
+pub fn append_steps_rows(
+    list: &gtk::ListBox,
+    parent: &gtk::Window,
+    details: &gtk::Entry,
+) -> (Rc<dyn Fn(bool)>, Rc<dyn Fn()>) {
+    let title = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    title.add_css_class("settings-row");
+    let label = gtk::Label::new(Some("Steps"));
+    label.set_halign(gtk::Align::Start);
+    label.set_hexpand(true);
+    title.append(&label);
+    let title_row = gtk::ListBoxRow::new();
+    title_row.set_activatable(false);
+    title_row.set_child(Some(&title));
+    list.append(&title_row);
 
     let editor = Rc::new(StepsEditor {
         parent: parent.clone(),
         details: details.clone(),
-        rows,
+        list: list.clone(),
+        title_row,
+        rows: RefCell::new(Vec::new()),
+        shown: Cell::new(true),
         steps: RefCell::new(Vec::new()),
         focus_new_text: Cell::new(false),
     });
 
-    // Four buttons don't always fit on one line, so they wrap.
-    let add_buttons = gtk::FlowBox::new();
-    add_buttons.set_selection_mode(gtk::SelectionMode::None);
-    add_buttons.set_column_spacing(6);
-    add_buttons.set_row_spacing(6);
-    add_buttons.set_max_children_per_line(4);
-    add_buttons.set_halign(gtk::Align::Start);
-
-    // An app comes up first, so that the steps after it go to it.
-    let open = gtk::Button::with_mnemonic("Open an _App");
+    // Each opens what it needs, so those that open a dialog say so with "…". An app comes up
+    // first, so that the steps after it go to it.
+    let add_button = |icon: &str, tooltip: &str| {
+        let button = gtk::Button::from_icon_name(icon);
+        button.set_tooltip_text(Some(tooltip));
+        button.update_property(&[gtk::accessible::Property::Label(tooltip)]);
+        button.add_css_class("flat");
+        button.set_valign(gtk::Align::Center);
+        title.append(&button);
+        button
+    };
     let opening = Rc::clone(&editor);
-    open.connect_clicked(move |_| {
+    add_button(OPEN_ICON, "Open an App…").connect_clicked(move |_| {
         let picked = Rc::clone(&opening);
         crate::ui::app_picker::open_app_picker(&opening.parent, &[], move |app| {
-            picked.steps.borrow_mut().push(KeyStep::Open(app));
-            picked.changed();
-            picked.rebuild();
+            picked.add(KeyStep::Open(app));
         });
     });
-    add_buttons.insert(&open, -1);
+    let pressing = Rc::clone(&editor);
+    add_button(PRESS_ICON, "Press a Shortcut…").connect_clicked(move |_| {
+        pressing.add(KeyStep::Press(String::new()));
+        // Keys are only known once they're pressed, so a new keys step asks for them.
+        pressing.record(pressing.steps.borrow().len() - 1);
+    });
+    let typing = Rc::clone(&editor);
+    add_button(TYPE_ICON, "Type a Text").connect_clicked(move |_| {
+        typing.focus_new_text.set(true);
+        typing.add(KeyStep::Type(String::new()));
+    });
+    let waiting = Rc::clone(&editor);
+    add_button(WAIT_ICON, "Add a Pause").connect_clicked(move |_| {
+        waiting.add(KeyStep::Wait(NEW_WAIT_MILLIS));
+    });
 
-    for (label, step) in [
-        ("Press a _Shortcut", KeyStep::Press(String::new())),
-        ("_Type a Text", KeyStep::Type(String::new())),
-        ("Add a _Pause", KeyStep::Wait(NEW_WAIT_MILLIS)),
-    ] {
-        let button = gtk::Button::with_mnemonic(label);
+    let show: Rc<dyn Fn(bool)> = {
         let editor = Rc::clone(&editor);
-        button.connect_clicked(move |_| {
-            let records = matches!(step, KeyStep::Press(_));
-            editor.steps.borrow_mut().push(step.clone());
-            editor.changed();
-            editor.focus_new_text.set(matches!(step, KeyStep::Type(_)));
-            editor.rebuild();
-            // Keys are only known once they're pressed, so a new keys step asks for them.
-            if records {
-                editor.record(editor.steps.borrow().len() - 1);
-            }
-        });
-        add_buttons.insert(&button, -1);
-    }
-    container.append(&add_buttons);
-
-    let load = {
+        Rc::new(move |shown| editor.show(shown))
+    };
+    let load: Rc<dyn Fn()> = {
         let editor = Rc::clone(&editor);
         Rc::new(move || {
             *editor.steps.borrow_mut() = parse_steps(&editor.details.text());
@@ -95,7 +122,7 @@ pub fn build_steps_editor(parent: &gtk::Window, details: &gtk::Entry) -> (gtk::B
         })
     };
     load();
-    (container, load)
+    (show, load)
 }
 
 impl StepsEditor {
@@ -104,30 +131,44 @@ impl StepsEditor {
         self.details.set_text(&format_steps(&self.steps.borrow()));
     }
 
+    fn add(self: &Rc<Self>, step: KeyStep) {
+        self.steps.borrow_mut().push(step);
+        self.changed();
+        self.rebuild();
+    }
+
+    fn show(&self, shown: bool) {
+        self.shown.set(shown);
+        self.title_row.set_visible(shown);
+        for row in self.rows.borrow().iter() {
+            row.set_visible(shown);
+        }
+    }
+
+    // The step rows are the last of the list, after its title row.
     fn rebuild(self: &Rc<Self>) {
-        while let Some(child) = self.rows.first_child() {
-            self.rows.remove(&child);
+        for row in self.rows.borrow_mut().drain(..) {
+            self.list.remove(&row);
         }
         let steps = self.steps.borrow().clone();
-        // With no steps, only the buttons to add them show, without space kept for the list.
-        self.rows.set_visible(!steps.is_empty());
         for (i, step) in steps.iter().enumerate() {
-            self.rows.append(&self.step_row(i, step, steps.len()));
+            let row = gtk::ListBoxRow::new();
+            row.set_activatable(false);
+            row.set_visible(self.shown.get());
+            row.set_child(Some(&self.step_row(i, step, steps.len())));
+            self.list.append(&row);
+            self.rows.borrow_mut().push(row);
         }
     }
 
     fn step_row(self: &Rc<Self>, i: usize, step: &KeyStep, count: usize) -> gtk::Box {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        row.add_css_class("settings-row");
 
-        let kind = gtk::Label::new(Some(match step {
-            KeyStep::Press(_) => "Press",
-            KeyStep::Type(_) => "Type",
-            KeyStep::Wait(_) => "Wait",
-            KeyStep::Open(_) => "Open",
-        }));
+        let kind = gtk::Image::from_icon_name(step_icon(step));
         kind.add_css_class("dim-label");
-        kind.set_width_chars(6);
-        kind.set_xalign(0.0);
+        kind.set_valign(gtk::Align::Center);
+        kind.set_margin_end(6);
         row.append(&kind);
 
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);

@@ -10,7 +10,7 @@ use gestos::config::generate_unique_id;
 use crate::state::{AppState, EditorActionOption};
 use crate::actions::{action_matches, action_needs_parameter};
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
-use crate::ui::keyboard_steps::build_steps_editor;
+use crate::ui::keyboard_steps::append_steps_rows;
 use crate::ui::app_picker::append_apps_rows;
 use gestos::key_steps::{format_steps, parse_steps, KeyStep};
 use crate::ui::components::{draw_gesture_path, show_confirm_dialog};
@@ -175,7 +175,7 @@ fn show_action_parameter(
     entry: &gtk::Entry,
     shortcut_display: &gtk::Box,
     record_button: &gtk::Button,
-    steps_editor: &gtk::Widget,
+    show_steps: &dyn Fn(bool),
 ) {
     // A custom action has its list of steps instead of the one value other actions take.
     let has_steps = matches!(&opt.action_type, ActionType::Keyboard(_));
@@ -183,9 +183,7 @@ fn show_action_parameter(
     if let Some(list_row) = row.parent() {
         list_row.set_visible(action_needs_parameter(opt) && !has_steps);
     }
-    if let Some(list_row) = steps_editor.parent() {
-        list_row.set_visible(has_steps);
-    }
+    show_steps(has_steps);
 
     let is_keypress = matches!(&opt.action_type, ActionType::Keypress(_));
     entry.set_visible(!is_keypress);
@@ -601,19 +599,9 @@ fn open_editor(
     settings_list.append(&action_details_row);
 
     // Edits the details entry, which holds a custom action's steps as the gesture saves them.
-    let (steps_box, load_steps) = build_steps_editor(&dialog, &action_details_entry);
-    // Its buttons and text would ask for room for all of them on one line, making Action Details
-    // wider than the parts around it. Held this way, it asks only for its smallest width, takes
-    // the width the others have, and wraps to it, with all of its height.
-    let steps_editor = gtk::ScrolledWindow::new();
-    steps_editor.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
-    steps_editor.set_propagate_natural_height(true);
-    steps_editor.set_child(Some(&steps_box));
-    let steps_editor: gtk::Widget = steps_editor.upcast();
-    settings_list.append(&steps_editor);
-    if let Some(list_row) = steps_editor.parent() {
-        list_row.set_visible(false);
-    }
+    let (show_steps, load_steps) =
+        append_steps_rows(&settings_list, &dialog, &action_details_entry);
+    show_steps(false);
 
     let selected_action: Rc<RefCell<Option<EditorActionOption>>> = Rc::new(RefCell::new(None));
 
@@ -761,7 +749,7 @@ fn open_editor(
             &action_details_entry,
             &shortcut_display_box,
             &record_btn,
-            &steps_editor,
+            &*show_steps,
         );
         // A chosen action is all a new gesture's default name needs.
         if preset_action.is_some() {
