@@ -9,6 +9,7 @@ import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extension
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {GestureChooser} from './lib/chooser.js';
+import {GestureTrail} from './lib/trail.js';
 import {fitSize, hasSize, isBelievableMinimum, keepInside, restoreRect, tileWindows} from './lib/tile.js';
 
 const OBJECT_PATH = '/io/github/deters/Gestos/Extension';
@@ -1230,12 +1231,15 @@ export default class GestosExtension extends Extension {
         this._actions.tileRemembered();
         this._dbus = Gio.DBusExportedObject.wrapJSObject(INTERFACE_XML, this._actions);
         this._dbus.export(Gio.DBus.session, OBJECT_PATH);
+        this._trail = new GestureTrail(this.getSettings());
     }
 
     // This runs when the extension is turned off, and also when the screen locks: other extensions
     // are turned off there, and the Shell turns this one off and on again after them. Windows are
     // only put back in the first case.
     disable() {
+        this._trail.destroy();
+        this._trail = null;
         this._dbus.unexport();
         this._dbus = null;
         if (Main.sessionMode.isLocked)
