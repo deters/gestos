@@ -122,6 +122,16 @@ impl ActionType {
         matches!(self, ActionType::ToggleTileWindows)
     }
 
+    /// The one desktop this runs on, named as `get_environment_suffix` names it, or None for an
+    /// action that runs on any. GNOME's shortcuts and its tiling are its own, and KDE's are KDE's.
+    pub fn only_on_desktop(&self) -> Option<&'static str> {
+        match self {
+            ActionType::Gnome(_) | ActionType::ToggleTileWindows => Some("gnome"),
+            ActionType::Kde(_, _) => Some("kde"),
+            _ => None,
+        }
+    }
+
     /// The GNOME shortcut key a built-in action runs on GNOME, if it has one.
     pub fn gnome_key(&self) -> Option<&'static str> {
         match self {
@@ -472,6 +482,15 @@ pub struct Gesture {
 }
 
 impl Gesture {
+    /// The desktop one of its actions only runs on, when that isn't the one in use.
+    pub fn needs_other_desktop(&self) -> Option<&'static str> {
+        let here = get_environment_suffix();
+        self.actions
+            .iter()
+            .filter_map(ActionType::only_on_desktop)
+            .find(|desktop| Some(*desktop) != here)
+    }
+
     /// Whether it works in the app that has focus, if that's known. One limited to some apps only
     /// works when one of them is known to have it.
     pub fn works_in(&self, app: Option<&str>) -> bool {
@@ -1050,6 +1069,16 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn desktop_actions_run_only_on_their_desktop() {
+        assert_eq!(ActionType::Gnome("close".to_string()).only_on_desktop(), Some("gnome"));
+        assert_eq!(ActionType::ToggleTileWindows.only_on_desktop(), Some("gnome"));
+        let kde = ActionType::Kde("kwin".to_string(), "Window Close".to_string());
+        assert_eq!(kde.only_on_desktop(), Some("kde"));
+        assert_eq!(ActionType::Kill.only_on_desktop(), None);
+        assert_eq!(ActionType::Execute("true".to_string()).only_on_desktop(), None);
     }
 
     #[test]

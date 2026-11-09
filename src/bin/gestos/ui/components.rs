@@ -434,18 +434,25 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
 
     main_hbox.append(&vbox);
 
-    // A gesture whose action needs the GNOME extension says so while the extension can't run it.
-    if let Some(action) = gesture.actions.first() {
-        let status = &state_rc.borrow().extension_status;
-        if action.needs_gnome_extension() && !status.is_running() {
-            let warning = gtk::Image::from_icon_name("dialog-warning-symbolic");
-            warning.add_css_class("warning");
-            warning.set_valign(gtk::Align::Center);
-            let note = crate::ui::main_window::extension_note(action, status).unwrap_or_default();
-            warning.set_tooltip_text(Some(note));
-            warning.update_property(&[gtk::accessible::Property::Label(note)]);
-            main_hbox.append(&warning);
-        }
+    // A gesture says so when an action of it can't run here: one of another desktop's, or one
+    // that needs the GNOME extension while the extension can't run it.
+    let note = match gesture.needs_other_desktop() {
+        Some("kde") => Some("Only works on KDE"),
+        Some(_) => Some("Only works on GNOME"),
+        None => gesture.actions.first().and_then(|action| {
+            let status = &state_rc.borrow().extension_status;
+            (!status.is_running())
+                .then(|| crate::ui::main_window::extension_note(action, status))
+                .flatten()
+        }),
+    };
+    if let Some(note) = note {
+        let warning = gtk::Image::from_icon_name("dialog-warning-symbolic");
+        warning.add_css_class("warning");
+        warning.set_valign(gtk::Align::Center);
+        warning.set_tooltip_text(Some(note));
+        warning.update_property(&[gtk::accessible::Property::Label(note)]);
+        main_hbox.append(&warning);
     }
 
     // 3. Mini Cairo preview canvas

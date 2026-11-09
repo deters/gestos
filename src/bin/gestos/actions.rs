@@ -380,10 +380,7 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
         },
     ]);
     // It runs in the GNOME Shell extension, so no other desktop can do it.
-    let is_gnome = std::env::var("XDG_CURRENT_DESKTOP")
-        .map(|d| d.to_lowercase().contains("gnome"))
-        .unwrap_or(false);
-    if is_gnome {
+    if is_desktop("gnome") {
         options.push(EditorActionOption {
             category: 1,
             action_type: ActionType::ToggleTileWindows,
@@ -413,10 +410,7 @@ pub fn fetch_kde_action_options() -> Vec<EditorActionOption> {
     let mut options = Vec::new();
 
     // Check if KDE is running to avoid unnecessary D-Bus calls/timeouts on other DEs
-    let is_kde = std::env::var("XDG_CURRENT_DESKTOP")
-        .map(|d| d.to_lowercase().contains("kde"))
-        .unwrap_or(false);
-    if !is_kde {
+    if !is_desktop("kde") {
         return options;
     }
 
@@ -485,8 +479,18 @@ pub fn fetch_kde_action_options() -> Vec<EditorActionOption> {
     options
 }
 
+/// Whether this is the desktop named, as `get_environment_suffix` names it.
+fn is_desktop(name: &str) -> bool {
+    gestos::config::get_environment_suffix() == Some(name)
+}
+
+/// GNOME's shortcuts, on GNOME only. Other desktops often have its settings installed, as GTK
+/// brings them, but nothing there runs them.
 pub fn fetch_gnome_action_options() -> Vec<EditorActionOption> {
     let mut options = Vec::new();
+    if !is_desktop("gnome") {
+        return options;
+    }
 
     let schemas = vec![
         "org.gnome.desktop.wm.keybindings",
