@@ -117,7 +117,10 @@ jobs:
 
       # JavaScript actions don't run in Alpine containers on ARM, so only the build runs in one.
       - name: Build Alpine Package
-        run: docker run --rm -v "$PWD:/src" -w /src alpine:latest sh packaging/build-apk.sh
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src alpine:latest sh packaging/build-apk.sh
+          # Give the checkout back to the runner, which cleans up its git settings afterwards.
+          sudo chown -R "$(id -u):$(id -g)" .
 
       - name: Upload Alpine Artifacts
         uses: actions/upload-artifact@v4
