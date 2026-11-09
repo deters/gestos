@@ -150,19 +150,30 @@ jobs:
     permissions:
       contents: write
     steps:
+      # For the release notes, and the script that adds which package to install.
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          path: source
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
+          path: packages
           merge-multiple: true
 
       # Debugging symbols stay with the run's artifacts, apart from what users download.
       - name: Leave out debug packages
-        run: find . \( -name '*-dbgsym_*' -o -name '*-debuginfo-*' -o -name '*-debugsource-*' \) -delete
+        run: find packages \( -name '*-dbgsym_*' -o -name '*-debuginfo-*' -o -name '*-debugsource-*' \) -delete
+
+      - name: Write the release page
+        run: sh source/packaging/release-body.sh source/RELEASE_NOTES.md packages > release-body.md
 
       - name: Publish Release with Assets
         uses: softprops/action-gh-release@v2
         with:
+          body_path: release-body.md
           files: |
-            **/*.rpm
-            **/*.deb
-            **/*.apk
+            packages/**/*.rpm
+            packages/**/*.deb
+            packages/**/*.apk

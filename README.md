@@ -36,7 +36,15 @@ Mouse gestures for Linux.
 
 ## Install
 
-Packages for Fedora, Debian and Alpine are on the [releases page](https://github.com/deters/gestos/releases).
+Download the package for your system from the [releases page](https://github.com/deters/gestos/releases), then install it:
+
+| System | Package | Install with |
+|---|---|---|
+| Ubuntu, Debian | `gestos_<version>_amd64.deb` | `sudo apt install ./gestos_*_amd64.deb` |
+| Fedora | `gestos-<version>.x86_64.rpm` | `sudo dnf install ./gestos-*.x86_64.rpm` |
+| Fedora on ARM | `gestos-<version>.aarch64.rpm` | `sudo dnf install ./gestos-*.aarch64.rpm` |
+| Alpine | `gestos-<version>-x86_64.apk` | `doas apk add --allow-untrusted ./gestos-*-x86_64.apk` |
+| Alpine on ARM | `gestos-<version>-aarch64.apk` | `doas apk add --allow-untrusted ./gestos-*-aarch64.apk` |
 
 On GNOME, log out and back in after installing, then turn on the Gestos extension in Preferences.
 
