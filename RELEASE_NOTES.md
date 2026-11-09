@@ -1,20 +1,13 @@
-# Gestos 6.5.0
+# Gestos 6.6.0
 
 ## Added
 
-- **Open any app.** Every installed app has its own Open action, so a gesture can open your browser or bring it to the front without setting up a custom action.
-- **See your gesture as you draw it.** Its path follows your pointer on screen and fades when you let go. You can turn it off in Preferences.
-- **Choose the button you draw with.** Right, Middle, Back or Forward, in Preferences. Left-handed mice draw with the button on the other side.
-- **Debugging information.** One button in Preferences creates a report of your setup and what Gestos logged, ready to attach to a bug report.
+- **GNOME 51.** The Gestos extension works on the new GNOME, so gestures per app, the gesture path and window tiling are back after upgrading.
+- **Know when the extension is missing.** A gesture that needs the GNOME extension tells you when it can't run, and whether to turn the extension on or update Gestos.
 
 ## Changed
 
-- **Fewer notifications.** Gestos only notifies you when something goes wrong, such as a gesture that can't run in the app you're in.
-- **A clearer Preferences page**, grouped into gestures, window tiling, the GNOME extension, your gestures and troubleshooting.
-- **A tidier gesture editor.** Each step of a custom action says what it is, the drawing area keeps its size, and Valid Apps says when a gesture only works in some apps.
-
-## Fixed
-
-- **Every mouse draws gestures**, not just the first one Gestos found.
+- **Looks like GNOME.** Gestos now matches GNOME's own apps, follows dark style on every desktop, and has new About and Preferences windows.
+- **Better bug reports.** The debugging report now always includes what Gestos did with your gestures.
 
 Log out and back in after updating, so GNOME loads the new extension.
