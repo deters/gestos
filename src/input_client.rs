@@ -2,7 +2,7 @@
 
 use crate::input_protocol::Request;
 use crate::key_steps::KeyStep;
-use crate::modifiers::Modifiers;
+use crate::modifiers::HeldKeys;
 use crate::keys::{name_to_keycode, parse_key_combo_on};
 use crate::uinput::trigger_button_code;
 use std::io::Write;
@@ -19,7 +19,7 @@ const TYPED_KEY_GAP: Duration = Duration::from_millis(8);
 #[derive(Clone)]
 pub struct InputClient {
     writer: Arc<Mutex<UnixStream>>,
-    held: Arc<(Mutex<Option<Modifiers>>, Condvar)>,
+    held: Arc<(Mutex<Option<HeldKeys>>, Condvar)>,
 }
 
 impl InputClient {
@@ -48,14 +48,14 @@ impl InputClient {
     }
 
     /// Passes on the service's answer to `held`.
-    pub fn answer_held(&self, modifiers: Modifiers) {
+    pub fn answer_held(&self, held: HeldKeys) {
         let (slot, arrived) = &*self.held;
-        *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(modifiers);
+        *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(held);
         arrived.notify_all();
     }
 
-    /// Which modifiers are down. Without an answer in time, none are, so nothing waits forever.
-    pub fn held(&self) -> Modifiers {
+    /// Which modifier keys are down. Without an answer in time, none are, so nothing waits forever.
+    pub fn held(&self) -> HeldKeys {
         let (slot, arrived) = &*self.held;
         *slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
         self.send(&Request::QueryHeld);
@@ -71,7 +71,7 @@ impl InputClient {
                 .unwrap_or_else(|e| e.into_inner())
                 .0;
         }
-        answer.unwrap_or_default()
+        answer.take().unwrap_or_default()
     }
 
     pub fn click(&self, button: i32) {
@@ -291,9 +291,9 @@ mod tests {
         let answering = client.clone();
         let answerer = std::thread::spawn(move || {
             assert_eq!(received(&mut service, 1), [Request::QueryHeld]);
-            answering.answer_held(Modifiers::parse("ctrl"));
+            answering.answer_held(HeldKeys::from_key_codes([29]));
         });
-        assert_eq!(client.held(), Modifiers::parse("ctrl"));
+        assert_eq!(client.held(), HeldKeys::from_key_codes([29]));
         answerer.join().unwrap();
     }
 

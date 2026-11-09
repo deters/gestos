@@ -45,6 +45,15 @@ pub fn report() -> String {
     line(&mut out, "Kernel", read_trimmed("/proc/sys/kernel/osrelease").as_str());
     line(&mut out, "Desktop", &env("XDG_CURRENT_DESKTOP"));
     line(&mut out, "Session", &env("XDG_SESSION_TYPE"));
+    let keyboard = match gestos::keymap::active_layout() {
+        Some(name) => [name.layout, name.variant, name.options]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "),
+        None => "unknown".to_string(),
+    };
+    line(&mut out, "Keyboard", &keyboard);
     let app_in_use = if gestos::config::get_environment_suffix() == Some("gnome") {
         "from the GNOME extension"
     } else if gestos::active_app::is_kde() {

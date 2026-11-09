@@ -120,6 +120,18 @@ pub fn name_to_keycode(name: &str) -> Option<u16> {
     }
 }
 
+/// The symbols a modifier named without a side may be, in the order to look for them. A layout
+/// can put them on other keys, like Ctrl on the Win key.
+fn modifier_symbols(name: &str) -> Option<&'static [&'static str]> {
+    match name.to_lowercase().as_str() {
+        "ctrl" | "control" => Some(&["Control_L", "Control_R"]),
+        "shift" => Some(&["Shift_L", "Shift_R"]),
+        "alt" => Some(&["Alt_L", "Alt_R", "Meta_L"]),
+        "super" | "win" | "meta" => Some(&["Super_L", "Super_R"]),
+        _ => None,
+    }
+}
+
 /// Resolves a shortcut like `Control_L+Alt_L+t` to the keys to press on a layout. A symbol that
 /// needs Shift or AltGr on it brings that key along. Anything the layout doesn't know falls back
 /// to the fixed table. A shortcut with an unknown key is rejected as a whole, because pressing
@@ -136,7 +148,13 @@ pub fn parse_key_combo_on(
         }
     };
     for token in keys.split(['+', ' ']).filter(|token| !token.is_empty()) {
-        match layout.and_then(|layout| layout.lookup(token)) {
+        let found = layout.and_then(|layout| {
+            modifier_symbols(token)
+                .unwrap_or(&[token])
+                .iter()
+                .find_map(|symbol| layout.lookup(symbol))
+        });
+        match found {
             Some((key, shift, altgr)) => {
                 if shift {
                     add(KeyCode::KEY_LEFTSHIFT.0);
@@ -203,6 +221,30 @@ mod tests {
         assert_eq!(
             parse_key_combo_on("Control+NoSuchKey", Some(&us)),
             Err("NoSuchKey".to_string())
+        );
+    }
+
+    #[test]
+    fn modifiers_are_pressed_where_the_layout_puts_them() {
+        use crate::keymap::{LayoutKeys, LayoutName};
+        let Some(swapped) = LayoutKeys::compile(&LayoutName {
+            layout: "us".to_string(),
+            options: "ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl".to_string(),
+            ..Default::default()
+        }) else {
+            return;
+        };
+        assert_eq!(
+            parse_key_combo_on("Control+c", Some(&swapped)),
+            Ok(vec![KeyCode::KEY_LEFTMETA.0, KeyCode::KEY_C.0])
+        );
+        assert_eq!(
+            parse_key_combo_on("Super+a", Some(&swapped)),
+            Ok(vec![KeyCode::KEY_LEFTCTRL.0, KeyCode::KEY_A.0])
+        );
+        assert_eq!(
+            parse_key_combo_on("Control_R+Alt+t", Some(&swapped)),
+            Ok(vec![KeyCode::KEY_RIGHTMETA.0, KeyCode::KEY_LEFTALT.0, KeyCode::KEY_T.0])
         );
     }
 

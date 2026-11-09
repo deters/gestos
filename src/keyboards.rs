@@ -1,8 +1,8 @@
 //! Finding out which modifiers are held, for gestures that need them. Keyboards are only opened
 //! if a gesture uses a modifier, and their key events are never read: the kernel is only asked
-//! which modifiers are down at the moment the gesture button is pressed.
+//! which keys that can be modifiers are down at the moment the gesture button is pressed.
 
-use crate::modifiers::Modifiers;
+use crate::modifiers::HeldKeys;
 
 const KEY_LEFTCTRL: usize = 29;
 const KEY_A: usize = 30;
@@ -78,8 +78,8 @@ impl Keyboards {
         self.devices.len()
     }
 
-    pub fn held(&self) -> Modifiers {
-        Modifiers::from_key_codes(
+    pub fn held(&self) -> HeldKeys {
+        HeldKeys::from_key_codes(
             self.devices
                 .iter()
                 .filter_map(|device| device.get_key_state().ok())

@@ -59,6 +59,59 @@ impl Modifiers {
     }
 }
 
+/// The keys a layout may make modifiers, by evdev code: Ctrl, Alt, Shift and Super on both sides,
+/// Caps Lock and Menu, which layouts can turn into Ctrl or Super. These are the only keys whose
+/// state the input service reports.
+pub const MODIFIER_KEYS: [u16; 10] = [29, 97, 56, 100, 42, 54, 125, 126, 58, 127];
+
+/// Which of the keys that can be modifiers are down. What each means depends on the layout:
+/// with Ctrl and Win swapped, the Win key is Ctrl.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HeldKeys(Vec<u16>);
+
+impl HeldKeys {
+    /// From the evdev codes of the keys that are down. Other keys are left out.
+    pub fn from_key_codes(codes: impl IntoIterator<Item = u16>) -> Self {
+        let mut keys: Vec<u16> =
+            codes.into_iter().filter(|code| MODIFIER_KEYS.contains(code)).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        HeldKeys(keys)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn codes(&self) -> &[u16] {
+        &self.0
+    }
+
+    /// What they mean where nothing is remapped.
+    pub fn on_standard_layout(&self) -> Modifiers {
+        Modifiers::from_key_codes(self.0.iter().copied())
+    }
+
+    /// Codes separated by spaces, or `none`.
+    pub fn encode(&self) -> String {
+        if self.0.is_empty() {
+            return "none".to_string();
+        }
+        self.0.iter().map(u16::to_string).collect::<Vec<_>>().join(" ")
+    }
+
+    /// Reads `encode`'s text. A service from before an update names modifiers instead, like
+    /// `ctrl+super`, which are taken as the keys that mean them on a standard layout.
+    pub fn decode(text: &str) -> Self {
+        if text.chars().any(|c| c.is_ascii_digit()) {
+            return Self::from_key_codes(text.split(' ').filter_map(|code| code.parse().ok()));
+        }
+        let named = Modifiers::parse(text);
+        let keys = [(named.ctrl, 29), (named.alt, 56), (named.shift, 42), (named.super_key, 125)];
+        Self::from_key_codes(keys.into_iter().filter(|(held, _)| *held).map(|(_, code)| code))
+    }
+}
+
 impl fmt::Display for Modifiers {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.labels().join("+").to_lowercase())
@@ -114,5 +167,28 @@ mod tests {
         assert!(Modifiers::from_key_codes([54]).shift);
         assert!(Modifiers::from_key_codes([126]).super_key);
         assert!(Modifiers::from_key_codes([30, 57, 1]).is_empty());
+    }
+
+    #[test]
+    fn only_keys_that_can_be_modifiers_are_held_keys() {
+        let held = HeldKeys::from_key_codes([30, 125, 29, 57, 125]);
+        assert_eq!(held.codes(), [29, 125]);
+        assert!(HeldKeys::from_key_codes([30, 57, 1]).is_empty());
+    }
+
+    #[test]
+    fn held_keys_survive_being_written_and_read_back() {
+        let held = HeldKeys::from_key_codes([58, 97]);
+        assert_eq!(held.encode(), "58 97");
+        assert_eq!(HeldKeys::decode(&held.encode()), held);
+        assert_eq!(HeldKeys::default().encode(), "none");
+        assert!(HeldKeys::decode("none").is_empty());
+    }
+
+    #[test]
+    fn modifiers_named_by_an_older_service_are_read_as_their_usual_keys() {
+        let held = HeldKeys::decode("ctrl+super");
+        assert_eq!(held.codes(), [29, 125]);
+        assert_eq!(held.on_standard_layout(), Modifiers::parse("ctrl+super"));
     }
 }

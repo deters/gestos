@@ -2,7 +2,7 @@
 //! The service has the rights to read input devices, so this is all that anything talking to it
 //! can do: no key events ever come out of it, only gesture paths and which modifiers are held.
 
-use crate::modifiers::Modifiers;
+use crate::modifiers::HeldKeys;
 
 pub const SOCKET_PATH: &str = "/run/gestos/input.sock";
 pub const MAX_LINE_LENGTH: usize = 4096;
@@ -54,10 +54,10 @@ pub enum Event {
     Updated(f64, f64),
     Point(f64, f64),
     Ended,
-    Finished(Modifiers),
+    Finished(HeldKeys),
     /// The left button was clicked while the right one was held, which then draws nothing.
     Chord,
-    Held(Modifiers),
+    Held(HeldKeys),
     Refused { permanent: bool, message: String },
 }
 
@@ -70,14 +70,6 @@ fn parse_flag(text: &str) -> Option<bool> {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
-    }
-}
-
-fn encode_modifiers(modifiers: Modifiers) -> String {
-    if modifiers.is_empty() {
-        "none".to_string()
-    } else {
-        modifiers.to_string()
     }
 }
 
@@ -137,9 +129,9 @@ impl Event {
             Event::Updated(x, y) => format!("updated {x} {y}\n"),
             Event::Point(x, y) => format!("point {x} {y}\n"),
             Event::Ended => "ended\n".to_string(),
-            Event::Finished(modifiers) => format!("finished {}\n", encode_modifiers(*modifiers)),
+            Event::Finished(held) => format!("finished {}\n", held.encode()),
             Event::Chord => "chord\n".to_string(),
-            Event::Held(modifiers) => format!("held {}\n", encode_modifiers(*modifiers)),
+            Event::Held(held) => format!("held {}\n", held.encode()),
             Event::Refused { permanent, message } => {
                 format!("refused {} {}\n", flag(*permanent), message.replace('\n', " "))
             }
@@ -154,9 +146,9 @@ impl Event {
             "updated" => parse_point(rest).map(|(x, y)| Event::Updated(x, y)),
             "point" => parse_point(rest).map(|(x, y)| Event::Point(x, y)),
             "ended" => Some(Event::Ended),
-            "finished" => Some(Event::Finished(Modifiers::parse(rest))),
+            "finished" => Some(Event::Finished(HeldKeys::decode(rest))),
             "chord" if rest.is_empty() => Some(Event::Chord),
-            "held" => Some(Event::Held(Modifiers::parse(rest))),
+            "held" => Some(Event::Held(HeldKeys::decode(rest))),
             "refused" => {
                 let (permanent, message) = rest.split_once(' ')?;
                 Some(Event::Refused {
@@ -250,18 +242,18 @@ mod tests {
 
     #[test]
     fn events_survive_being_sent() {
-        let held = Modifiers::parse("ctrl+super");
+        let held = HeldKeys::from_key_codes([29, 125]);
         for event in [
             Event::Ready,
             Event::Started(1.5, -2.0),
             Event::Updated(3.0, 4.25),
             Event::Point(0.0, 100.0),
             Event::Ended,
-            Event::Finished(held),
-            Event::Finished(Modifiers::default()),
+            Event::Finished(held.clone()),
+            Event::Finished(HeldKeys::default()),
             Event::Chord,
             Event::Held(held),
-            Event::Held(Modifiers::default()),
+            Event::Held(HeldKeys::default()),
             Event::Refused {
                 permanent: true,
                 message: "no such button".to_string(),

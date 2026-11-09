@@ -672,13 +672,14 @@ fn run_session(
                     let _ = signals.try_send(DaemonSignal::GestureEnded);
                 }
                 Some(Event::Point(x, y)) => points.push(gestos::protractor::Point2D { x, y }),
-                Some(Event::Finished(modifiers)) => {
+                Some(Event::Finished(held)) => {
                     println!("Gesture drawing finished. Path points: {}", points.len());
+                    let modifiers = gestos::keymap::held_modifiers(&held);
                     dispatch_gesture(&points, config, modifiers, &input, signals, wayland_ctx);
                     points.clear();
                 }
                 Some(Event::Chord) => show_overview_on_click(&input, wayland_ctx),
-                Some(Event::Held(modifiers)) => input.answer_held(modifiers),
+                Some(Event::Held(held)) => input.answer_held(held),
                 Some(Event::Refused { permanent, message }) => {
                     return SessionEnd::Refused { permanent, message };
                 }

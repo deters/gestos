@@ -2,13 +2,15 @@
 //! symbols, like `Control+z`, but a virtual keyboard presses physical keys, and on a French layout
 //! `z` is where a US layout has `w`.
 
+use crate::modifiers::{HeldKeys, Modifiers, MODIFIER_KEYS};
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use xkbcommon_dl::{
-    xkb_context_flags, xkb_keymap_compile_flags, xkb_keysym_flags, xkb_rule_names,
-    xkbcommon_option,
+    xkb_context_flags, xkb_key_direction, xkb_keymap_compile_flags, xkb_keysym_flags,
+    xkb_rule_names, xkb_state_component, xkbcommon_option, XKB_MOD_NAME_ALT, XKB_MOD_NAME_CTRL,
+    XKB_MOD_NAME_LOGO, XKB_MOD_NAME_SHIFT,
 };
 
 // xkbcommon numbers keys 8 above the kernel.
@@ -58,7 +60,14 @@ fn parse_localectl(output: &str) -> Option<LayoutName> {
             .map(|value| value.split(',').next().unwrap_or("").trim().to_string())
     };
     let layout = field("X11 Layout:").filter(|layout| !layout.is_empty() && layout != "(unset)")?;
-    Some(LayoutName::new(&layout, &field("X11 Variant:").unwrap_or_default()))
+    let mut name = LayoutName::new(&layout, &field("X11 Variant:").unwrap_or_default());
+    name.options = output
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("X11 Options:"))
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    Some(name)
 }
 
 /// The first layout in KDE's `kxkbrc`.
@@ -69,7 +78,46 @@ fn parse_kxkbrc(content: &str) -> Option<LayoutName> {
         .split(',')
         .next()?
         .trim();
-    (!layout.is_empty()).then(|| LayoutName::new(layout, ""))
+    let mut name = LayoutName::new(layout, "");
+    name.options = content
+        .lines()
+        .find_map(|line| line.strip_prefix("Options="))
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    (!layout.is_empty()).then_some(name)
+}
+
+/// The layout in an X server's `_XKB_RULES_NAMES`: rules, model, layouts, variants and options,
+/// each ending in a zero byte.
+fn parse_xkb_rules_names(value: &[u8]) -> Option<LayoutName> {
+    let fields: Vec<String> = value
+        .split(|byte| *byte == 0)
+        .map(|field| String::from_utf8_lossy(field).into_owned())
+        .collect();
+    let first = |index: usize| {
+        fields.get(index).map(|field| field.split(',').next().unwrap_or("").trim().to_string())
+    };
+    let layout = first(2).filter(|layout| !layout.is_empty())?;
+    let mut name = LayoutName::new(&layout, &first(3).unwrap_or_default());
+    name.options = fields.get(4).cloned().unwrap_or_default();
+    Some(name)
+}
+
+/// What the X server says its keyboard is, `setxkbmap`'s changes included.
+fn x11_layout() -> Option<LayoutName> {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{AtomEnum, ConnectionExt};
+    let (conn, screen) = x11rb::connect(None).ok()?;
+    let root = conn.setup().roots[screen].root;
+    let atom = conn.intern_atom(true, b"_XKB_RULES_NAMES").ok()?.reply().ok()?.atom;
+    let value = conn
+        .get_property(false, root, atom, AtomEnum::STRING, 0, 1024)
+        .ok()?
+        .reply()
+        .ok()?
+        .value;
+    parse_xkb_rules_names(&value)
 }
 
 fn command_output(program: &str, args: &[&str]) -> Option<String> {
@@ -103,7 +151,22 @@ fn gnome_layout() -> Option<LayoutName> {
 }
 
 /// The layout in use, as far as each desktop reveals it. Other desktops only say what's configured.
+/// On X11 the server has the options in use, which may be changed without the desktop knowing.
 pub fn active_layout() -> Option<LayoutName> {
+    let layout = desktop_layout();
+    if !crate::active_app::is_x11_session() {
+        return layout;
+    }
+    match (layout, x11_layout()) {
+        (Some(mut layout), Some(server)) => {
+            layout.options = server.options;
+            Some(layout)
+        }
+        (layout, server) => layout.or(server),
+    }
+}
+
+fn desktop_layout() -> Option<LayoutName> {
     let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_lowercase();
     if desktop.contains("kde") {
         let kxkbrc = crate::config::config_home().join("kxkbrc");
@@ -123,6 +186,8 @@ pub fn active_layout() -> Option<LayoutName> {
 pub struct LayoutKeys {
     symbols: HashMap<u32, (u16, u32)>,
     chars: HashMap<char, (u16, u32)>,
+    /// What each key that can be a modifier does when held.
+    modifier_keys: HashMap<u16, Modifiers>,
 }
 
 impl LayoutKeys {
@@ -142,6 +207,7 @@ impl LayoutKeys {
 
         let mut symbols: HashMap<u32, (u16, u32)> = HashMap::new();
         let mut chars: HashMap<char, (u16, u32)> = HashMap::new();
+        let mut modifier_keys: HashMap<u16, Modifiers> = HashMap::new();
         // Safe because the pointers stay valid during these calls, the key's symbol array is read
         // within the bounds xkbcommon reports, and each object is released exactly once.
         unsafe {
@@ -189,10 +255,52 @@ impl LayoutKeys {
                     }
                 }
             }
+            for key in MODIFIER_KEYS {
+                let state = (xkb.xkb_state_new)(keymap);
+                if state.is_null() {
+                    continue;
+                }
+                let keycode = key as u32 + XKB_KEYCODE_OFFSET;
+                (xkb.xkb_state_update_key)(state, keycode, xkb_key_direction::XKB_KEY_DOWN);
+                let active = |name: &[u8]| {
+                    (xkb.xkb_state_mod_name_is_active)(
+                        state,
+                        name.as_ptr() as *const _,
+                        xkb_state_component::XKB_STATE_MODS_EFFECTIVE,
+                    ) > 0
+                };
+                let modifiers = Modifiers {
+                    ctrl: active(XKB_MOD_NAME_CTRL),
+                    alt: active(XKB_MOD_NAME_ALT),
+                    shift: active(XKB_MOD_NAME_SHIFT),
+                    super_key: active(XKB_MOD_NAME_LOGO),
+                };
+                (xkb.xkb_state_unref)(state);
+                modifier_keys.insert(key, modifiers);
+            }
             (xkb.xkb_keymap_unref)(keymap);
             (xkb.xkb_context_unref)(context);
         }
-        Some(LayoutKeys { symbols, chars })
+        Some(LayoutKeys { symbols, chars, modifier_keys })
+    }
+
+    /// What held keys mean on this layout. A key that's no modifier on it keeps its usual meaning,
+    /// so right Alt is Alt where it types the third level, as it always was here.
+    pub fn modifiers(&self, held: &HeldKeys) -> Modifiers {
+        let mut modifiers = Modifiers::default();
+        for key in held.codes() {
+            let meaning = self
+                .modifier_keys
+                .get(key)
+                .copied()
+                .filter(|meaning| !meaning.is_empty())
+                .unwrap_or_else(|| Modifiers::from_key_codes([*key]));
+            modifiers.ctrl |= meaning.ctrl;
+            modifiers.alt |= meaning.alt;
+            modifiers.shift |= meaning.shift;
+            modifiers.super_key |= meaning.super_key;
+        }
+        modifiers
     }
 
     /// The key that types a symbol, and any shift level it needs. Names are exact, because
@@ -294,6 +402,17 @@ pub fn current_layout_keys() -> Option<Arc<LayoutKeys>> {
     let keys = LayoutKeys::compile(&name).map(Arc::new);
     *cached = Some((name, keys.clone()));
     keys
+}
+
+/// What held keys mean on the layout in use, remaps like Ctrl and Win swapped included.
+pub fn held_modifiers(held: &HeldKeys) -> Modifiers {
+    if held.is_empty() {
+        return Modifiers::default();
+    }
+    match current_layout_keys() {
+        Some(keys) => keys.modifiers(held),
+        None => held.on_standard_layout(),
+    }
 }
 
 #[cfg(test)]
@@ -429,6 +548,68 @@ mod tests {
         let Some(us) = layout("us") else { return };
         assert_eq!(us.lookup("NoSuchSymbol"), None);
         assert_eq!(us.lookup("control"), None);
+    }
+
+    #[test]
+    fn options_are_read_from_each_desktop_and_the_x_server() {
+        let mut swapped = name("br", "abnt2");
+        swapped.options = "ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl".to_string();
+        assert_eq!(
+            parse_localectl(
+                "   X11 Layout: br,us\n  X11 Variant: abnt2,\n  X11 Options: ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl\n"
+            ),
+            Some(swapped.clone())
+        );
+        assert_eq!(
+            parse_xkb_rules_names(
+                b"evdev\0pc105\0br,us\0abnt2,\0ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl\0"
+            ),
+            Some(swapped)
+        );
+        let mut kde = name("de", "");
+        kde.options = "caps:ctrl_modifier".to_string();
+        assert_eq!(
+            parse_kxkbrc("[Layout]\nLayoutList=de,us\nOptions=caps:ctrl_modifier\nResetOldOptions=true\n"),
+            Some(kde)
+        );
+        assert_eq!(parse_xkb_rules_names(b"evdev\0pc105\0\0\0\0"), None);
+    }
+
+    fn with_options(options: &str) -> Option<LayoutKeys> {
+        let mut layout = name("us", "");
+        layout.options = options.to_string();
+        LayoutKeys::compile(&layout)
+    }
+
+    fn meaning(keys: &LayoutKeys, codes: &[u16]) -> Modifiers {
+        keys.modifiers(&HeldKeys::from_key_codes(codes.iter().copied()))
+    }
+
+    #[test]
+    fn held_keys_mean_what_the_layout_makes_them() {
+        let Some(us) = layout("us") else { return };
+        assert_eq!(meaning(&us, &[29]), Modifiers::parse("ctrl"));
+        assert_eq!(meaning(&us, &[125, 42]), Modifiers::parse("super+shift"));
+        assert!(meaning(&us, &[58]).is_empty());
+
+        let Some(swapped) = with_options("ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl") else { return };
+        assert_eq!(meaning(&swapped, &[125]), Modifiers::parse("ctrl"));
+        assert_eq!(meaning(&swapped, &[126]), Modifiers::parse("ctrl"));
+        assert_eq!(meaning(&swapped, &[29]), Modifiers::parse("super"));
+        assert_eq!(meaning(&swapped, &[97]), Modifiers::parse("super"));
+
+        let Some(both_ctrl) = with_options("altwin:ctrl_win") else { return };
+        assert_eq!(meaning(&both_ctrl, &[125]), Modifiers::parse("ctrl"));
+        assert_eq!(meaning(&both_ctrl, &[29]), Modifiers::parse("ctrl"));
+
+        let Some(caps_ctrl) = with_options("caps:ctrl_modifier") else { return };
+        assert_eq!(meaning(&caps_ctrl, &[58]), Modifiers::parse("ctrl"));
+    }
+
+    #[test]
+    fn right_alt_stays_alt_where_it_types_the_third_level() {
+        let Some(brazilian) = layout("br") else { return };
+        assert_eq!(meaning(&brazilian, &[100]), Modifiers::parse("alt"));
     }
 
     #[test]

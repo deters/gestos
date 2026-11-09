@@ -34,7 +34,7 @@ mod service {
         SOCKET_PATH,
     };
     use crate::keyboards::{created_event_nodes, is_physical_keyboard, Keyboards};
-    use crate::modifiers::Modifiers;
+    use crate::modifiers::HeldKeys;
     use crate::uinput::{trigger_button_code, UinputDevice};
     use evdev::{Device, EventType, KeyCode};
     use std::fs::File;
@@ -54,7 +54,8 @@ mod service {
     const MAX_SENSITIVITY: i32 = 100_000;
     const MAX_PENDING_BYTES: usize = 1024 * 1024;
     // Keeps GNOME from treating a released Super as a tap, which opens the Overview. It's F24,
-    // which nothing normally uses.
+    // which nothing normally uses. Tapped with any modifier key held, since which of them is Super
+    // depends on the layout.
     const UNUSED_KEY: u16 = KeyCode::KEY_F24.0;
 
     struct Refusal {
@@ -169,7 +170,7 @@ mod service {
             self.reopen_at = None;
         }
 
-        fn held(&self) -> Modifiers {
+        fn held(&self) -> HeldKeys {
             self.keyboards.as_ref().map(Keyboards::held).unwrap_or_default()
         }
 
@@ -327,7 +328,7 @@ mod service {
         let mut lines = LineBuffer::default();
         let mut recognizer = GestureRecognizer::new(threshold / 10.0, min_path_length);
         let mut pending_frame: Vec<evdev::InputEvent> = Vec::new();
-        let mut held_at_press = Modifiers::default();
+        let mut held_at_press = HeldKeys::default();
         let mut next_seat_check = Instant::now() + SEAT_CHECK_INTERVAL;
         let mut last_gesture = None;
         // Clicking left while right draws runs its own action instead of a gesture. Only a
@@ -412,7 +413,7 @@ mod service {
                             let held = if may_report_held(last_gesture, Instant::now()) {
                                 modifiers.held()
                             } else {
-                                Modifiers::default()
+                                HeldKeys::default()
                             };
                             outbox.send(&Event::Held(held));
                         }
@@ -475,7 +476,7 @@ mod service {
                         outbox.send(&Event::Ended);
 
                         if let Some(points) = path {
-                            if held_at_press.super_key {
+                            if !held_at_press.is_empty() {
                                 if let Some(ref u) = uinput {
                                     u.tap_key(UNUSED_KEY);
                                 }
@@ -483,7 +484,7 @@ mod service {
                             for point in &points {
                                 outbox.send(&Event::Point(point.x, point.y));
                             }
-                            outbox.send(&Event::Finished(held_at_press));
+                            outbox.send(&Event::Finished(held_at_press.clone()));
                             last_gesture = Some(Instant::now());
                         } else if grabbed {
                             // Click emulation
