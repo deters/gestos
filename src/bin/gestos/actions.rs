@@ -50,9 +50,10 @@ pub fn action_needs_parameter(opt: &EditorActionOption) -> bool {
 }
 
 /// Keybinding keys hold a list of accelerators. The schemas also hold settings that aren't
-/// actions, such as the volume step and the list of custom shortcut paths.
+/// actions, such as the volume step and the list of custom shortcut paths, and one key that only
+/// works while an app has taken the mouse and keyboard.
 fn is_gnome_action_key(key: &str, holds_string_list: bool) -> bool {
-    holds_string_list && key != "custom-keybindings"
+    holds_string_list && key != "custom-keybindings" && key != "cancel-input-capture"
 }
 
 /// The standard shortcuts apps share, from https://developer.gnome.org/hig/reference/keyboard.html
@@ -492,11 +493,7 @@ pub fn fetch_gnome_action_options() -> Vec<EditorActionOption> {
         return options;
     }
 
-    let schemas = vec![
-        "org.gnome.desktop.wm.keybindings",
-        "org.gnome.settings-daemon.plugins.media-keys",
-        "org.gnome.shell.keybindings",
-    ];
+    let schemas = gestos::wayland::GNOME_SHORTCUT_SCHEMAS;
 
     let source = match gio::SettingsSchemaSource::default() {
         Some(s) => s,
@@ -697,5 +694,7 @@ mod tests {
         assert!(is_gnome_action_key("close", true));
         assert!(!is_gnome_action_key("volume-step", false));
         assert!(!is_gnome_action_key("custom-keybindings", true));
+        assert!(is_gnome_action_key("toggle-tiled-left", true));
+        assert!(!is_gnome_action_key("cancel-input-capture", true));
     }
 }

@@ -20,6 +20,14 @@ const GESTOS_EXTENSION_PATH: &str = "/io/github/deters/Gestos/Extension";
 const GESTOS_EXTENSION_INTERFACE: &str = "io.github.deters.Gestos.Extension";
 const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
 const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
+/// Where GNOME keeps the shortcuts Gestos can run: the window manager's, Mutter's own, which
+/// snap windows to a side, the media keys, and the Shell's.
+pub const GNOME_SHORTCUT_SCHEMAS: [&str; 4] = [
+    "org.gnome.desktop.wm.keybindings",
+    "org.gnome.mutter.keybindings",
+    "org.gnome.settings-daemon.plugins.media-keys",
+    "org.gnome.shell.keybindings",
+];
 
 fn call_extension(conn: &zbus::blocking::Connection, shell: &str, method: &str) -> zbus::Result<()> {
     conn.call_method(
@@ -846,11 +854,7 @@ impl WaylandContext {
     }
 
     fn run_gnome_shortcut(&self, key: &str, fallback_keys: &str, uinput_handler: &dyn Fn(&str)) {
-        let schemas = vec![
-            "org.gnome.desktop.wm.keybindings",
-            "org.gnome.settings-daemon.plugins.media-keys",
-            "org.gnome.shell.keybindings",
-        ];
+        let schemas = GNOME_SHORTCUT_SCHEMAS;
 
         // An action can be unassigned and still have a fixed key, like www and www-static.
         let static_key = format!("{key}-static");

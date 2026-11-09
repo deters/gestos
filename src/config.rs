@@ -335,6 +335,8 @@ fn gnome_icon_name(key: &str) -> &'static str {
         "move-to-side-s" => "go-down-symbolic",
         "move-to-side-e" => "go-next-symbolic",
         "move-to-side-w" => "go-previous-symbolic",
+        "toggle-tiled-left" => "view-dual-symbolic",
+        "toggle-tiled-right" => "view-dual-symbolic",
         "move-to-center" => "format-justify-center-symbolic",
         _ if key.starts_with("move-to-corner-") => "go-jump-symbolic",
         _ if key.starts_with("move-to-monitor-") => "video-joined-displays-symbolic",
