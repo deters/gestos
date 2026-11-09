@@ -64,6 +64,7 @@ getent group input >/dev/null || groupadd -r input
 /lib/modules-load.d/gestos.conf
 %{_datadir}/applications/gestos.desktop
 %{_datadir}/icons/hicolor/scalable/apps/gestos.svg
+%{_datadir}/icons/hicolor/*/apps/gestos.png
 %{_datadir}/gestos/gestos.yaml
 %{_datadir}/gnome-shell/extensions/gestos@deters.github.io/
 /usr/lib/systemd/user/gestosd.service

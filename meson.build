@@ -62,6 +62,11 @@ install_data('packaging/gestos.conf', install_dir: modulesloaddir)
 datadir = prefix / get_option('datadir')
 install_data('gestos.desktop', install_dir: datadir / 'applications')
 install_data('gestos.svg', install_dir: datadir / 'icons/hicolor/scalable/apps')
+# Drawn at the usual sizes too, for where the SVG isn't shown, as on Ubuntu.
+foreach size : ['16', '24', '32', '48', '64', '128', '256', '512']
+  install_data('icons/gestos-' + size + '.png', rename: 'gestos.png',
+    install_dir: datadir / 'icons/hicolor' / (size + 'x' + size) / 'apps')
+endforeach
 install_data('gestos.yaml', install_dir: datadir / 'gestos')
 
 # D-Bus Activation Service
