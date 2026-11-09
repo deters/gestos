@@ -307,12 +307,13 @@ fn prefer_app_gestures(candidates: Vec<Gesture>) -> Vec<Gesture> {
 }
 
 /// The app of the focused window, which gestures limited to some apps need. It's only asked for
-/// when there are some, and only GNOME's extension can say.
+/// when there are some, and only GNOME's extension can say. The second part says that it
+/// couldn't be asked.
 #[cfg(target_os = "linux")]
-fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> Option<String> {
+fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> (Option<String>, bool) {
     let limited = config.gestures.iter().any(|g| !g.is_deleted && !g.apps.is_empty());
     if !limited {
-        return None;
+        return (None, false);
     }
     let asked = if wayland_ctx.is_gnome {
         gestos::wayland::focused_app_in_gnome_extension().ok()
@@ -325,7 +326,25 @@ fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> Option<S
              takes GNOME, with the \u{201c}Gestos\u{201d} extension turned on."
         );
     }
-    asked.flatten()
+    let unknown = asked.is_none();
+    (asked.flatten(), unknown)
+}
+
+/// Whether the drawing would match a gesture limited to some apps, if the app in use were known.
+fn matches_app_gesture(
+    points: &[gestos::protractor::Point2D],
+    config: &Configuration,
+    modifiers: Modifiers,
+) -> bool {
+    let templates: Vec<_> = config
+        .gestures
+        .iter()
+        .filter(|g| !g.is_deleted && g.modifiers == modifiers)
+        .map(|g| (g.name.clone(), g.points.clone()))
+        .collect();
+    gestos::protractor::match_gesture_candidates(points, &templates)
+        .iter()
+        .any(|name| config.gestures.iter().any(|g| &g.name == name && !g.apps.is_empty()))
 }
 
 #[cfg(target_os = "linux")]
@@ -383,9 +402,12 @@ fn dispatch_gesture(
         return;
     }
 
-    let app = focused_app(config, wayland_ctx);
+    let (app, app_unknown) = focused_app(config, wayland_ctx);
     if let Some(app) = &app {
         println!("App in use: {app}");
+    }
+    if app_unknown && wayland_ctx.is_gnome && matches_app_gesture(points, config, modifiers) {
+        gestos::wayland::tell_gesture_needs_extension();
     }
     let templates = gesture_templates(config, modifiers, app.as_deref());
     let candidates: Vec<Gesture> = gestos::protractor::match_gesture_candidates(points, &templates)
@@ -1417,6 +1439,27 @@ mod tests {
         assert_eq!(names(Some("org.mozilla.firefox")), ["close", "close-tab"]);
         assert_eq!(names(Some("org.gnome.TextEditor")), ["close"]);
         assert_eq!(names(None), ["close"]);
+    }
+
+    #[test]
+    fn a_drawing_for_an_apps_gesture_is_noticed_without_the_app() {
+        let line = |to: f64| -> Vec<gestos::protractor::Point2D> {
+            (0..20)
+                .map(|i| gestos::protractor::Point2D { x: f64::from(i) * to, y: f64::from(i) * 10.0 })
+                .collect()
+        };
+        let mut down_right = sample_gesture("down-right", "");
+        down_right.points = line(10.0);
+        down_right.apps = vec!["org.gnome.Ptyxis".to_string()];
+        let mut down = sample_gesture("down", "");
+        down.points = line(0.0);
+        let config = Configuration {
+            gestures: vec![down_right, down],
+            user_config_path: PathBuf::new(),
+            button: None,
+        };
+        assert!(matches_app_gesture(&line(10.0), &config, Modifiers::default()));
+        assert!(!matches_app_gesture(&line(0.0), &config, Modifiers::default()));
     }
 
     #[test]

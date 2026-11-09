@@ -205,8 +205,35 @@ fn run_extension_action_telling(
         conn,
         notifications,
         "This action needs the \u{201c}Gestos\u{201d} GNOME extension",
-        "Turn it on in Gestos Preferences.",
+        extension_needed_body(conn, shell),
     )
+}
+
+/// What gets the extension running: an update if this GNOME is newer than it supports, or else
+/// turning it on.
+fn extension_needed_body(conn: &zbus::blocking::Connection, shell: &str) -> &'static str {
+    let unsupported = crate::gnome_extension::info_from(conn, shell).is_ok_and(|info| {
+        crate::gnome_extension::value::<f64>(&info, "state")
+            == Some(crate::gnome_extension::STATE_OUT_OF_DATE)
+    });
+    if unsupported {
+        "It doesn't support this version of GNOME yet. Update Gestos to use it."
+    } else {
+        "Turn it on in Gestos Preferences."
+    }
+}
+
+/// Says that a gesture didn't run, as it needs the extension, which isn't running. On its own
+/// thread, so that a busy Shell can't hold up the next gesture.
+pub fn tell_gesture_needs_extension() {
+    std::thread::spawn(|| {
+        let Ok(conn) = zbus::blocking::Connection::session() else { return };
+        let body = extension_needed_body(&conn, GNOME_SHELL_NAME);
+        let summary = "This gesture needs the \u{201c}Gestos\u{201d} GNOME extension";
+        if let Err(e) = notify(&conn, NOTIFICATIONS_NAME, summary, body) {
+            log::warn!("Failed to say a gesture needs the extension: {}", e);
+        }
+    });
 }
 
 fn notify(
