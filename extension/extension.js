@@ -365,7 +365,9 @@ class WindowActions {
             done();
             return;
         }
-        const rect = keepInside(original.rect, window.get_work_area_current_monitor());
+        // No bigger than the screen, as that's the most it can take, so it's not waited for longer.
+        const area = window.get_work_area_current_monitor();
+        const rect = keepInside({...original.rect, ...fitSize(original.rect, area)}, area);
         const finish = () => {
             this._stopResizeWait(window, original);
             done();
@@ -395,13 +397,14 @@ class WindowActions {
 
     // Holds the window's picture as it is, so that resizing it doesn't show, until it's thawed: once
     // it changes size again if asked, or after a while. A window that closes is never thawed, as
-    // its picture goes with it. Thawing also shows a window that was hidden while frozen.
+    // its picture goes with it. Thawing also shows a window that was hidden while frozen. `ended`
+    // is called once it's thawed or gone.
     _freeze(window) {
         const actor = window.get_compositor_private();
         if (!actor)
-            return () => {};
+            return (_onResize, _timeout, ended = null) => ended?.();
         actor.freeze();
-        return (onResize, timeout) => {
+        return (onResize, timeout, ended = null) => {
             const frozen = {ids: [], timeoutId: 0};
             frozen.release = thaw => {
                 for (const id of frozen.ids)
@@ -413,6 +416,7 @@ class WindowActions {
                     actor.thaw();
                     actor.opacity = 255;
                 }
+                ended?.();
             };
             frozen.ids.push(window.connect('unmanaging', () => frozen.release(false)));
             if (onResize)
@@ -488,17 +492,23 @@ class WindowActions {
         const flags = window.get_maximize_flags();
         if (window.is_fullscreen() || flags === Meta.MaximizeFlags.BOTH) {
             const fullscreen = window.is_fullscreen();
-            const aside = this._setAsideFrom(tiling, window, original);
+            // The others only take its room once it's shown maximized, over them, as it takes a
+            // moment to get there.
+            const aside = this._setAsideFrom(tiling, window, original, false);
             // Its original size is taken where it can't be seen, until it's maximized again.
             const thawLater = this._freeze(window);
             this._restoreOriginalThen(window, original, () => {
                 this._untrack(window);
+                // Watched before it's maximized, as an X11 window takes its new size at once.
+                thawLater(true, MAXIMIZE_THAW_TIMEOUT_MS, () => {
+                    if (aside && this._tilings.get(tiling.workspace) === tiling)
+                        this._layoutWhenReady(tiling);
+                });
                 if (fullscreen)
                     window.make_fullscreen();
                 else
                     window.maximize();
                 aside?.settle();
-                thawLater(true, MAXIMIZE_THAW_TIMEOUT_MS);
             });
         } else if (flags !== 0) {
             if (!original.snapped) {
@@ -513,11 +523,15 @@ class WindowActions {
         }
     }
 
-    // Takes a tiled window out to set it aside, with its original size to join again at.
-    _setAsideFrom(tiling, window, original) {
+    // Takes a tiled window out to set it aside, with its original size to join again at. The others
+    // take its room now, or once `_layoutWhenReady` is called if not.
+    _setAsideFrom(tiling, window, original, makeRoom = true) {
         if (!tiling || !original.rect)
             return null;
-        this._leave(window);
+        if (makeRoom)
+            this._leave(window);
+        else
+            this._dropFromTiling(tiling, window);
         this._setAside(tiling, window, original.rect);
         return tiling.aside.get(window);
     }
@@ -681,8 +695,12 @@ class WindowActions {
         this._joinTiling(tiling, window, {tile: null});
         // A window that joins is the one the user touched last, as it's just been opened or shown.
         tiling.order.unshift(window);
-        if (maximized)
+        if (maximized) {
             window.unmaximize();
+            // An X11 window takes its normal size at once, so there's nothing to wait for.
+            if (window.get_client_type() === Meta.WindowClientType.X11)
+                original.rect ??= copyRect(window.get_frame_rect());
+        }
     }
 
     // Places the tiles once every window's original size is known.
@@ -862,7 +880,12 @@ class WindowActions {
         aside.ids = [
             ...['notify::maximized-horizontally', 'notify::maximized-vertically',
                 'notify::fullscreen'].map(signal => window.connect(signal, check)),
-            window.connect('unmanaged', () => this._forgetAside(tiling, window)),
+            window.connect('unmanaged', () => {
+                this._forgetAside(tiling, window);
+                // Gone before it was maximized, so the others haven't taken its room yet.
+                if (!aside.settled)
+                    this._layoutWhenReady(tiling);
+            }),
         ];
         aside.settle = () => {
             aside.settled = true;
