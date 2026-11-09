@@ -92,6 +92,7 @@ fn append_button_row(
     state_rc: &Rc<RefCell<AppState>>,
     list: &adw::PreferencesGroup,
     dialog: &gtk::Window,
+    overview_row: Option<adw::ActionRow>,
 ) {
     let (row, row_box, subtitle) =
         settings_row("Draw With", "The mouse button that draws gestures");
@@ -107,9 +108,13 @@ fn append_button_row(
         let state_rc = Rc::clone(state_rc);
         let dialog = dialog.clone();
         let subtitle = subtitle.clone();
+        let overview_row = overview_row.clone();
         toggle.connect_toggled(move |toggle| {
             if !toggle.is_active() {
                 return;
+            }
+            if let Some(row) = &overview_row {
+                row.set_sensitive(button == DEFAULT_DRAW_BUTTON);
             }
             let mut state = state_rc.borrow_mut();
             let picked = (button != DEFAULT_DRAW_BUTTON).then_some(button);
@@ -137,6 +142,39 @@ fn append_button_row(
     list.add(&row);
 }
 
+
+/// Clicking left while holding right shows the overview, as on a Mac. Only desktops with an
+/// overview have it, and it only works while the right button draws.
+fn overview_click_row(state_rc: &Rc<RefCell<AppState>>) -> Option<adw::ActionRow> {
+    if !matches!(gestos::config::get_environment_suffix(), Some("gnome" | "kde")) {
+        return None;
+    }
+    let title = "Show Overview With Both Buttons";
+    let description = "Hold right, then click left";
+    let (row, row_box, subtitle) = settings_row(title, description);
+    let switch = settings_switch(title);
+    {
+        let state = state_rc.borrow();
+        switch.set_active(state.config.overview_click);
+        row.set_sensitive(state.config.button.unwrap_or(DEFAULT_DRAW_BUTTON) == DEFAULT_DRAW_BUTTON);
+    }
+    let state_rc = Rc::clone(state_rc);
+    switch.connect_state_set(move |switch, enabled| {
+        let mut state = state_rc.borrow_mut();
+        state.config.overview_click = enabled;
+        if let Err(e) = state.config.save_to_file() {
+            state.config.overview_click = !enabled;
+            subtitle.set_text(&format!("Could not change this setting: {e}"));
+            return glib::Propagation::Stop;
+        }
+        subtitle.set_text(description);
+        let parent = switch.root().and_downcast::<gtk::Window>();
+        reload_daemon(state.dbus_conn.as_ref(), parent.as_ref());
+        glib::Propagation::Proceed
+    });
+    row_box.append(&switch);
+    Some(row)
+}
 
 /// The extension's status, with a switch for it. The rows for what it does follow it, as they
 /// can only be changed while it runs.
@@ -206,7 +244,11 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     // --- Gestures ---
     let gestures_list = append_section(&page, "Gestures");
     append_autostart_row(&gestures_list);
-    append_button_row(state_rc, &gestures_list, &dialog);
+    let overview_row = overview_click_row(state_rc);
+    append_button_row(state_rc, &gestures_list, &dialog, overview_row.clone());
+    if let Some(row) = &overview_row {
+        gestures_list.add(row);
+    }
     // The extension draws it, so it's only on GNOME.
     if on_gnome {
         let (path_row, path_box, _) =

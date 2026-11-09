@@ -330,6 +330,12 @@ mod service {
         let mut held_at_press = Modifiers::default();
         let mut next_seat_check = Instant::now() + SEAT_CHECK_INTERVAL;
         let mut last_gesture = None;
+        // Clicking left while right draws runs its own action instead of a gesture. Only a
+        // grabbed mouse can keep that click from the app under the pointer.
+        let mut chord_enabled = false;
+        let mut trigger_held = false;
+        let mut chorded = false;
+        let mut holding_back_left = false;
 
         loop {
             if !outbox.flush() {
@@ -401,6 +407,7 @@ mod service {
                             }
                         }
                         Some(Request::SetKeyboards(enabled)) => modifiers.set_enabled(enabled),
+                        Some(Request::SetChord(enabled)) => chord_enabled = enabled,
                         Some(Request::QueryHeld) => {
                             let held = if may_report_held(last_gesture, Instant::now()) {
                                 modifiers.held()
@@ -433,12 +440,37 @@ mod service {
                 let ev_code = ev.code();
                 let ev_value = ev.value();
 
+                // The left click of a chord, and its release, never reach the app.
+                if ev_type == EventType::KEY && ev_code == KeyCode::BTN_LEFT.0 && grabbed {
+                    if ev_value == 1 && chord_enabled && trigger_held {
+                        holding_back_left = true;
+                        if !chorded {
+                            chorded = true;
+                            outbox.send(&Event::Chord);
+                        }
+                        continue;
+                    }
+                    if ev_value == 0 && holding_back_left {
+                        holding_back_left = false;
+                        continue;
+                    }
+                }
+
                 if ev_type == EventType::KEY && ev_code == target_button {
                     if ev_value == 1 {
+                        trigger_held = true;
+                        chorded = false;
                         held_at_press = modifiers.held();
                         let start = recognizer.press();
                         outbox.send(&Event::Started(start.x, start.y));
+                    } else if ev_value == 0 && chorded {
+                        // It was a chord, so the right button neither draws nor clicks.
+                        trigger_held = false;
+                        chorded = false;
+                        recognizer.release();
+                        outbox.send(&Event::Ended);
                     } else if ev_value == 0 {
+                        trigger_held = false;
                         let path = recognizer.release();
                         outbox.send(&Event::Ended);
 

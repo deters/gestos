@@ -545,6 +545,17 @@ fn run_gesture(
     );
 }
 
+/// Clicking left while right is held shows the overview, as Mission Control does on a Mac.
+#[cfg(target_os = "linux")]
+fn show_overview_on_click(input: &InputClient, wayland_ctx: &WaylandContext) {
+    if screen_is_locked() {
+        println!("Ignoring a click because the screen is locked.");
+        return;
+    }
+    println!("Clicked left while holding right: Show Overview");
+    spawn_gesture_actions(vec![ActionType::ShowOverview], wayland_ctx.clone(), input.clone(), false);
+}
+
 /// Why a connection to the input service ended.
 #[cfg(target_os = "linux")]
 enum SessionEnd {
@@ -580,6 +591,10 @@ fn run_session(
         keyboards: config.uses_modifiers(),
         device: device_path.to_string(),
     });
+    // Only asked for when it's on, so an input service from before it existed still serves.
+    if config.overview_click {
+        input.send(&Request::SetChord(true));
+    }
 
     let mut lines = LineBuffer::default();
     let mut points = Vec::new();
@@ -588,6 +603,9 @@ fn run_session(
             println!("gestosd: Reloading configuration dynamically...");
             match Configuration::load_trusted(&config.user_config_path) {
                 Ok(new_config) => {
+                    if new_config.overview_click != config.overview_click {
+                        input.send(&Request::SetChord(new_config.overview_click));
+                    }
                     *config = new_config;
                     input.send(&Request::SetKeyboards(config.uses_modifiers()));
                     println!("gestosd: Configuration reloaded successfully.");
@@ -659,6 +677,7 @@ fn run_session(
                     dispatch_gesture(&points, config, modifiers, &input, signals, wayland_ctx);
                     points.clear();
                 }
+                Some(Event::Chord) => show_overview_on_click(&input, wayland_ctx),
                 Some(Event::Held(modifiers)) => input.answer_held(modifiers),
                 Some(Event::Refused { permanent, message }) => {
                     return SessionEnd::Refused { permanent, message };
@@ -1347,6 +1366,7 @@ mod tests {
             gestures: vec![sample_gesture("held", "ctrl")],
             user_config_path: PathBuf::new(),
             button: None,
+            overview_click: false,
         };
         let (signals, received) = std::sync::mpsc::sync_channel(16);
         let (mut wake_reader, _wake_writer) = UnixStream::pair().unwrap();
@@ -1412,6 +1432,7 @@ mod tests {
             ],
             user_config_path: PathBuf::new(),
             button: None,
+            overview_click: false,
         };
         let names = |modifiers: &str| -> Vec<String> {
             gesture_templates(&config, Modifiers::parse(modifiers), None)
@@ -1433,6 +1454,7 @@ mod tests {
             gestures: vec![sample_gesture("close", ""), close_tab],
             user_config_path: PathBuf::new(),
             button: None,
+            overview_click: false,
         };
         let names = |app: Option<&str>| -> Vec<String> {
             gesture_templates(&config, Modifiers::default(), app)
@@ -1461,6 +1483,7 @@ mod tests {
             gestures: vec![down_right, down],
             user_config_path: PathBuf::new(),
             button: None,
+            overview_click: false,
         };
         assert!(matches_app_gesture(&line(10.0), &config, Modifiers::default()));
         assert!(!matches_app_gesture(&line(0.0), &config, Modifiers::default()));

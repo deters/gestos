@@ -41,6 +41,8 @@ pub enum Request {
         device: String,
     },
     SetKeyboards(bool),
+    /// Whether clicking the left button while the right one draws is reported, as `Chord`.
+    SetChord(bool),
     Key { code: u16, pressed: bool },
     QueryHeld,
 }
@@ -53,6 +55,8 @@ pub enum Event {
     Point(f64, f64),
     Ended,
     Finished(Modifiers),
+    /// The left button was clicked while the right one was held, which then draws nothing.
+    Chord,
     Held(Modifiers),
     Refused { permanent: bool, message: String },
 }
@@ -87,6 +91,7 @@ impl Request {
                 device,
             } => format!("open {button} {sensitivity} {} {device}\n", flag(*keyboards)),
             Request::SetKeyboards(on) => format!("keyboards {}\n", flag(*on)),
+            Request::SetChord(on) => format!("chord {}\n", flag(*on)),
             Request::Key { code, pressed } => format!("key {code} {}\n", flag(*pressed)),
             Request::QueryHeld => "held\n".to_string(),
         }
@@ -105,6 +110,7 @@ impl Request {
                 })
             }
             "keyboards" => Some(Request::SetKeyboards(parse_flag(rest)?)),
+            "chord" => Some(Request::SetChord(parse_flag(rest)?)),
             "key" => {
                 let (code, pressed) = rest.split_once(' ')?;
                 Some(Request::Key {
@@ -132,6 +138,7 @@ impl Event {
             Event::Point(x, y) => format!("point {x} {y}\n"),
             Event::Ended => "ended\n".to_string(),
             Event::Finished(modifiers) => format!("finished {}\n", encode_modifiers(*modifiers)),
+            Event::Chord => "chord\n".to_string(),
             Event::Held(modifiers) => format!("held {}\n", encode_modifiers(*modifiers)),
             Event::Refused { permanent, message } => {
                 format!("refused {} {}\n", flag(*permanent), message.replace('\n', " "))
@@ -148,6 +155,7 @@ impl Event {
             "point" => parse_point(rest).map(|(x, y)| Event::Point(x, y)),
             "ended" => Some(Event::Ended),
             "finished" => Some(Event::Finished(Modifiers::parse(rest))),
+            "chord" if rest.is_empty() => Some(Event::Chord),
             "held" => Some(Event::Held(Modifiers::parse(rest))),
             "refused" => {
                 let (permanent, message) = rest.split_once(' ')?;
@@ -231,6 +239,7 @@ mod tests {
                 device: "/dev/input/by-path/a mouse-event".to_string(),
             },
             Request::SetKeyboards(false),
+            Request::SetChord(true),
             Request::Key { code: 29, pressed: true },
             Request::QueryHeld,
         ] {
@@ -250,6 +259,7 @@ mod tests {
             Event::Ended,
             Event::Finished(held),
             Event::Finished(Modifiers::default()),
+            Event::Chord,
             Event::Held(held),
             Event::Held(Modifiers::default()),
             Event::Refused {
@@ -264,10 +274,10 @@ mod tests {
 
     #[test]
     fn nonsense_is_not_understood() {
-        for line in ["", "open", "open x 30 1 /dev/input/event1", "key 29", "key 99999 1", "key 1 2", "held now", "rm -rf"] {
+        for line in ["", "open", "open x 30 1 /dev/input/event1", "key 29", "key 99999 1", "key 1 2", "held now", "chord 2", "rm -rf"] {
             assert_eq!(Request::decode(line), None, "{line}");
         }
-        for line in ["", "started 1", "point a b", "refused"] {
+        for line in ["", "started 1", "point a b", "refused", "chord now"] {
             assert_eq!(Event::decode(line), None, "{line}");
         }
     }
