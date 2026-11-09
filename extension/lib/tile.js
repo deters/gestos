@@ -35,6 +35,38 @@ export function keepInside(rect, bounds) {
 }
 
 /**
+ * The biggest part of an area that none of the rectangles given cover, such as the room snapped
+ * windows leave. With none of it free, the whole area.
+ *
+ * @param {{x: number, y: number, width: number, height: number}} area - the room there is
+ * @param {Array<{x: number, y: number, width: number, height: number}>} taken - what's covered
+ * @returns {{x: number, y: number, width: number, height: number}} the free part
+ */
+export function freeArea(area, taken) {
+    let free = [{x: area.x, y: area.y, width: area.width, height: area.height}];
+    for (const t of taken) {
+        free = free.flatMap(f => {
+            const left = Math.max(f.x, t.x);
+            const right = Math.min(f.x + f.width, t.x + t.width);
+            const top = Math.max(f.y, t.y);
+            const bottom = Math.min(f.y + f.height, t.y + t.height);
+            if (left >= right || top >= bottom)
+                return [f];
+            // What's beside it on each side, as far as the free part goes.
+            return [
+                {...f, width: left - f.x},
+                {...f, x: right, width: f.x + f.width - right},
+                {...f, height: top - f.y},
+                {...f, y: bottom, height: f.y + f.height - bottom},
+            ].filter(r => r.width > 0 && r.height > 0);
+        });
+    }
+    const size = r => r.width * r.height;
+    return free.reduce((best, r) => (!best || size(r) > size(best) ? r : best), null) ??
+        {x: area.x, y: area.y, width: area.width, height: area.height};
+}
+
+/**
  * A size made no bigger than the bounds, along each side.
  *
  * @param {{width: number, height: number}} size - the size to fit

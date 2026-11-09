@@ -2,7 +2,7 @@
 
 import {exit} from 'system';
 
-import {fitSize, hasSize, isBelievableMinimum, keepInside, restoreRect, tileWindows} from '../lib/tile.js';
+import {fitSize, freeArea, hasSize, isBelievableMinimum, keepInside, restoreRect, tileWindows} from '../lib/tile.js';
 
 const rect = (x, y, width, height) => ({x, y, width, height});
 const bounds = rect(0, 0, 1000, 800);
@@ -146,6 +146,16 @@ class BoxedRect {
         return this.#rect.height;
     }
 }
+const work = rect(0, 32, 1000, 768);
+results.push(['leaves the right half beside a window snapped left',
+    freeArea(work, [rect(0, 32, 500, 768)]), rect(500, 32, 500, 768)]);
+results.push(['leaves the wider side beside a window maximized only up and down',
+    freeArea(work, [rect(100, 32, 300, 768)]), rect(400, 32, 600, 768)]);
+results.push(['leaves the whole area when nothing covers it',
+    freeArea(work, [rect(1000, 32, 500, 768)]), work]);
+results.push(['leaves the whole area when windows are snapped to both halves',
+    freeArea(work, [rect(0, 32, 500, 768), rect(500, 32, 500, 768)]), work]);
+
 results.push(['moves a boxed rect out from under the top bar',
     keepInside(new BoxedRect(0, 0, 300, 200), rect(0, 32, 1000, 768)), rect(0, 32, 300, 200)]);
 

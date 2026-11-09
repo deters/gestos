@@ -10,7 +10,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {GestureChooser} from './lib/chooser.js';
 import {GestureTrail} from './lib/trail.js';
-import {fitSize, hasSize, isBelievableMinimum, keepInside, restoreRect, tileWindows} from './lib/tile.js';
+import {fitSize, freeArea, hasSize, isBelievableMinimum, keepInside, restoreRect, tileWindows} from './lib/tile.js';
 
 const OBJECT_PATH = '/io/github/deters/Gestos/Extension';
 const INTERFACE_XML = `
@@ -73,6 +73,12 @@ const UNTILED_APP_IDS = ['io.github.deters.Gestos.Chooser', 'io.github.deters.Ge
 // Snapping a window to half the screen maximizes it in one direction.
 function isMaximizedAtAll(window) {
     return window.get_maximize_flags() !== 0;
+}
+
+// Snapped to a side, or maximized one way: it covers part of the screen, not all of it.
+function isSnapped(window) {
+    const flags = window.get_maximize_flags();
+    return flags !== 0 && flags !== Meta.MaximizeFlags.BOTH && !window.is_fullscreen();
 }
 
 function isTileable(window) {
@@ -765,12 +771,14 @@ class WindowActions {
             : [...tiling.parked.keys()].filter(window => window.get_workspace() === tiling.workspace);
         const windows = [...tiling.order.filter(window => tiling.windows.has(window)), ...parked];
         tiling.plans = this._byMonitor(windows).map(group => {
-            const area = group[0].get_work_area_current_monitor();
+            const workArea = group[0].get_work_area_current_monitor();
+            // Snapped windows keep their side, and the others are tiled in the room left.
+            const area = freeArea(workArea, this._snappedOn(tiling, group[0].get_monitor()));
             const rects = group.map(window => window === dragged
                 ? copyRect(window.get_frame_rect())
                 : tiling.parked.get(window)?.rect ?? this._originals.get(window).rect);
             return {windows: group, rects: tileWindows(rects, area, gap,
-                this._minimumsOf(tiling, group, area))};
+                this._minimumsOf(tiling, group, workArea))};
         });
         for (const plan of tiling.plans) {
             plan.windows.forEach((window, i) => {
@@ -798,6 +806,14 @@ class WindowActions {
         }
         this._stopTileCheck(tiling);
         this._scheduleTileCheck(tiling);
+    }
+
+    // Where the workspace's snapped windows on a monitor are.
+    _snappedOn(tiling, monitor) {
+        return tiling.workspace.list_windows()
+            .filter(window => !window.minimized && window.get_monitor() === monitor &&
+                isSnapped(window) && !tiling.windows.has(window))
+            .map(window => window.get_frame_rect());
     }
 
     _byMonitor(windows) {
@@ -893,11 +909,22 @@ class WindowActions {
             ...['notify::maximized-horizontally', 'notify::maximized-vertically',
                 'notify::fullscreen', 'notify::on-all-workspaces'].map(signal =>
                 window.connect(signal, check)),
+            // A snapped one only has its side once the app takes that size, and the others are
+            // tiled beside it again then.
+            ...['size-changed', 'position-changed'].map(signal => window.connect(signal, () => {
+                if (aside.settled && isSnapped(window))
+                    this._layoutWhenReady(tiling);
+            })),
+            // One that's minimized or moved away leaves its side to the others.
+            ...['notify::minimized', 'workspace-changed'].map(signal => window.connect(signal, () => {
+                if (aside.settled)
+                    this._layoutWhenReady(tiling);
+            })),
+            // Gone, so the others take its room: a snapped one's side, or the room of one that was
+            // still being maximized.
             window.connect('unmanaged', () => {
                 this._forgetAside(tiling, window);
-                // Gone before it was maximized, so the others haven't taken its room yet.
-                if (!aside.settled)
-                    this._layoutWhenReady(tiling);
+                this._layoutWhenReady(tiling);
             }),
         ];
         aside.settle = () => {
