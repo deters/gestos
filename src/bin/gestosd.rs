@@ -307,8 +307,8 @@ fn prefer_app_gestures(candidates: Vec<Gesture>) -> Vec<Gesture> {
 }
 
 /// The app of the focused window, which gestures limited to some apps need. It's only asked for
-/// when there are some, and only GNOME's extension can say. The second part says that it
-/// couldn't be asked.
+/// when there are some. On GNOME its extension says, and elsewhere the desktop, where it can. The
+/// second part says that it couldn't be asked.
 #[cfg(target_os = "linux")]
 fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> (Option<String>, bool) {
     let limited = config.gestures.iter().any(|g| !g.is_deleted && !g.apps.is_empty());
@@ -317,13 +317,17 @@ fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> (Option<
     }
     let asked = if wayland_ctx.is_gnome {
         gestos::wayland::focused_app_in_gnome_extension().ok()
+    } else if wayland_ctx.is_kde {
+        gestos::active_app::kde_active_app()
+    } else if gestos::active_app::is_x11_session() {
+        gestos::active_app::x11_active_app()
     } else {
         None
     };
     if asked.is_none() {
         println!(
             "Gestures limited to some apps can't run, as the app in use isn't known. That \
-             takes GNOME, with the \u{201c}Gestos\u{201d} extension turned on."
+             takes GNOME with the \u{201c}Gestos\u{201d} extension turned on, KDE, or X11."
         );
     }
     let unknown = asked.is_none();

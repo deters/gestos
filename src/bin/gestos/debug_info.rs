@@ -45,6 +45,16 @@ pub fn report() -> String {
     line(&mut out, "Kernel", read_trimmed("/proc/sys/kernel/osrelease").as_str());
     line(&mut out, "Desktop", &env("XDG_CURRENT_DESKTOP"));
     line(&mut out, "Session", &env("XDG_SESSION_TYPE"));
+    let app_in_use = if gestos::config::get_environment_suffix() == Some("gnome") {
+        "from the GNOME extension"
+    } else if gestos::active_app::is_kde() {
+        "from KWin"
+    } else if gestos::active_app::is_x11_session() {
+        "from X11"
+    } else {
+        "unknown here"
+    };
+    line(&mut out, "App in use", app_in_use);
     if gestos::config::get_environment_suffix() == Some("gnome") {
         line(&mut out, "GNOME Shell", &command_output("gnome-shell", &["--version"]));
     }

@@ -1,3 +1,4 @@
+pub mod active_app;
 pub mod chooser;
 pub mod config;
 pub mod gesture;

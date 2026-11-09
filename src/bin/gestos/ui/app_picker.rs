@@ -22,7 +22,7 @@ fn app_info(id: &str) -> Option<gio::DesktopAppInfo> {
 
 /// The app's name, or its ID for one that isn't installed.
 pub fn app_name(id: &str) -> String {
-    app_info(id).map_or_else(|| id.to_string(), |info| info.display_name().to_string())
+    gestos::key_steps::app_name(id)
 }
 
 /// The app's icon at a size, or a generic one for an app that isn't installed.
@@ -48,26 +48,17 @@ pub fn opened_app(action: &gestos::config::ActionType) -> Option<&str> {
 
 /// The installed apps that show in the app grid, by name, as their IDs.
 fn installed_apps() -> Vec<String> {
-    let mut apps: Vec<(String, String)> = gio::AppInfo::all()
-        .into_iter()
-        .filter(|info| info.should_show())
-        .filter_map(|info| {
-            let id = info.id()?.trim_end_matches(".desktop").to_string();
-            Some((info.display_name().to_lowercase(), id))
-        })
-        .collect();
-    apps.sort();
-    apps.dedup_by(|a, b| a.1 == b.1);
-    apps.into_iter().map(|(_, id)| id).collect()
+    gestos::key_steps::installed_apps().into_iter().map(|(_, id)| id).collect()
 }
 
-/// What keeps a gesture limited to some apps from running, if anything: the daemon only knows the
-/// app in use from GNOME's extension, so elsewhere such a gesture never runs.
-pub fn apps_note(status: &ExtensionStatus) -> Option<&'static str> {
+/// What keeps a gesture limited to some apps from running, if anything. The daemon knows the app
+/// in use from GNOME's extension, or, without GNOME, where the desktop can say: `elsewhere`.
+pub fn apps_note(status: &ExtensionStatus, elsewhere: bool) -> Option<&'static str> {
     match status {
         ExtensionStatus::Running => None,
+        ExtensionStatus::Unavailable if elsewhere => None,
         ExtensionStatus::Unavailable => {
-            Some("Only works on GNOME: here, a gesture limited to apps doesn't run")
+            Some("Only works on GNOME, KDE and X11: here, a gesture limited to apps doesn't run")
         }
         // Named as GNOME's Extensions app lists it, so it can be found there.
         ExtensionStatus::Outdated(_) => {
@@ -106,8 +97,9 @@ pub fn append_apps_rows(
         apps,
         changed,
         rows: RefCell::new(Vec::new()),
-        can_add: *status != ExtensionStatus::Unavailable,
-        note: apps_note(status),
+        can_add: *status != ExtensionStatus::Unavailable
+            || gestos::active_app::can_tell_without_extension(),
+        note: apps_note(status, gestos::active_app::can_tell_without_extension()),
     });
     app_rows.fill();
 }
@@ -318,10 +310,11 @@ mod tests {
 
     #[test]
     fn apps_need_no_note_only_with_the_extension_running() {
-        assert_eq!(apps_note(&ExtensionStatus::Running), None);
-        assert!(apps_note(&ExtensionStatus::Unavailable).unwrap().contains("Only works on GNOME"));
-        assert!(apps_note(&ExtensionStatus::Off).unwrap().contains("GNOME extension"));
-        assert!(apps_note(&ExtensionStatus::Outdated(OldCopy::Replaced))
+        assert_eq!(apps_note(&ExtensionStatus::Running, false), None);
+        assert_eq!(apps_note(&ExtensionStatus::Unavailable, true), None);
+        assert!(apps_note(&ExtensionStatus::Unavailable, false).unwrap().contains("Only works on"));
+        assert!(apps_note(&ExtensionStatus::Off, false).unwrap().contains("GNOME extension"));
+        assert!(apps_note(&ExtensionStatus::Outdated(OldCopy::Replaced), false)
             .unwrap()
             .contains("updated"));
     }

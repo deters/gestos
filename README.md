@@ -6,6 +6,7 @@ Mouse gestures for Linux.
 
 ## Features
 
+- Gestures per app: each app can have its own actions, on GNOME, KDE and X11 desktops
 - Modifier keys: the same gesture does more with Ctrl, Alt, Shift or Super held
 - Your choice of trigger button: right, middle, back or forward
 - Built for Wayland
@@ -28,7 +29,6 @@ Mouse gestures for Linux.
 
 ## GNOME Gestos Extension
 
-- Gestures per app: it identifies the active window, so each app can have its own actions
 - The gesture's path drawn on screen as you draw it
 - Advanced window tiling that keeps windows from overlapping
 
