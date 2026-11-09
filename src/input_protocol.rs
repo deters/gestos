@@ -10,6 +10,28 @@ pub const MAX_LINE_LENGTH: usize = 4096;
 /// they're released, and a little longer than the daemon waits for that.
 pub const HELD_REPORT_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// Whether systemd runs this system. Without it, as on Alpine, OpenRC starts the input service.
+pub fn uses_systemd() -> bool {
+    std::path::Path::new("/run/systemd/system").exists()
+}
+
+/// How to run a command as root here. Alpine has doas, not sudo.
+pub fn as_root() -> &'static str {
+    let doas_only = std::path::Path::new("/usr/bin/doas").exists()
+        && !std::path::Path::new("/usr/bin/sudo").exists();
+    if doas_only { "doas" } else { "sudo" }
+}
+
+/// The command that starts the input service, now and at every boot.
+pub fn start_service_command() -> String {
+    let root = as_root();
+    if uses_systemd() {
+        format!("{root} systemctl enable --now gestos-input.socket")
+    } else {
+        format!("{root} rc-update add gestos-input && {root} rc-service gestos-input start")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Request {
     Open {

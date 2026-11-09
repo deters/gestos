@@ -189,7 +189,7 @@ fn find_pointer_devices(sys_input: &Path, trigger_code: u16) -> Vec<String> {
 }
 
 /// Everything that touches input devices happens in the gestos-input service. Its socket is
-/// there whenever it's set up, and systemd starts the service for each connection.
+/// there whenever it's set up: systemd starts the service for each connection, OpenRC at boot.
 fn input_service_is_set_up() -> bool {
     if Path::new(gestos::input_protocol::SOCKET_PATH).exists() {
         return true;
@@ -198,9 +198,9 @@ fn input_service_is_set_up() -> bool {
     eprintln!("ERROR: Missing permissions: the Gestos input service isn't running.");
     eprintln!(" - {} does not exist.", gestos::input_protocol::SOCKET_PATH);
     eprintln!("\nTo start it:\n");
-    eprintln!("   sudo systemctl enable --now gestos-input.socket\n");
+    eprintln!("   {}\n", gestos::input_protocol::start_service_command());
     eprintln!("If that fails, reinstall Gestos. The uinput kernel module must also be loaded:\n");
-    eprintln!("   sudo modprobe uinput");
+    eprintln!("   {} modprobe uinput", gestos::input_protocol::as_root());
     eprintln!("=========================================================================\n");
     false
 }
