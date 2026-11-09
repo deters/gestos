@@ -3,11 +3,11 @@
 //! commands they run are left out, as they can hold passwords and other private things.
 
 use crate::extension;
+use adw::prelude::*;
 use gestos::config::{ActionType, Configuration};
 use gestos::key_steps::KeyStep;
 use gtk4::gio;
 use gtk4::glib;
-use gtk4::prelude::*;
 use std::fmt::Write;
 use std::path::Path;
 use std::process::Command;
@@ -63,7 +63,11 @@ pub fn report() -> String {
     line(
         &mut out,
         "Input service",
-        &command_output("systemctl", &["is-active", "gestos-input.socket"]),
+        &if gestos::input_protocol::uses_systemd() {
+            command_output("systemctl", &["is-active", "gestos-input.socket"])
+        } else {
+            command_output("rc-service", &["gestos-input", "status"])
+        },
     );
     line(&mut out, "Groups", &command_output("id", &["-Gn"]));
     line(&mut out, "Access rules", &access_rules());
@@ -337,21 +341,41 @@ fn log(out: &mut String, matches: &[&str], lines: usize, filter: Option<&str>) {
 /// Writes the report to a file and opens it in the user's text editor, to read or attach.
 pub fn open(parent: &impl IsA<gtk4::Window>) {
     let path = glib::user_cache_dir().join("gestos").join("gestos-debug.txt");
+    let text = report();
     let written = path
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|_| std::fs::write(&path, report()));
-    let opened = written.map_err(|e| e.to_string()).and_then(|_| {
-        gio::AppInfo::launch_default_for_uri(
-            &gio::File::for_path(&path).uri(),
-            gio::AppLaunchContext::NONE,
-        )
-        .map_err(|e| e.to_string())
-    });
-    if let Err(e) = opened {
+        .and_then(|_| std::fs::write(&path, &text));
+    if let Err(e) = written {
         crate::ui::components::show_error_dialog(
             parent,
-            &format!("Could not open the debugging information: {e}"),
+            &format!("Could not save the debugging information: {e}"),
         );
+        return;
     }
+    let opened = gio::AppInfo::launch_default_for_uri(
+        &gio::File::for_path(&path).uri(),
+        gio::AppLaunchContext::NONE,
+    );
+    // With no app for text files, as on a bare system, say where it is and let it be copied.
+    if opened.is_err() {
+        show_saved(parent, &path, text);
+    }
+}
+
+fn show_saved(parent: &impl IsA<gtk4::Window>, path: &Path, text: String) {
+    let dialog = adw::MessageDialog::new(
+        Some(parent),
+        Some("Report Saved"),
+        Some(&path.display().to_string()),
+    );
+    dialog.add_response("close", "Close");
+    dialog.add_response("copy", "Copy Report");
+    dialog.set_response_appearance("copy", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("copy"));
+    dialog.set_close_response("close");
+    dialog.connect_response(Some("copy"), move |dialog, _| {
+        dialog.clipboard().set_text(&text);
+    });
+    dialog.present();
 }
