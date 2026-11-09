@@ -1,10 +1,14 @@
-# Gestos 6.7.0
+# Gestos 6.8.0
 
 ## Added
 
-- **Gestures per app on KDE and X11.** Gestures limited to some apps now work on KDE and on X11 desktops such as Cinnamon, not only on GNOME.
+- **Alpine for ARM.** An Alpine package for ARM computers, such as a virtual machine on an Apple silicon Mac.
+
+## Changed
+
+- **Only actions that work here.** GNOME's actions are offered on GNOME only, as KDE's are on KDE, and a gesture that uses another desktop's action says which desktop it works on.
 
 ## Fixed
 
-- **Apps with the same name are told apart.** Nemo and Nautilus, which both call themselves Files, show as Files (Nemo) and Files (Nautilus), so searching for either finds it.
-- **New apps show up right away**, without reopening Gestos.
+- **Starting the input service on Alpine.** When it isn't running, Gestos now shows the command that starts it on systems without systemd.
+- **Reports on systems without a text editor.** When no app can open the report, Gestos shows where it was saved and can copy it.
