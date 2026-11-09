@@ -942,8 +942,9 @@ class WindowActions {
     }
 
     // Checks that tiled windows are where they were put. One that's bigger than it was given can't
-    // get that small, which the others make room for. One that moved or changed size goes back a
-    // few times, and after that keeps what its app wants, as its original size.
+    // get that small, which the others make room for. One that was moved without changing size
+    // stays where it was moved to. One that changed size goes back a few times, and after that
+    // keeps what its app wants, as its original size.
     _checkTiles(tiling) {
         const now = Date.now();
         let changed = false;
@@ -974,6 +975,17 @@ class WindowActions {
                 const moved = Math.abs(frame.x - tile.x) > 1 || Math.abs(frame.y - tile.y) > 1;
                 if (!moved && hasSize(frame, tile))
                     return;
+                // Moved as it was, as the Shell's shortcuts for moving a window to a side or
+                // another screen do: the user put it there, so it stays, at its original size, and
+                // the others make room for it.
+                if (hasSize(frame, tile)) {
+                    tiling.order = [window, ...tiling.order.filter(w => w !== window)];
+                    original.rect = keepInside({x: frame.x, y: frame.y,
+                        width: original.rect.width, height: original.rect.height}, area);
+                    state.returns = [];
+                    changed = true;
+                    return;
+                }
                 state.returns = (state.returns ?? []).filter(t => now - t < TILE_RETURN_PERIOD_MS);
                 if (state.returns.length >= MAX_TILE_RETURNS) {
                     if (!hasSize(frame, original.rect) || moved) {
