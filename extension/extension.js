@@ -78,7 +78,7 @@ function isMaximizedAtAll(window) {
 function isTileable(window) {
     // A maximized or snapped window can't be resized until it's restored, which tiling does.
     return !window.minimized && !UNTILED_APP_IDS.includes(window.get_gtk_application_id()) &&
-        window.get_window_type() === Meta.WindowType.NORMAL &&
+        window.get_window_type() === Meta.WindowType.NORMAL && !window.is_on_all_workspaces() &&
         !window.is_fullscreen() && (isMaximizedAtAll(window) || window.allows_resize());
 }
 
@@ -316,7 +316,7 @@ class WindowActions {
                 window.connect('unmanaged', () => this._onUnmanaged(window)),
                 window.connect('workspace-changed', () => this._onWorkspaceChanged(window)),
                 ...['notify::maximized-horizontally', 'notify::maximized-vertically',
-                    'notify::fullscreen'].map(signal =>
+                    'notify::fullscreen', 'notify::on-all-workspaces'].map(signal =>
                     window.connect(signal, () => this._onStateChanged(window))),
             ],
             waitId: 0,
@@ -488,6 +488,14 @@ class WindowActions {
         // Still being restored as it joins tiling.
         if (tiling && !tiling.windows.get(window).tile)
             return;
+
+        // One on all workspaces belongs to no one tiling, so it's set aside at its original size
+        // until it's on one workspace again.
+        if (window.is_on_all_workspaces()) {
+            this._setAsideFrom(tiling, window, original)?.settle();
+            this._restoreOriginal(window);
+            return;
+        }
 
         const flags = window.get_maximize_flags();
         if (window.is_fullscreen() || flags === Meta.MaximizeFlags.BOTH) {
@@ -781,6 +789,7 @@ class WindowActions {
                     return;
                 }
                 state.tile = rect;
+                state.monitor = window.get_monitor();
                 const frame = window.get_frame_rect();
                 if (frame.x !== rect.x || frame.y !== rect.y || frame.width !== rect.width ||
                     frame.height !== rect.height)
@@ -858,8 +867,9 @@ class WindowActions {
         window.unminimize();
     }
 
-    // A maximized, fullscreen or snapped window is set aside, with the size it had while tiled, and
-    // joins again as the one touched last once it's back to normal, if it's still here. It's only
+    // A maximized, fullscreen, snapped or all-workspaces window is set aside, with the size it had
+    // while tiled, and joins again as the one touched last once it's back to normal, on the tiled
+    // workspace it's on then. It's only
     // watched once it's settled, as getting its original size back first restores it for a moment.
     _setAside(tiling, window, rect) {
         if (tiling.aside.has(window))
@@ -867,19 +877,22 @@ class WindowActions {
         const aside = {rect, settled: false};
         const check = () => {
             if (!aside.settled || this._originals.get(window)?.fixing || isMaximizedAtAll(window) ||
-                window.is_fullscreen())
+                window.is_fullscreen() || window.is_on_all_workspaces())
                 return;
             this._forgetAside(tiling, window);
-            if (window.get_workspace() !== tiling.workspace || window.minimized ||
-                this._findTiling(window)[1])
+            // It joins the workspace it's on now, which isn't the one it left when it was on all.
+            const workspace = window.get_workspace();
+            const joining = workspace && this._tilings.get(workspace);
+            if (!joining || window.minimized || this._findTiling(window)[1])
                 return;
-            this._addToTiling(tiling, window);
+            this._addToTiling(joining, window);
             this._originals.get(window).rect = copyRect(aside.rect);
-            this._layoutWhenReady(tiling);
+            this._layoutWhenReady(joining);
         };
         aside.ids = [
             ...['notify::maximized-horizontally', 'notify::maximized-vertically',
-                'notify::fullscreen'].map(signal => window.connect(signal, check)),
+                'notify::fullscreen', 'notify::on-all-workspaces'].map(signal =>
+                window.connect(signal, check)),
             window.connect('unmanaged', () => {
                 this._forgetAside(tiling, window);
                 // Gone before it was maximized, so the others haven't taken its room yet.
@@ -975,13 +988,14 @@ class WindowActions {
                 const moved = Math.abs(frame.x - tile.x) > 1 || Math.abs(frame.y - tile.y) > 1;
                 if (!moved && hasSize(frame, tile))
                     return;
-                // Moved as it was, as the Shell's shortcuts for moving a window to a side or
-                // another screen do: the user put it there, so it stays, at its original size, and
-                // the others make room for it.
-                if (hasSize(frame, tile)) {
+                // Moved as it was, as the Shell's shortcuts for moving a window to a side do, or to
+                // another screen, which can make it smaller to fit: the user put it there, so it
+                // stays, at its original size as far as it fits, and the others make room for it.
+                if (hasSize(frame, tile) ||
+                    (state.monitor !== undefined && window.get_monitor() !== state.monitor)) {
                     tiling.order = [window, ...tiling.order.filter(w => w !== window)];
                     original.rect = keepInside({x: frame.x, y: frame.y,
-                        width: original.rect.width, height: original.rect.height}, area);
+                        ...fitSize(original.rect, area)}, area);
                     state.returns = [];
                     changed = true;
                     return;
