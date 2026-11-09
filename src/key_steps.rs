@@ -124,16 +124,78 @@ pub fn describe_steps(steps: &[KeyStep]) -> String {
         .join(", ")
 }
 
-/// An app's name, or its ID if it isn't installed.
+/// The installed apps a person would look for, as their names and desktop file IDs, sorted by
+/// name.
+pub fn installed_apps() -> Vec<(String, String)> {
+    use gio::prelude::AppInfoExt;
+    let apps = gio::AppInfo::all()
+        .into_iter()
+        .filter(|info| info.should_show())
+        .filter_map(|info| {
+            let id = info.id()?.trim_end_matches(".desktop").to_string();
+            Some((info.display_name().to_string(), id))
+        })
+        .collect();
+    distinct_names(apps)
+}
+
+/// Gives apps that share a name, as file managers often call themselves "Files", the last part of
+/// their ID after it, like "Files (Nemo)", and sorts them by name.
+fn distinct_names(mut apps: Vec<(String, String)>) -> Vec<(String, String)> {
+    apps.sort_by(|a, b| a.1.cmp(&b.1));
+    apps.dedup_by(|a, b| a.1 == b.1);
+    let names: Vec<String> = apps.iter().map(|(name, _)| name.clone()).collect();
+    for (name, id) in &mut apps {
+        if names.iter().filter(|other| *other == name).count() > 1 {
+            let program = id.rsplit('.').next().unwrap_or(id);
+            let mut letters = program.chars();
+            let program: String = letters
+                .next()
+                .map(|first| first.to_uppercase().chain(letters).collect())
+                .unwrap_or_default();
+            *name = format!("{name} ({program})");
+        }
+    }
+    apps.sort_by_key(|(name, _)| name.to_lowercase());
+    apps
+}
+
+/// An app's name, as installed_apps has it, or its ID if it isn't installed.
 pub fn app_name(id: &str) -> String {
     use gio::prelude::AppInfoExt;
-    gio::DesktopAppInfo::new(&format!("{id}.desktop"))
-        .map_or_else(|| id.to_string(), |info| info.display_name().to_string())
+    installed_apps()
+        .into_iter()
+        .find(|(_, app)| app == id)
+        .map(|(name, _)| name)
+        .or_else(|| {
+            gio::DesktopAppInfo::new(&format!("{id}.desktop"))
+                .map(|info| info.display_name().to_string())
+        })
+        .unwrap_or_else(|| id.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apps_that_share_a_name_say_which_they_are() {
+        let apps = |list: &[(&str, &str)]| -> Vec<(String, String)> {
+            list.iter().map(|(name, id)| (name.to_string(), id.to_string())).collect()
+        };
+        assert_eq!(
+            distinct_names(apps(&[
+                ("Files", "org.gnome.Nautilus"),
+                ("Terminal", "org.gnome.Ptyxis"),
+                ("Files", "nemo"),
+            ])),
+            apps(&[
+                ("Files (Nautilus)", "org.gnome.Nautilus"),
+                ("Files (Nemo)", "nemo"),
+                ("Terminal", "org.gnome.Ptyxis"),
+            ])
+        );
+    }
 
     fn steps() -> Vec<KeyStep> {
         vec![

@@ -398,16 +398,7 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
 /// An action to open each app in GNOME's app grid, or bring it to the front: a custom action of one
 /// step, which more can be added to.
 pub fn app_action_options() -> Vec<EditorActionOption> {
-    let mut apps: Vec<(String, String)> = gio::AppInfo::all()
-        .into_iter()
-        .filter(|info| info.should_show())
-        .filter_map(|info| {
-            let id = info.id()?.trim_end_matches(".desktop").to_string();
-            Some((info.display_name().to_string(), id))
-        })
-        .collect();
-    apps.sort_by_key(|(name, _)| name.to_lowercase());
-    apps.dedup_by(|a, b| a.1 == b.1);
+    let apps = gestos::key_steps::installed_apps();
     apps.into_iter()
         .map(|(name, id)| EditorActionOption {
             category: 0,

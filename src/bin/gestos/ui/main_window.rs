@@ -274,6 +274,25 @@ pub fn show_about_dialog<W: IsA<gtk::Window>>(parent: &W) {
     dialog.present();
 }
 
+/// The actions to make gestures for. Reading the desktop's action lists can be slow, so it doesn't
+/// happen on the UI thread.
+fn load_action_options(state: &Rc<RefCell<AppState>>) {
+    let load_options = gtk::gio::spawn_blocking(|| {
+        let mut options = get_static_action_options();
+        options.extend(fetch_gnome_action_options());
+        options.extend(fetch_kde_action_options());
+        options.extend(app_action_options());
+        options
+    });
+    let state_options = Rc::clone(state);
+    glib::spawn_future_local(async move {
+        if let Ok(options) = load_options.await {
+            state_options.borrow_mut().action_options = options;
+            refresh_gesture_list(&state_options, None);
+        }
+    });
+}
+
 pub fn build_ui(app: &gtk::Application) {
     let window = gtk::ApplicationWindow::new(app);
     window.set_title(Some("Gestos"));
@@ -446,20 +465,18 @@ pub fn build_ui(app: &gtk::Application) {
             }
         });
 
-    // Reading the desktop's action lists can be slow, so it doesn't happen on the UI thread.
-    let load_options = gtk::gio::spawn_blocking(|| {
-        let mut options = get_static_action_options();
-        options.extend(fetch_gnome_action_options());
-        options.extend(fetch_kde_action_options());
-        options.extend(app_action_options());
-        options
-    });
-    let state_options = Rc::clone(&state);
-    glib::spawn_future_local(async move {
-        if let Ok(options) = load_options.await {
-            state_options.borrow_mut().action_options = options;
-            refresh_gesture_list(&state_options, None);
+    load_action_options(&state);
+    // Apps installed or removed while Gestos is open come and go from the list too.
+    let apps = gtk::gio::AppInfoMonitor::get();
+    let state_apps = Rc::downgrade(&state);
+    apps.connect_changed(move |_| {
+        if let Some(state) = state_apps.upgrade() {
+            load_action_options(&state);
         }
+    });
+    // The monitor only says what changed for as long as it's kept.
+    state.borrow().window.connect_destroy(move |_| {
+        let _ = &apps;
     });
 
 
