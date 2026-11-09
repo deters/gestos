@@ -1,33 +1,44 @@
 # Gestos
 
-Formerly known as MyGestures.
+Mouse gestures for Linux.
 
-- **Any desktop:** GNOME, KDE, Sway, Hyprland, XFCE.
-- **No config files:** search an action, draw a gesture, save.
-- **Real desktop actions:** GNOME's own actions and shortcuts.
-- **Modifier keys:** one stroke, different actions with Ctrl, Alt, Shift or Super.
-- **Similar gestures:** a chooser at the pointer instead of a guess.
-- **Window tiling on GNOME:** through an optional extension.
+![A GNOME desktop with tiled windows, Gestos's list of gestures, and a gesture's path drawn over Files](docs/screenshots/desktop.png)
 
-## Get started
+## Features
 
-Search some action and create a gesture:
+- Modifier keys: the same gesture does more with Ctrl, Alt, Shift or Super held
+- Your choice of trigger button: right, middle, back or forward
+- Built for Wayland
+- Works on GNOME, KDE, Sway, Hyprland and XFCE
 
-![Searching for "screen" lists matching actions to create a gesture for](docs/screenshots/search-suggestions.png)
+![Preferences: start at login, the button to draw with, the gesture path and window tiling](docs/screenshots/preferences.png)
 
-Draw the gesture and save it:
+## Actions Supported
 
-![The gesture editor with a drawn path and the Take Screenshot action](docs/screenshots/gesture-editor.png)
+- The actions GNOME and KDE expose, like moving windows, switching workspaces and controlling media
+- Open any installed app, or bring it to the front
+- Press any keyboard shortcut
+- Type text, including several lines and accented letters
+- Run shell commands
+- Custom actions: open apps, press shortcuts, type text and pause, in any order
 
-That's it. Hold the right mouse button anywhere, draw your gesture, and let go. A short click still works as a normal right click.
+![Searching for "maximize" lists GNOME's window actions to create a gesture for](docs/screenshots/search-actions.png)
 
-## Actions
+![A custom action that opens Camera and presses two shortcuts, drawn as an R with Super held](docs/screenshots/custom-action.png)
 
-Gestos can manage windows and workspaces, control media and volume, take screenshots, lock the screen or log out, open apps, use the standard app shortcuts like Copy, Save, or Zoom In, and tile windows on GNOME. It can also run your GNOME or KDE shortcut actions, a shell command, or a custom action: apps to open, shortcuts, text to type and pauses, in the order you set, with what comes after an app going to it. On GNOME, a gesture can be limited to some apps, so the same shape can do something else in each of them.
+## GNOME Gestos Extension
+
+- Gestures per app: it identifies the active window, so each app can have its own actions
+- The gesture's path drawn on screen as you draw it
+- Advanced window tiling that keeps windows from overlapping
+
+![A Next Track gesture limited to Audio Player](docs/screenshots/gesture-per-app.png)
 
 ## Install
 
-Packages for Fedora, Debian, and Alpine are on the [releases page](https://github.com/deters/gestos/releases).
+Packages for Fedora, Debian and Alpine are on the [releases page](https://github.com/deters/gestos/releases).
+
+On GNOME, log out and back in after installing, then turn on the Gestos extension in Preferences.
 
 ### From source
 
@@ -56,11 +67,13 @@ meson compile -C build
 sudo meson install -C build
 ```
 
+Building with `-Dgnome_extension=false` leaves out the GNOME extension.
+
 If you're updating an older install, run the install step again. It removes the Set-Group-ID permission that `gestosd` used to have, and starts the input service.
 
-### Tiling on GNOME
+## Troubleshooting
 
-Toggle Tile Windows needs the “Gestos” GNOME extension, which comes with Gestos. After installing, log out and back in, then turn it on in Gestos's Preferences. Other desktops don't use it, and building with `-Dgnome_extension=false` leaves it out.
+Attach a report to [bug reports](https://github.com/deters/gestos/issues): Preferences → Troubleshooting → Create Report, or `gestos --debug-info`.
 
 ## Security
 
@@ -95,6 +108,10 @@ debug = "line-tables-only"
 ```
 
 Change `x86_64-unknown-linux-gnu` to match your system if it differs (`rustc -vV` shows it as `host`). The next build recompiles everything once. This applies to all your Rust projects, and you lose local variables in a debugger, though panics keep their file and line numbers.
+
+## History
+
+Gestos was formerly known as MyGestures.
 
 ## License
 
