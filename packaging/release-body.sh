@@ -8,7 +8,8 @@ packages=$2
 
 # The package in the folder whose name matches, or nothing if there's none.
 find_package() {
-	find "$packages" -name "$1" -exec basename {} \; | head -n 1
+	path=$(find "$packages" -name "$1" | sort | head -n 1)
+	echo "${path##*/}"
 }
 
 row() {
@@ -27,9 +28,12 @@ echo
 echo "| System | Package | Install with |"
 echo "|---|---|---|"
 row "Ubuntu, Debian" "$(find_package 'gestos_*_amd64.deb')" "sudo apt install"
-row "Fedora" "$(find_package 'gestos-*.x86_64.rpm')" "sudo dnf install"
-row "Fedora on ARM" "$(find_package 'gestos-*.aarch64.rpm')" "sudo dnf install"
-row "Alpine" "$(find_package 'gestos-*-x86_64.apk')" "doas apk add --allow-untrusted"
+# The version comes right after the name, which leaves out debug packages.
+row "Fedora" "$(find_package 'gestos-[0-9]*.x86_64.rpm')" "sudo dnf install"
+row "Fedora on ARM" "$(find_package 'gestos-[0-9]*.aarch64.rpm')" "sudo dnf install"
+# Before 6.8.0 there was only an x86_64 package, named without it.
+alpine=$(find_package 'gestos-*-x86_64.apk')
+row "Alpine" "${alpine:-$(find_package 'gestos-*-r[0-9].apk')}" "doas apk add --allow-untrusted"
 row "Alpine on ARM" "$(find_package 'gestos-*-aarch64.apk')" "doas apk add --allow-untrusted"
 echo
 echo "On GNOME, log out and back in after installing, then turn on the Gestos extension in Preferences."
