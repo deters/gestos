@@ -1,10 +1,16 @@
 name: Build and Release Packages
 
-# Tags build and publish a release. Starting this by hand only builds the packages.
+# Tags build and publish a release. Starting this by hand only builds the packages, or publishes
+# them as the Beta pre-release, which replaces the one before and leaves the latest release alone.
 on:
   push:
     tags: [ 'v*' ]
   workflow_dispatch:
+    inputs:
+      beta:
+        description: Publish as the Beta pre-release
+        type: boolean
+        default: false
 
 jobs:
   build-fedora:
@@ -22,6 +28,10 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+
+      - name: Number as a beta
+        if: inputs.beta
+        run: sh packaging/mark-beta.sh ${{ github.run_number }}
 
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
@@ -67,6 +77,10 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+
+      - name: Number as a beta
+        if: inputs.beta
+        run: sh packaging/mark-beta.sh ${{ github.run_number }}
 
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
@@ -119,6 +133,10 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Number as a beta
+        if: inputs.beta
+        run: sh packaging/mark-beta.sh ${{ github.run_number }}
+
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
@@ -146,15 +164,17 @@ jobs:
     name: Publish Github Release
     needs: [build-fedora, build-debian, build-alpine]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.beta
     permissions:
       contents: write
     steps:
-      # For the release notes, and the script that adds which package to install.
+      # For the release notes, and the script that adds which package to install. A beta lists
+      # what changed since the last release, which takes the history.
       - name: Checkout source
         uses: actions/checkout@v4
         with:
           path: source
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -167,11 +187,37 @@ jobs:
         run: find packages \( -name '*-dbgsym_*' -o -name '*-debuginfo-*' -o -name '*-debugsource-*' \) -delete
 
       - name: Write the release page
-        run: sh source/packaging/release-body.sh source/RELEASE_NOTES.md packages > release-body.md
+        run: |
+          if [ "${{ inputs.beta }}" = true ]; then
+            last=$(git -C source describe --tags --abbrev=0 --match 'v*')
+            {
+              echo "A preview of what comes after Gestos ${last#v}, built from $(git -C source rev-parse --short HEAD)."
+              echo
+              echo "## Changes since ${last#v}"
+              echo
+              git -C source log --no-merges --format='- %s' "$last..HEAD" |
+                grep -v -E '^- (Bump version|Write the release notes)' || true
+            } > notes.md
+          else
+            cp source/RELEASE_NOTES.md notes.md
+          fi
+          sh source/packaging/release-body.sh notes.md packages > release-body.md
+
+      # Only one beta is kept, so its page always has the newest.
+      - name: Remove the previous beta
+        if: inputs.beta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete beta --cleanup-tag --yes -R "$GITHUB_REPOSITORY" || true
 
       - name: Publish Release with Assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.beta && 'beta' || github.ref_name }}
+          name: ${{ inputs.beta && 'Beta' || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ inputs.beta == true }}
+          make_latest: ${{ inputs.beta && 'false' || 'true' }}
           body_path: release-body.md
           files: |
             packages/**/*.rpm
