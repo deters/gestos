@@ -395,7 +395,7 @@ class WindowActions {
 
     // Holds the window's picture as it is, so that resizing it doesn't show, until it's thawed: once
     // it changes size again if asked, or after a while. A window that closes is never thawed, as
-    // its picture goes with it.
+    // its picture goes with it. Thawing also shows a window that was hidden while frozen.
     _freeze(window) {
         const actor = window.get_compositor_private();
         if (!actor)
@@ -409,8 +409,10 @@ class WindowActions {
                 if (frozen.timeoutId)
                     GLib.source_remove(frozen.timeoutId);
                 this._frozen.delete(frozen);
-                if (thaw)
+                if (thaw) {
                     actor.thaw();
+                    actor.opacity = 255;
+                }
             };
             frozen.ids.push(window.connect('unmanaging', () => frozen.release(false)));
             if (onResize)
@@ -440,8 +442,12 @@ class WindowActions {
         if (!original?.rect || original.fixing || original.closing)
             return false;
         this._leave(window);
-        // It closes looking as it did, with its original size taken where it can't be seen.
+        // It's gone at once, as the others take its room at once, and takes its original size out
+        // of sight before it closes. If its app keeps it open, it's shown again once thawed.
         const thawLater = this._freeze(window);
+        const actor = window.get_compositor_private();
+        if (actor)
+            actor.opacity = 0;
         this._restoreOriginalThen(window, original, () => {
             this._untrack(window);
             close();
