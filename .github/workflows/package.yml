@@ -91,11 +91,16 @@ jobs:
           path: "*.deb"
 
   build-alpine:
-    name: Build Alpine APK
-    runs-on: ubuntu-latest
-    container:
-      image: alpine:latest
-      options: --user root
+    name: Build Alpine APK (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          # Apple silicon Macs run this one, in a VM or on Asahi Linux.
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -106,38 +111,19 @@ jobs:
           path: |
             .cargo
             target-alpine
-          key: ${{ runner.os }}-alpine-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-alpine-${{ matrix.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-alpine-cargo-
+            ${{ runner.os }}-alpine-${{ matrix.arch }}-cargo-
 
-      - name: Install dependencies
-        run: |
-          apk update
-          apk add alpine-sdk meson ninja cargo rust gtk4.0-dev libadwaita-dev libevdev-dev pkgconfig git sudo
-
+      # JavaScript actions don't run in Alpine containers on ARM, so only the build runs in one.
       - name: Build Alpine Package
-        run: |
-          # Create builder user (abuild cannot run as root)
-          adduser -D builder -G abuild
-          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-          chown -R builder:abuild .
-
-          # Build from this checkout. A source archive already in SRCDEST isn't downloaded,
-          # and the download would only exist once the release tag does.
-          VERSION=$(grep '^pkgver=' packaging/APKBUILD | cut -d= -f2)
-          mkdir -p /tmp/distfiles
-          tar --exclude-vcs --exclude='.cargo' --exclude='target-alpine' --transform "s,^\.,gestos-$VERSION," -czf /tmp/distfiles/gestos-$VERSION.tar.gz .
-          chown -R builder:abuild /tmp/distfiles
-
-          # Run abuild as builder user
-          su builder -c "abuild-keygen -i -a -n"
-          su builder -c "export SRCDEST=/tmp/distfiles && export CARGO_HOME=$GITHUB_WORKSPACE/.cargo && export OVERRIDE_CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target-alpine && cd packaging && abuild checksum && abuild -r"
+        run: docker run --rm -v "$PWD:/src" -w /src alpine:latest sh packaging/build-apk.sh
 
       - name: Upload Alpine Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: alpine-apk
-          path: /home/builder/packages/*/*/*.apk
+          name: alpine-apk-${{ matrix.arch }}
+          path: apk/*.apk
 
   release:
     name: Publish Github Release
