@@ -8,8 +8,16 @@ on:
 
 jobs:
   build-fedora:
-    name: Build Fedora RPM
-    runs-on: ubuntu-latest
+    name: Build Fedora RPM (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          # Apple silicon Macs run this one, in a VM or on Asahi Linux.
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     container: fedora:latest
     steps:
       - name: Checkout source
@@ -21,9 +29,9 @@ jobs:
           path: |
             .cargo
             target-fedora
-          key: ${{ runner.os }}-fedora-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-fedora-${{ matrix.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-fedora-cargo-
+            ${{ runner.os }}-fedora-${{ matrix.arch }}-cargo-
 
       - name: Install dependencies
         run: |
@@ -41,10 +49,16 @@ jobs:
       - name: Upload RPM Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: fedora-rpm
-          path: |
-            /github/home/rpmbuild/RPMS/*/*.rpm
-            /github/home/rpmbuild/SRPMS/*.rpm
+          name: fedora-rpm-${{ matrix.arch }}
+          path: /github/home/rpmbuild/RPMS/*/*.rpm
+
+      # The source package is the same for both, and would clash in the release.
+      - name: Upload Source RPM
+        if: matrix.arch == 'x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fedora-srpm
+          path: /github/home/rpmbuild/SRPMS/*.rpm
 
   build-debian:
     name: Build Debian DEB
