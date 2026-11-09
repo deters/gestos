@@ -280,9 +280,11 @@ impl LayoutKeys {
 type CachedLayout = (LayoutName, Option<Arc<LayoutKeys>>);
 static CURRENT_LAYOUT: Mutex<Option<CachedLayout>> = Mutex::new(None);
 
-/// The keys of the layout in use, compiled again only when the layout changes.
+/// The keys of the layout in use, compiled again only when the layout changes. Where it can't be
+/// told, as on systems without systemd's localectl, xkbcommon's default layout is used, which is
+/// the one XKB_DEFAULT_LAYOUT names, or else US.
 pub fn current_layout_keys() -> Option<Arc<LayoutKeys>> {
-    let name = active_layout()?;
+    let name = active_layout().unwrap_or_default();
     let mut cached = CURRENT_LAYOUT.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((cached_name, keys)) = cached.as_ref() {
         if *cached_name == name {
@@ -382,6 +384,14 @@ mod tests {
         let Some(brazilian) = layout("br") else { return };
         assert_eq!(key(&brazilian, "c"), KeyCode::KEY_C.0);
         assert_eq!(key(&brazilian, "ccedilla"), KeyCode::KEY_SEMICOLON.0);
+    }
+
+    #[test]
+    fn with_no_layout_named_the_default_types_punctuation() {
+        let Some(default) = LayoutKeys::compile(&LayoutName::default()) else { return };
+        assert!(default.lookup_char('.').is_some());
+        assert!(default.lookup_char('/').is_some());
+        assert!(default.lookup_char('a').is_some());
     }
 
     #[test]
