@@ -789,7 +789,9 @@ class WindowActions {
                     return;
                 }
                 const state = tiling.windows.get(window);
-                if (window === dragged || !state || this._originals.get(window).closing)
+                // One that's no longer on screen is going away, and can't be resized.
+                if (window === dragged || !state || this._originals.get(window).closing ||
+                    !window.get_compositor_private())
                     return;
                 if (!rect) {
                     if (!dragged)
@@ -890,10 +892,10 @@ class WindowActions {
     _setAside(tiling, window, rect) {
         if (tiling.aside.has(window))
             return;
-        const aside = {rect, settled: false};
-        const check = () => {
-            if (!aside.settled || this._originals.get(window)?.fixing || isMaximizedAtAll(window) ||
-                window.is_fullscreen() || window.is_on_all_workspaces())
+        const aside = {rect, settled: false, closing: false, checkId: 0};
+        const join = () => {
+            if (!aside.settled || aside.closing || this._originals.get(window)?.fixing ||
+                isMaximizedAtAll(window) || window.is_fullscreen() || window.is_on_all_workspaces())
                 return;
             this._forgetAside(tiling, window);
             // It joins the workspace it's on now, which isn't the one it left when it was on all.
@@ -905,19 +907,35 @@ class WindowActions {
             this._originals.get(window).rect = copyRect(aside.rect);
             this._layoutWhenReady(joining);
         };
+        // Once the Shell is done changing the window, as resizing windows in the middle of that
+        // can crash it.
+        const check = () => {
+            if (!aside.checkId) {
+                aside.checkId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                    aside.checkId = 0;
+                    join();
+                    return GLib.SOURCE_REMOVE;
+                });
+            }
+        };
         aside.ids = [
             ...['notify::maximized-horizontally', 'notify::maximized-vertically',
                 'notify::fullscreen', 'notify::on-all-workspaces'].map(signal =>
                 window.connect(signal, check)),
+            // A closing window can stop being maximized or fullscreen as it goes, and mustn't
+            // join, as it can't be resized anymore.
+            window.connect('unmanaging', () => {
+                aside.closing = true;
+            }),
             // A snapped one only has its side once the app takes that size, and the others are
             // tiled beside it again then.
             ...['size-changed', 'position-changed'].map(signal => window.connect(signal, () => {
-                if (aside.settled && isSnapped(window))
+                if (aside.settled && !aside.closing && isSnapped(window))
                     this._layoutWhenReady(tiling);
             })),
             // One that's minimized or moved away leaves its side to the others.
             ...['notify::minimized', 'workspace-changed'].map(signal => window.connect(signal, () => {
-                if (aside.settled)
+                if (aside.settled && !aside.closing)
                     this._layoutWhenReady(tiling);
             })),
             // Gone, so the others take its room: a snapped one's side, or the room of one that was
@@ -939,6 +957,8 @@ class WindowActions {
             return;
         for (const id of aside.ids)
             window.disconnect(id);
+        if (aside.checkId)
+            GLib.source_remove(aside.checkId);
         tiling.aside.delete(window);
     }
 
