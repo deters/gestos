@@ -237,6 +237,13 @@ jobs:
       - name: Leave out debug packages
         run: find packages \( -name '*-dbgsym_*' -o -name '*-debuginfo-*' -o -name '*-debugsource-*' \) -delete
 
+      # GitHub turns the ~ in a beta's file names into a dot, so the page names them that way too.
+      - name: Name files as GitHub keeps them
+        run: |
+          find packages -name '*~*' | while read -r file; do
+            mv "$file" "$(dirname "$file")/$(basename "$file" | tr '~' '.')"
+          done
+
       - name: Write the release page
         env:
           VERSION: ${{ inputs.beta }}
