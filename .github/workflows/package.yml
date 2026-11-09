@@ -27,7 +27,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          dnf install -y meson ninja-build cargo rust gtk4-devel libevdev-devel gcc systemd-rpm-macros rpm-build rpmdevtools git
+          dnf install -y meson ninja-build cargo rust gtk4-devel libadwaita-devel libevdev-devel gcc systemd-rpm-macros rpm-build rpmdevtools git
 
       - name: Build RPM
         run: |
@@ -67,7 +67,7 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y build-essential devscripts debhelper libevdev-dev libgtk-4-dev libc6-dev pkg-config git curl
+          apt-get install -y build-essential devscripts debhelper libevdev-dev libgtk-4-dev libadwaita-1-dev libc6-dev pkg-config git curl
           
           # Set CARGO_HOME to a workspace-relative directory so it can be cached
           export CARGO_HOME=$GITHUB_WORKSPACE/.cargo
@@ -113,7 +113,7 @@ jobs:
       - name: Install dependencies
         run: |
           apk update
-          apk add alpine-sdk meson ninja cargo rust gtk4.0-dev libevdev-dev pkgconfig git sudo
+          apk add alpine-sdk meson ninja cargo rust gtk4.0-dev libadwaita-dev libevdev-dev pkgconfig git sudo
 
       - name: Build Alpine Package
         run: |

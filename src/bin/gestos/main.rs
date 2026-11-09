@@ -25,11 +25,11 @@ fn run_gesture_chooser() {
         std::process::exit(2);
     }
 
-    let app = gtk::Application::builder()
+    let app = adw::Application::builder()
         .application_id("io.github.deters.Gestos.Chooser")
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
         .build();
-    app.connect_activate(move |app| ui::gesture_chooser::build_chooser_ui(app, &entries));
+    app.connect_activate(move |app| ui::gesture_chooser::build_chooser_ui(app.upcast_ref(), &entries));
     app.run_with_args::<glib::GString>(&[]);
 }
 
@@ -58,7 +58,8 @@ fn main() {
 
     let is_overlay = args.iter().any(|arg| arg == "--overlay");
 
-    let app = gtk::Application::builder()
+    // libadwaita styles every window as GNOME's own apps, and follows the desktop's dark style.
+    let app = adw::Application::builder()
         .application_id(if is_overlay {
             "io.github.deters.Gestos.Overlay"
         } else {
@@ -67,9 +68,9 @@ fn main() {
         .build();
 
     if is_overlay {
-        app.connect_activate(build_overlay_ui);
+        app.connect_activate(|app| build_overlay_ui(app.upcast_ref()));
     } else {
-        app.connect_activate(build_ui);
+        app.connect_activate(|app| build_ui(app.upcast_ref()));
     }
     app.run_with_args::<glib::GString>(&[]);
 }

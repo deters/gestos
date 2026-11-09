@@ -258,15 +258,19 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
     visible.is_empty()
 }
 pub fn show_about_dialog<W: IsA<gtk::Window>>(parent: &W) {
-    let dialog = gtk::AboutDialog::new();
-    dialog.set_transient_for(Some(parent));
-    dialog.set_modal(true);
-    dialog.set_program_name(Some("Gestos"));
-    dialog.set_version(Some("6.5.0"));
-    dialog.set_comments(Some(
-        "A modern mouse gestures editor for Wayland desktop environments.",
-    ));
-    dialog.set_authors(&["Lucas Augusto Deters <lucasdeters@gmail.com>"]);
+    let dialog = adw::AboutWindow::builder()
+        .transient_for(parent)
+        .modal(true)
+        .application_name("Gestos")
+        .application_icon("gestos")
+        .version("6.5.0")
+        .comments("Mouse gestures for Linux")
+        .developer_name("Lucas Augusto Deters")
+        .developers(["Lucas Augusto Deters <lucasdeters@gmail.com>"])
+        .website("https://github.com/deters/gestos")
+        .issue_url("https://github.com/deters/gestos/issues")
+        .license_type(gtk::License::Gpl20)
+        .build();
     dialog.present();
 }
 
@@ -513,7 +517,6 @@ pub fn build_ui(app: &gtk::Application) {
         "headerbar { background: @window_bg_color; border: none; box-shadow: none; }\n\
          .main-window-content, .dialog-content { background-color: @window_bg_color; }\n\
          scrolledwindow, viewport { background-color: transparent !important; background-image: none !important; }\n\
-         .boxed-list, .boxed-list row, .boxed-list listrow, row, listrow { background-color: @card_bg_color !important; }\n\
          .gesture-preview-frame { background: @window_bg_color; border-radius: 6px; }\n\
          searchentry, entry.search { border-radius: 18px; }\n\
          .context-title { font-size: 1.5em; font-weight: bold; }\n\

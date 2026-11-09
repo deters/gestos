@@ -1,4 +1,4 @@
-use gtk::prelude::*;
+use adw::prelude::*;
 use gtk::{gio, glib};
 use gestos::config::Configuration;
 use crate::ui::main_window::refresh_gesture_list;
@@ -11,51 +11,31 @@ use crate::daemon::reload_daemon;
 use crate::extension::{self, ExtensionStatus};
 use crate::system::{get_autostart_file_path, mark_autostart_decided, set_autostart_enabled};
 
-/// A row with a title, a subtitle under it, and room for a control at its end.
-fn settings_row(title: &str, subtitle: &str) -> (gtk::ListBoxRow, gtk::Box, gtk::Label) {
-    let row = gtk::ListBoxRow::new();
-    row.set_activatable(false);
-    let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    row_box.set_margin_start(16);
-    row_box.set_margin_end(16);
-    row_box.set_margin_top(12);
-    row_box.set_margin_bottom(12);
+/// A row's subtitle, which also says when a setting couldn't be changed.
+#[derive(Clone)]
+struct Subtitle(adw::ActionRow);
 
-    let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    text.set_hexpand(true);
-    text.set_halign(gtk::Align::Start);
-    let title_label = gtk::Label::new(Some(title));
-    title_label.add_css_class("status-label");
-    title_label.set_halign(gtk::Align::Start);
-    text.append(&title_label);
-    let subtitle_label = gtk::Label::new(Some(subtitle));
-    subtitle_label.add_css_class("action-label");
-    subtitle_label.set_halign(gtk::Align::Start);
-    subtitle_label.set_xalign(0.0);
-    subtitle_label.set_wrap(true);
-    text.append(&subtitle_label);
-    row_box.append(&text);
+impl Subtitle {
+    fn set_text(&self, text: &str) {
+        self.0.set_subtitle(text);
+    }
+}
 
-    row.set_child(Some(&row_box));
-    (row, row_box, subtitle_label)
+/// A row with a title, a subtitle under it, and a box at its end for its controls.
+fn settings_row(title: &str, subtitle: &str) -> (adw::ActionRow, gtk::Box, Subtitle) {
+    let row = adw::ActionRow::builder().title(title).subtitle(subtitle).build();
+    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    controls.set_valign(gtk::Align::Center);
+    row.add_suffix(&controls);
+    let subtitle = Subtitle(row.clone());
+    (row, controls, subtitle)
 }
 
 /// A titled group of rows, as GNOME's settings pages have them.
-fn append_section(main_box: &gtk::Box, title: &str) -> gtk::ListBox {
-    let header = gtk::Label::new(Some(title));
-    header.add_css_class("section-header");
-    header.set_halign(gtk::Align::Start);
-    header.set_margin_bottom(4);
-    if main_box.first_child().is_some() {
-        header.set_margin_top(12);
-    }
-    main_box.append(&header);
-
-    let list = gtk::ListBox::new();
-    list.add_css_class("boxed-list");
-    list.set_selection_mode(gtk::SelectionMode::None);
-    main_box.append(&list);
-    list
+fn append_section(page: &adw::PreferencesPage, title: &str) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder().title(title).build();
+    page.add(&group);
+    group
 }
 
 fn settings_switch(label: &str) -> gtk::Switch {
@@ -70,7 +50,7 @@ fn extension_settings_usable(status: &ExtensionStatus) -> bool {
     matches!(status, ExtensionStatus::Running | ExtensionStatus::Outdated(_))
 }
 
-fn append_autostart_row(list: &gtk::ListBox) {
+fn append_autostart_row(list: &adw::PreferencesGroup) {
     let manual_autostart =
         gestos::config::manual_autostart_for(gestos::config::get_environment_suffix());
     let description = "Start gestures automatically";
@@ -82,11 +62,8 @@ fn append_autostart_row(list: &gtk::ListBox) {
             ));
             let config_line = gtk::Label::new(Some(line));
             config_line.add_css_class("monospace");
-            config_line.set_halign(gtk::Align::Start);
             config_line.set_selectable(true);
-            if let Some(text) = subtitle.parent().and_downcast::<gtk::Box>() {
-                text.append(&config_line);
-            }
+            row_box.append(&config_line);
         }
         None => {
             let switch = settings_switch("Start When I Log In");
@@ -102,7 +79,7 @@ fn append_autostart_row(list: &gtk::ListBox) {
             row_box.append(&switch);
         }
     }
-    list.append(&row);
+    list.add(&row);
 }
 
 /// The mouse buttons gestures can be drawn with, numbered as in `gestosd --button`.
@@ -111,7 +88,11 @@ const DEFAULT_DRAW_BUTTON: i32 = 3;
 
 /// Which mouse button draws gestures. The daemon only picks it as it starts, so a change
 /// restarts gestures if they're on.
-fn append_button_row(state_rc: &Rc<RefCell<AppState>>, list: &gtk::ListBox, dialog: &gtk::Window) {
+fn append_button_row(
+    state_rc: &Rc<RefCell<AppState>>,
+    list: &adw::PreferencesGroup,
+    dialog: &gtk::Window,
+) {
     let (row, row_box, subtitle) =
         settings_row("Draw With", "The mouse button that draws gestures");
     let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -153,7 +134,7 @@ fn append_button_row(state_rc: &Rc<RefCell<AppState>>, list: &gtk::ListBox, dial
         buttons.append(&toggle);
     }
     row_box.append(&buttons);
-    list.append(&row);
+    list.add(&row);
 }
 
 
@@ -161,8 +142,8 @@ fn append_button_row(state_rc: &Rc<RefCell<AppState>>, list: &gtk::ListBox, dial
 /// can only be changed while it runs.
 fn append_extension_row(
     state_rc: &Rc<RefCell<AppState>>,
-    list: &gtk::ListBox,
-    needs_extension: Vec<gtk::ListBoxRow>,
+    list: &adw::PreferencesGroup,
+    needs_extension: Vec<adw::ActionRow>,
 ) {
     let status = state_rc.borrow().extension_status.clone();
     for row in &needs_extension {
@@ -201,50 +182,21 @@ fn append_extension_row(
         });
         status_box.append(&switch);
     }
-    list.append(&status_row);
+    list.add(&status_row);
 }
 
 pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     let parent = state_rc.borrow().window.clone();
-    let dialog = gtk::Window::new();
-    dialog.set_transient_for(Some(&parent));
-    dialog.set_modal(true);
-    dialog.set_title(Some("Preferences"));
-    dialog.set_default_size(380, -1);
-
-    let esc_controller = gtk::EventControllerKey::new();
-    let dialog_esc = dialog.clone();
-    esc_controller.connect_key_pressed(move |_, keyval, _, _| {
-        if keyval == gtk::gdk::Key::Escape {
-            dialog_esc.destroy();
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
-    });
-    dialog.add_controller(esc_controller);
-
-    let header = gtk::HeaderBar::new();
-    header.set_show_title_buttons(true);
-    let title_label = gtk::Label::new(Some("Preferences"));
-    title_label.add_css_class("title");
-    header.set_title_widget(Some(&title_label));
-    dialog.set_titlebar(Some(&header));
-
-    // As tall as what's in it, and scrolling once that's more than the main window.
-    let scrolled = gtk::ScrolledWindow::new();
-    scrolled.set_hscrollbar_policy(gtk::PolicyType::Never);
-    scrolled.set_propagate_natural_height(true);
-    scrolled.set_max_content_height(parent.height().max(480));
-    dialog.set_child(Some(&scrolled));
-
-    let main_box = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    main_box.add_css_class("dialog-content");
-    main_box.set_margin_start(24);
-    main_box.set_margin_end(24);
-    main_box.set_margin_top(24);
-    main_box.set_margin_bottom(24);
-    scrolled.set_child(Some(&main_box));
+    let preferences = adw::PreferencesWindow::builder()
+        .title("Preferences")
+        .transient_for(&parent)
+        .modal(true)
+        .search_enabled(false)
+        .default_width(560)
+        .build();
+    let dialog: gtk::Window = preferences.clone().upcast();
+    let page = adw::PreferencesPage::new();
+    preferences.add(&page);
 
     let on_gnome = state_rc.borrow().extension_status != ExtensionStatus::Unavailable;
     // The extension keeps its settings with it, so they can only be bound while it's installed.
@@ -252,7 +204,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     let mut needs_extension = Vec::new();
 
     // --- Gestures ---
-    let gestures_list = append_section(&main_box, "Gestures");
+    let gestures_list = append_section(&page, "Gestures");
     append_autostart_row(&gestures_list);
     append_button_row(state_rc, &gestures_list, &dialog);
     // The extension draws it, so it's only on GNOME.
@@ -264,13 +216,13 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
             settings.bind("show-gesture-path", &path, "active").build();
         }
         path_box.append(&path);
-        gestures_list.append(&path_row);
+        gestures_list.add(&path_row);
         needs_extension.push(path_row);
     }
 
     if on_gnome {
         // --- Window Tiling ---
-        let tiling_list = append_section(&main_box, "Window Tiling");
+        let tiling_list = append_section(&page, "Window Tiling");
         let (auto_row, auto_box, _) =
             settings_row("Tile Automatically", "Tile every workspace, also new ones");
         let auto = settings_switch("Tile Automatically");
@@ -287,19 +239,19 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
             });
         }
         auto_box.append(&auto);
-        tiling_list.append(&auto_row);
+        tiling_list.add(&auto_row);
         gap_box.append(&gap);
-        tiling_list.append(&gap_row);
+        tiling_list.add(&gap_row);
         needs_extension.push(auto_row);
         needs_extension.push(gap_row);
 
         // --- GNOME Extension ---
-        let extension_list = append_section(&main_box, "GNOME Extension");
+        let extension_list = append_section(&page, "GNOME Extension");
         append_extension_row(state_rc, &extension_list, needs_extension);
     }
 
     // --- Your Gestures ---
-    let config_list = append_section(&main_box, "Your Gestures");
+    let config_list = append_section(&page, "Your Gestures");
 
     let (export_row, export_box, _) =
         settings_row("Export Configuration", "Save your gestures to a YAML file");
@@ -355,7 +307,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
         chooser.show();
     });
     export_box.append(&export_btn);
-    config_list.append(&export_row);
+    config_list.add(&export_row);
 
     let (import_row, import_box, _) =
         settings_row("Import Configuration", "Load gestures from a YAML file");
@@ -429,7 +381,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
         chooser.show();
     });
     import_box.append(&import_btn);
-    config_list.append(&import_row);
+    config_list.add(&import_row);
 
     let (reset_row, reset_box, _) =
         settings_row("Remove All Gestures", "Delete every gesture and start over");
@@ -467,11 +419,11 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
         );
     });
     reset_box.append(&reset_btn);
-    config_list.append(&reset_row);
+    config_list.add(&reset_row);
 
     // --- Troubleshooting ---
     // For bug reports: the user's setup and what Gestos logged, opened in their text editor.
-    let troubleshooting_list = append_section(&main_box, "Troubleshooting");
+    let troubleshooting_list = append_section(&page, "Troubleshooting");
     let (debug_row, debug_box, _) =
         settings_row("Debugging Information", "Details about your setup for a bug report");
     let debug_btn = gtk::Button::with_mnemonic("_Create Report");
@@ -479,17 +431,18 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     let debug_parent = dialog.clone();
     debug_btn.connect_clicked(move |_| crate::debug_info::open(&debug_parent));
     debug_box.append(&debug_btn);
-    troubleshooting_list.append(&debug_row);
+    troubleshooting_list.add(&debug_row);
 
     let about_btn = gtk::Button::with_label("About Gestos");
     about_btn.add_css_class("flat");
     about_btn.set_halign(gtk::Align::Center);
-    about_btn.set_margin_top(12);
     let about_parent = dialog.clone();
     about_btn.connect_clicked(move |_| {
         crate::ui::main_window::show_about_dialog(&about_parent);
     });
-    main_box.append(&about_btn);
+    let about_group = adw::PreferencesGroup::new();
+    about_group.add(&about_btn);
+    page.add(&about_group);
 
-    dialog.present();
+    preferences.present();
 }

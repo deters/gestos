@@ -14,11 +14,13 @@ BuildRequires:  meson
 BuildRequires:  ninja-build
 BuildRequires:  cargo
 BuildRequires:  gtk4-devel
+BuildRequires:  libadwaita-devel
 BuildRequires:  libevdev-devel
 BuildRequires:  gcc
 BuildRequires:  systemd-rpm-macros
 
 Requires:       gtk4
+Requires:       libadwaita
 Requires:       libevdev
 Requires:       systemd
 

@@ -46,13 +46,13 @@ Install the dependencies:
 
 ```bash
 # Fedora
-sudo dnf install gtk4-devel meson ninja-build cargo gcc git
+sudo dnf install gtk4-devel libadwaita-devel meson ninja-build cargo gcc git
 
 # Debian 13
-sudo apt install libgtk-4-dev meson ninja-build cargo build-essential pkg-config git
+sudo apt install libgtk-4-dev libadwaita-1-dev meson ninja-build cargo build-essential pkg-config git
 
 # Alpine
-apk add gtk4.0-dev meson cargo gcc musl-dev git
+apk add gtk4.0-dev libadwaita-dev meson cargo gcc musl-dev git
 ```
 
 Older systems may need a newer Rust from [rustup](https://rustup.rs). Rust 1.75, from Ubuntu 24.04, is too old, and 1.85 works.
