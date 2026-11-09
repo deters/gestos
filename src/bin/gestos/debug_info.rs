@@ -126,7 +126,8 @@ pub fn report() -> String {
     }
 
     section(&mut out, "Gestures log");
-    log(&mut out, &["--user", "_COMM=gestosd"], LOG_LINES, None);
+    // Started at login it's logged as itself; started by the app, under its name.
+    log(&mut out, &["--user", "_COMM=gestosd", "+", "SYSLOG_IDENTIFIER=gestosd"], LOG_LINES, None);
     if let Some(path) = std::env::var_os("XDG_RUNTIME_DIR")
         .map(|dir| Path::new(&dir).join("gestosd-start.log"))
         .filter(|path| path.exists())

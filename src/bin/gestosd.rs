@@ -384,6 +384,9 @@ fn dispatch_gesture(
     }
 
     let app = focused_app(config, wayland_ctx);
+    if let Some(app) = &app {
+        println!("App in use: {app}");
+    }
     let templates = gesture_templates(config, modifiers, app.as_deref());
     let candidates: Vec<Gesture> = gestos::protractor::match_gesture_candidates(points, &templates)
         .iter()

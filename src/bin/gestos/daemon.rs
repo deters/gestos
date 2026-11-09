@@ -42,6 +42,16 @@ fn start_log_path() -> Option<std::path::PathBuf> {
     std::env::var_os("XDG_RUNTIME_DIR").map(|dir| std::path::PathBuf::from(dir).join("gestosd-start.log"))
 }
 
+/// A stream into the system journal, under the name `gestosd`, for the daemon's output. It's
+/// how journald takes a service's output, and lasts as long as the daemon, whatever this app does.
+fn journal_stream() -> Option<Stdio> {
+    let stream = std::os::unix::net::UnixStream::connect("/run/systemd/journal/stdout").ok()?;
+    // Its name, no unit, the info level, no level prefixes, and not forwarded anywhere else.
+    std::io::Write::write_all(&mut &stream, b"gestosd\n\n6\n0\n0\n0\n0\n").ok()?;
+    stream.shutdown(std::net::Shutdown::Read).ok()?;
+    Some(Stdio::from(std::os::fd::OwnedFd::from(stream)))
+}
+
 /// Makes the daemon's startup output readable, dropping the banner lines around its errors.
 fn clean_start_error(output: &str) -> String {
     output
@@ -59,7 +69,8 @@ pub fn start_daemon(conn: Option<&zbus::blocking::Connection>) -> Result<(), Str
     }
 
     // The daemon outlives this app, so its output can't go to a pipe that closes with the app:
-    // writing to it would make the daemon panic.
+    // writing to it would make the daemon panic. What it does goes to the journal, and its
+    // errors to a file, to tell why it didn't start.
     let log_path = start_log_path();
     let stderr = log_path
         .as_ref()
@@ -76,7 +87,7 @@ pub fn start_daemon(conn: Option<&zbus::blocking::Connection>) -> Result<(), Str
 
     let mut child = Command::new(daemon_binary())
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(journal_stream().unwrap_or_else(Stdio::null))
         .stderr(stderr)
         .process_group(0)
         .spawn()
