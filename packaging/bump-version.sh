@@ -74,10 +74,7 @@ perl -i -pe "s/(\%changelog)/\${1}\n* $SPEC_DATE Lucas Augusto Deters <lucasdete
 perl -i -pe "s/^(pkgver=)\S+/\${1}$NEW_VERSION/g" packaging/APKBUILD
 perl -i -pe "s/^(pkgrel=)\S+/\${1}0/g" packaging/APKBUILD
 
-# 5. src/bin/gestos/ui/main_window.rs
-perl -i -pe "s/(dialog\.set_version\(Some\(\")[^\"]+/\${1}$NEW_VERSION/g" src/bin/gestos/ui/main_window.rs
-
-# 6. debian/changelog
+# 5. debian/changelog
 if ! grep -q "gestos ($NEW_VERSION-1)" debian/changelog; then
     DATE_DEB=$(date -R)
     TEMP_CHANGELOG=$(mktemp)
@@ -99,7 +96,7 @@ cargo check >/dev/null 2>&1 || true
 
 # Commit and tag
 echo "Staging version changes in Git..."
-git add Cargo.toml Cargo.lock meson.build packaging/gestos.spec packaging/APKBUILD src/bin/gestos/ui/main_window.rs debian/changelog
+git add Cargo.toml Cargo.lock meson.build packaging/gestos.spec packaging/APKBUILD debian/changelog
 
 git commit -m "Bump version to $NEW_VERSION"
 git tag "v$NEW_VERSION"

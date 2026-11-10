@@ -263,7 +263,7 @@ pub fn show_about_dialog<W: IsA<gtk::Window>>(parent: &W) {
         .modal(true)
         .application_name("Gestos")
         .application_icon("gestos")
-        .version("6.9.0")
+        .version(env!("GESTOS_SHOWN_VERSION"))
         .comments("Mouse gestures for Linux")
         .developer_name("Lucas Augusto Deters")
         .developers(["Lucas Augusto Deters <lucasdeters@gmail.com>"])

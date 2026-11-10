@@ -27,7 +27,7 @@ pub fn report() -> String {
     let _ = writeln!(out, "Gestos debugging information, {now}");
 
     section(&mut out, "Gestos");
-    line(&mut out, "Version", env!("CARGO_PKG_VERSION"));
+    line(&mut out, "Version", env!("GESTOS_SHOWN_VERSION"));
     line(
         &mut out,
         "App",

@@ -12,6 +12,8 @@ sed -i "1s/^gestos ([^)]*)/gestos ($version~beta$n-1)/" debian/changelog
 sed -i "s/^Version:\( *\).*/Version:\1$version~beta$n/" packaging/gestos.spec
 # Alpine: 6.10.0_beta1, the same way.
 sed -i "s/^pkgver=.*/pkgver=${version}_beta$n/" packaging/APKBUILD
+# What About and the debug report show.
+echo "$version beta $n" > packaging/beta-version
 
 grep -q "^gestos ($version~beta$n-1)" debian/changelog
 grep -q "^Version: *$version~beta$n\$" packaging/gestos.spec

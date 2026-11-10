@@ -2,3 +2,4 @@
 /build/
 *.shell-extension.zip
 /extension/.stage/
+/packaging/beta-version
