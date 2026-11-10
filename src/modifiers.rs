@@ -92,19 +92,27 @@ impl HeldKeys {
         Modifiers::from_key_codes(self.0.iter().copied())
     }
 
-    /// Codes separated by spaces, or `none`.
+    /// The codes, then what they mean on a standard layout, joined by `+` like `29+125+ctrl+super`,
+    /// or `none`. A daemon from before an update reads only the names, and skips the codes as
+    /// names it doesn't know, so it keeps working until it's restarted.
     pub fn encode(&self) -> String {
         if self.0.is_empty() {
             return "none".to_string();
         }
-        self.0.iter().map(u16::to_string).collect::<Vec<_>>().join(" ")
+        let mut parts: Vec<String> = self.0.iter().map(u16::to_string).collect();
+        let standard = self.on_standard_layout();
+        if !standard.is_empty() {
+            parts.push(standard.to_string());
+        }
+        parts.join("+")
     }
 
-    /// Reads `encode`'s text. A service from before an update names modifiers instead, like
+    /// Reads `encode`'s text. A service from before an update only names modifiers, like
     /// `ctrl+super`, which are taken as the keys that mean them on a standard layout.
     pub fn decode(text: &str) -> Self {
-        if text.chars().any(|c| c.is_ascii_digit()) {
-            return Self::from_key_codes(text.split(' ').filter_map(|code| code.parse().ok()));
+        let codes: Vec<u16> = text.split('+').filter_map(|part| part.trim().parse().ok()).collect();
+        if !codes.is_empty() {
+            return Self::from_key_codes(codes);
         }
         let named = Modifiers::parse(text);
         let keys = [(named.ctrl, 29), (named.alt, 56), (named.shift, 42), (named.super_key, 125)];
@@ -179,10 +187,21 @@ mod tests {
     #[test]
     fn held_keys_survive_being_written_and_read_back() {
         let held = HeldKeys::from_key_codes([58, 97]);
-        assert_eq!(held.encode(), "58 97");
+        assert_eq!(held.encode(), "58+97+ctrl");
         assert_eq!(HeldKeys::decode(&held.encode()), held);
+        let caps_only = HeldKeys::from_key_codes([58]);
+        assert_eq!(caps_only.encode(), "58");
+        assert_eq!(HeldKeys::decode(&caps_only.encode()), caps_only);
         assert_eq!(HeldKeys::default().encode(), "none");
         assert!(HeldKeys::decode("none").is_empty());
+    }
+
+    #[test]
+    fn an_older_daemon_reads_the_usual_meaning_of_held_keys() {
+        // It reads them with `Modifiers::parse`, as it did before held keys were sent.
+        let held = HeldKeys::from_key_codes([29, 125, 54]);
+        assert_eq!(Modifiers::parse(&held.encode()), Modifiers::parse("ctrl+shift+super"));
+        assert!(Modifiers::parse(&HeldKeys::default().encode()).is_empty());
     }
 
     #[test]
