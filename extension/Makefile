@@ -17,6 +17,7 @@ install: pack
 
 test:
 	gjs -m tests/tile.test.js
+	gjs -m tests/sizes.test.js
 
 clean:
 	rm -rf $(PACK) $(STAGE)

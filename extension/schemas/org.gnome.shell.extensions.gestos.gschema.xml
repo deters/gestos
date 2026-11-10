@@ -25,7 +25,12 @@
     <key name="closed-sizes" type="a{s(iiiix)}">
       <default>{}</default>
       <summary>Sizes to undo</summary>
-      <description>Apps whose window closed at a size the extension gave it, so they saved that size: for each app, the window's original width and height, the width and height it closed at, and when, in seconds since 1970. The next window the app opens at that size gets its original size back.</description>
+      <description>What given-sizes holds, as versions before it kept it: one size for each app, of the last window that closed. It's moved there and emptied.</description>
+    </key>
+    <key name="given-sizes" type="a{sa(iiiix)}">
+      <default>{}</default>
+      <summary>Sizes to undo</summary>
+      <description>Windows the extension gave a size to, which their apps may have saved: for each app, each window's original width and height, the width and height it was given, and when, in seconds since 1970. They're kept while the windows are open too, in case the session ends without them getting their original size back. The next window the app opens at one of those sizes gets its original size back.</description>
     </key>
   </schema>
 </schemalist>

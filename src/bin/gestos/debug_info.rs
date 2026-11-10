@@ -103,7 +103,7 @@ pub fn report() -> String {
             if let Some(schema) = settings.settings_schema() {
                 for key in schema.list_keys() {
                     // Only settings, not what the extension keeps track of by itself.
-                    if matches!(key.as_str(), "tiled-workspaces" | "closed-sizes") {
+                    if matches!(key.as_str(), "tiled-workspaces" | "closed-sizes" | "given-sizes") {
                         continue;
                     }
                     line(&mut out, &key, &settings.value(&key).print(false));

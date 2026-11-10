@@ -6,10 +6,12 @@ import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {GestureChooser} from './lib/chooser.js';
 import {GestureTrail} from './lib/trail.js';
+import {addSize, readSizes, removeSize, takeSize, writeSizes} from './lib/sizes.js';
 import {fitSize, freeArea, hasSize, isBelievableMinimum, keepInside, restoreRect, tileWindows} from './lib/tile.js';
 
 const OBJECT_PATH = '/io/github/deters/Gestos/Extension';
@@ -42,6 +44,9 @@ const UNMAXIMIZE_TIMEOUT_MS = 1000;
 const RESIZE_TIMEOUT_MS = 500;
 // How long a window that was asked to close stays frozen, in case its app doesn't close it.
 const CLOSE_THAW_TIMEOUT_MS = 1000;
+// How long a window that was asked to close has to stay open to be tiled again, as some apps take
+// long to close, and would save the size of the tile if it came back before.
+const CLOSE_REJOIN_MS = 5000;
 // How long a window that's maximized again stays frozen, if its app doesn't take the new size.
 const MAXIMIZE_THAW_TIMEOUT_MS = 500;
 // How long tiled windows get to settle, after they're placed or change, before they're checked.
@@ -51,6 +56,13 @@ const MAX_TILE_RETURNS = 3;
 const TILE_RETURN_PERIOD_MS = 5000;
 // How long a size to undo is kept for an app that isn't opened again.
 const CLOSED_SIZE_DAYS = 30;
+// How long sizes given to windows wait to be saved, so a layout writes them once.
+const SIZES_SAVE_DELAY_MS = 1000;
+// How long the Shell gets to move windows to the monitors there are now, before they're tiled.
+const MONITORS_SETTLE_MS = 500;
+// How much smaller than its tile a window may be and still fill it: terminals only take whole
+// lines and columns, and leave the rest of the tile empty.
+const TILE_SLACK = 40;
 // How often tiled windows make room for one that's being moved or resized.
 const DRAG_LAYOUT_DELAY_MS = 100;
 
@@ -81,11 +93,52 @@ function isSnapped(window) {
     return flags !== 0 && flags !== Meta.MaximizeFlags.BOTH && !window.is_fullscreen();
 }
 
+// With workspaces only on the primary monitor, as GNOME has by default, windows on the others are
+// on every workspace. They're tiled with the workspace in use.
+function isOnSharedMonitor(window) {
+    return Meta.prefs_get_workspaces_only_on_primary() &&
+        window.get_monitor() !== global.display.get_primary_monitor();
+}
+
+// Shown on every workspace because the user chose it, not for being on a shared monitor.
+function isOnAllByChoice(window) {
+    return window.is_on_all_workspaces() && !isOnSharedMonitor(window);
+}
+
+// Windows that stay over the others instead of taking a place among them: ones that belong to
+// another window, ones kept on top, as picture-in-picture videos are, and ones left out of the
+// taskbar, as drop-down terminals are.
+function floats(window) {
+    return window.get_transient_for() !== null || window.is_above() || window.is_skip_taskbar();
+}
+
+// Windows that can't be resized are tiled at their own size, and the others make room for them.
+function isFixedSize(window) {
+    return !window.allows_resize() && !isMaximizedAtAll(window) && !window.is_fullscreen();
+}
+
 function isTileable(window) {
-    // A maximized or snapped window can't be resized until it's restored, which tiling does.
     return !window.minimized && !UNTILED_APP_IDS.includes(window.get_gtk_application_id()) &&
-        window.get_window_type() === Meta.WindowType.NORMAL && !window.is_on_all_workspaces() &&
-        !window.is_fullscreen() && (isMaximizedAtAll(window) || window.allows_resize());
+        window.get_window_type() === Meta.WindowType.NORMAL && !isOnAllByChoice(window) &&
+        !floats(window) && !window.is_fullscreen();
+}
+
+// Other extensions that tile windows, which would move the same windows as this. Tiling waits
+// while one of them is on.
+const OTHER_TILING_EXTENSIONS = [
+    'tiling-assistant@ubuntu.com',
+    'tiling-assistant@leleat-on-github',
+    'pop-shell@system76.com',
+    'forge@jmmaranan.com',
+    'paperwm@paperwm.github.com',
+    'paperwm@hedning:matrix.org',
+    'tilingshell@ferrarodomenico.com',
+    'material-shell@papyelgringo',
+];
+
+function otherTilingIsOn() {
+    return OTHER_TILING_EXTENSIONS.some(uuid =>
+        Main.extensionManager.lookup(uuid)?.state === ExtensionState.ACTIVE);
 }
 
 // The smallest the app lets its window get, as frame size: the Shell reports it with the window's
@@ -121,11 +174,14 @@ class WindowActions {
     _tilings = new Map();
     // Windows whose picture is held while they change size where nobody should see it.
     _frozen = new Set();
+    // Windows kept open as they were asked to close, waiting to join their tiling again.
+    _rejoins = new Set();
     constructor(settings) {
         this._settings = settings;
-        // Apps whose window closed at a size this gave it, with its original size and that size.
-        // They're kept across sessions, as the app keeps the size it saved until it's opened again.
-        this._closedSizes = this._loadClosedSizes();
+        // Sizes this gave windows, with their original sizes, for each app. They're kept across
+        // sessions, as an app keeps the size it saved until it's opened again.
+        this._givenSizes = this._loadGivenSizes();
+        this._sizesSaveId = 0;
         this._grabId = global.display.connect('grab-op-begin',
             (_display, window, op) => this._onGrabBegin(window, op));
         this._grabEndId = global.display.connect('grab-op-end',
@@ -165,6 +221,17 @@ class WindowActions {
             (_wm, actor) => this._onMinimized(actor.meta_window));
         this._unminimizeId = global.window_manager.connect('unminimize',
             (_wm, actor) => this._onUnminimized(actor.meta_window));
+        // Windows on shared monitors go with the workspace in use.
+        this._activeWorkspaceId = global.workspace_manager.connect('active-workspace-changed',
+            () => this._onActiveWorkspaceChanged());
+        // Monitors that come and go move windows, which isn't the user placing them.
+        this._monitorsSettleId = 0;
+        this._monitorsId = Main.layoutManager.connect('monitors-changed',
+            () => this._onMonitorsChanged());
+        // Another extension that tiles windows puts tiling on hold while it's on.
+        this._otherTiling = otherTilingIsOn();
+        this._extensionStateId = Main.extensionManager.connect('extension-state-changed',
+            () => this._onExtensionStateChanged());
 
         // Windows closed from the Shell, by its close shortcut, window menu, or overview, get their
         // original size back before they close.
@@ -189,6 +256,11 @@ class WindowActions {
         global.window_manager.disconnect(this._mapId);
         global.window_manager.disconnect(this._minimizeId);
         global.window_manager.disconnect(this._unminimizeId);
+        global.workspace_manager.disconnect(this._activeWorkspaceId);
+        Main.layoutManager.disconnect(this._monitorsId);
+        Main.extensionManager.disconnect(this._extensionStateId);
+        if (this._monitorsSettleId)
+            GLib.source_remove(this._monitorsSettleId);
         global.workspace_manager.disconnect(this._workspaceAddedId);
         global.workspace_manager.disconnect(this._workspaceRemovedId);
         global.workspace_manager.disconnect(this._workspacesReorderedId);
@@ -202,6 +274,12 @@ class WindowActions {
             this._untrack(window);
         for (const frozen of [...this._frozen])
             frozen.release(true);
+        for (const finish of [...this._rejoins])
+            finish();
+        if (this._sizesSaveId) {
+            GLib.source_remove(this._sizesSaveId);
+            this._saveGivenSizes();
+        }
     }
 
     // What's needed to pick up where this left off, for when the extension is enabled again.
@@ -231,8 +309,13 @@ class WindowActions {
     loadState(saved) {
         const open = new Set(global.get_window_actors().map(actor => actor.meta_window));
         for (const [window, original] of saved.originals) {
-            if (open.has(window))
-                Object.assign(this._track(window, original.rect), original);
+            if (!open.has(window))
+                continue;
+            const tracked = Object.assign(this._track(window, original.rect), original);
+            // Its size was saved as given, which it's still at, so it's the same one.
+            if (tracked.size)
+                takeSize(this._givenSizes, tracked.appId, tracked.size);
+            this._remember(tracked);
         }
         for (const [workspace, {windows, plans, order, parked}] of saved.tilings) {
             const tiling = this._startTiling(workspace);
@@ -251,23 +334,59 @@ class WindowActions {
         }
     }
 
-    _loadClosedSizes() {
+    // Versions before kept one size for each app, which is moved over.
+    _loadGivenSizes() {
         const oldest = Date.now() / 1000 - CLOSED_SIZE_DAYS * 24 * 60 * 60;
-        const saved = this._settings.get_value('closed-sizes').deepUnpack();
-        return new Map(Object.entries(saved)
-            .filter(([, [, , , , time]]) => time >= oldest)
-            .map(([appId, [width, height, sizeWidth, sizeHeight, time]]) => [appId, {
-                rect: {width, height},
-                size: {width: sizeWidth, height: sizeHeight},
-                time,
-            }]));
+        const saved = this._settings.get_value('given-sizes').deepUnpack();
+        const older = this._settings.get_value('closed-sizes').deepUnpack();
+        for (const [appId, entry] of Object.entries(older))
+            saved[appId] = [...saved[appId] ?? [], entry];
+        const sizes = readSizes(saved, oldest);
+        if (Object.keys(older).length > 0) {
+            this._settings.set_value('given-sizes', new GLib.Variant('a{sa(iiiix)}', writeSizes(sizes)));
+            this._settings.reset('closed-sizes');
+        }
+        return sizes;
     }
 
-    _saveClosedSizes() {
-        const entries = [...this._closedSizes].map(([appId, {rect, size, time}]) =>
-            [appId, [rect.width, rect.height, size.width, size.height, time]]);
-        this._settings.set_value('closed-sizes',
-            new GLib.Variant('a{s(iiiix)}', Object.fromEntries(entries)));
+    _saveGivenSizes() {
+        this._sizesSaveId = 0;
+        this._settings.set_value('given-sizes',
+            new GLib.Variant('a{sa(iiiix)}', writeSizes(this._givenSizes)));
+    }
+
+    _scheduleSizesSave() {
+        if (this._sizesSaveId)
+            return;
+        this._sizesSaveId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, SIZES_SAVE_DELAY_MS, () => {
+            this._saveGivenSizes();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    // Keeps the size this gave a window, with its original size, as its app may save it.
+    _remember(original) {
+        if (!original.rect || !original.size)
+            return;
+        const now = Math.floor(Date.now() / 1000);
+        const size = {width: original.size.width, height: original.size.height};
+        const rect = {width: original.rect.width, height: original.rect.height};
+        if (original.entry) {
+            Object.assign(original.entry, {rect, size, time: now});
+        } else {
+            original.entry = {rect, size, time: now};
+            addSize(this._givenSizes, original.appId, original.entry);
+        }
+        this._scheduleSizesSave();
+    }
+
+    // The window is back at its original size, or closed at it, so there's nothing to undo.
+    _forgetGiven(original) {
+        if (!original?.entry)
+            return;
+        removeSize(this._givenSizes, original.appId, original.entry);
+        original.entry = null;
+        this._scheduleSizesSave();
     }
 
     // Windows that were already open when this started, as apps can open theirs at login before
@@ -322,9 +441,11 @@ class WindowActions {
                 window.connect('unmanaged', () => this._onUnmanaged(window)),
                 window.connect('workspace-changed', () => this._onWorkspaceChanged(window)),
                 ...['notify::maximized-horizontally', 'notify::maximized-vertically',
-                    'notify::fullscreen', 'notify::on-all-workspaces'].map(signal =>
+                    'notify::fullscreen', 'notify::on-all-workspaces', 'notify::above'].map(signal =>
                     window.connect(signal, () => this._onStateChanged(window))),
             ],
+            entry: null,
+            changedMeanwhile: false,
             waitId: 0,
             timeoutId: 0,
         };
@@ -344,7 +465,9 @@ class WindowActions {
 
     // Gives a window a size, remembering that it's one this gave it.
     _resizeTo(window, rect) {
-        this._originals.get(window).size = copyRect(rect);
+        const original = this._originals.get(window);
+        original.size = copyRect(rect);
+        this._remember(original);
         window.move_resize_frame(true, rect.x, rect.y, rect.width, rect.height);
     }
 
@@ -355,6 +478,7 @@ class WindowActions {
             const {x, y, width, height} =
                 keepInside(original.rect, window.get_work_area_current_monitor());
             window.move_resize_frame(true, x, y, width, height);
+            this._forgetGiven(original);
         }
         this._untrack(window);
     }
@@ -363,10 +487,14 @@ class WindowActions {
     // while if it doesn't.
     _restoreOriginalThen(window, original, done) {
         original.fixing = true;
+        original.changedMeanwhile = false;
+        // Changes this makes itself aren't the user changing their mind.
+        original.ownChange = true;
         if (isMaximizedAtAll(window))
             window.unmaximize();
         if (window.is_fullscreen())
             window.unmake_fullscreen();
+        original.ownChange = false;
         if (!original.rect) {
             done();
             return;
@@ -404,11 +532,16 @@ class WindowActions {
     // Holds the window's picture as it is, so that resizing it doesn't show, until it's thawed: once
     // it changes size again if asked, or after a while. A window that closes is never thawed, as
     // its picture goes with it. Thawing also shows a window that was hidden while frozen. `ended`
-    // is called once it's thawed or gone.
+    // is called once it's thawed or gone, with whether it was thawed. What's returned can thaw it
+    // early with `release(true)`.
     _freeze(window) {
         const actor = window.get_compositor_private();
-        if (!actor)
-            return (_onResize, _timeout, ended = null) => ended?.();
+        if (!actor) {
+            return (_onResize, _timeout, ended = null) => {
+                ended?.(false);
+                return {release: () => {}};
+            };
+        }
         actor.freeze();
         return (onResize, timeout, ended = null) => {
             const frozen = {ids: [], timeoutId: 0};
@@ -418,11 +551,12 @@ class WindowActions {
                 if (frozen.timeoutId)
                     GLib.source_remove(frozen.timeoutId);
                 this._frozen.delete(frozen);
+                frozen.release = () => {};
                 if (thaw) {
                     actor.thaw();
                     actor.opacity = 255;
                 }
-                ended?.();
+                ended?.(thaw);
             };
             frozen.ids.push(window.connect('unmanaging', () => frozen.release(false)));
             if (onResize)
@@ -433,6 +567,7 @@ class WindowActions {
                 return GLib.SOURCE_REMOVE;
             });
             this._frozen.add(frozen);
+            return frozen;
         };
     }
 
@@ -451,33 +586,91 @@ class WindowActions {
         const original = this._originals.get(window);
         if (!original?.rect || original.fixing || original.closing)
             return false;
-        this._leave(window);
+        const tiling = this._leave(window);
         // It's gone at once, as the others take its room at once, and takes its original size out
-        // of sight before it closes. If its app keeps it open, it's shown again once thawed.
+        // of sight before it closes.
         const thawLater = this._freeze(window);
         const actor = window.get_compositor_private();
         if (actor)
             actor.opacity = 0;
         this._restoreOriginalThen(window, original, () => {
+            this._forgetGiven(original);
             this._untrack(window);
+            // If its app keeps it open, as to ask whether to save first, it's shown again: at
+            // once if it opens a window to ask in, or once thawed.
+            let frozen = null;
+            let dialog = null;
+            const dialogId = global.display.connect('window-created', (_display, created) => {
+                if (created.get_transient_for() !== window)
+                    return;
+                dialog = created;
+                frozen?.release(true);
+            });
+            frozen = thawLater(false, CLOSE_THAW_TIMEOUT_MS, thawed => {
+                global.display.disconnect(dialogId);
+                if (thawed && tiling)
+                    this._rejoinIfKeptOpen(tiling, window, dialog);
+            });
             close();
-            thawLater(false, CLOSE_THAW_TIMEOUT_MS);
         });
         return true;
+    }
+
+    // A window its app kept open as it was asked to close joins its tiling again: once the window
+    // it asked in is closed, or after a while.
+    _rejoinIfKeptOpen(tiling, window, dialog) {
+        let closing = false;
+        let timeoutId = 0;
+        const ids = [];
+        const finish = () => {
+            for (const [object, id] of ids)
+                object.disconnect(id);
+            ids.length = 0;
+            if (timeoutId)
+                GLib.source_remove(timeoutId);
+            timeoutId = 0;
+            this._rejoins.delete(finish);
+        };
+        this._rejoins.add(finish);
+        const rejoin = () => {
+            finish();
+            if (closing || this._tilings.get(tiling.workspace) !== tiling ||
+                this._findTiling(window)[1] || !isTileable(window))
+                return;
+            this._addToTiling(tiling, window);
+            this._layoutWhenReady(tiling);
+        };
+        ids.push([window, window.connect('unmanaging', () => {
+            closing = true;
+            finish();
+        })]);
+        if (dialog) {
+            // Once the Shell is done with the dialog, and the window's app has had a moment to
+            // close it as the user answered.
+            ids.push([dialog, dialog.connect('unmanaged', () => {
+                timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, CLOSE_THAW_TIMEOUT_MS, () => {
+                    timeoutId = 0;
+                    rejoin();
+                    return GLib.SOURCE_REMOVE;
+                });
+            })]);
+        } else {
+            timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, CLOSE_REJOIN_MS, () => {
+                timeoutId = 0;
+                rejoin();
+                return GLib.SOURCE_REMOVE;
+            });
+        }
     }
 
     _onUnmanaged(window) {
         const original = this._originals.get(window);
         // Its app saved the size this gave it, so the next window it opens at that size gets the
-        // original size instead.
-        if (original.rect && original.size && !original.fixing) {
-            this._closedSizes.set(original.appId, {
-                rect: original.rect,
-                size: original.size,
-                time: Math.floor(Date.now() / 1000),
-            });
-            this._saveClosedSizes();
-        }
+        // original size instead. That stays remembered.
+        if (original.fixing)
+            this._forgetGiven(original);
+        else
+            this._remember(original);
         this._leave(window);
         this._untrack(window);
     }
@@ -488,6 +681,11 @@ class WindowActions {
     // by the Shell, so it gets its original size back once the snap is undone instead.
     _onStateChanged(window) {
         const original = this._originals.get(window);
+        // One maximized again while it gets its original size back, after this restored it, was
+        // toggled once more by the user, who changed their mind. Fullscreen isn't, as apps can
+        // ask for it again themselves.
+        if (original.fixing && !original.ownChange && isMaximizedAtAll(window))
+            original.changedMeanwhile = true;
         if (original.fixing || original.closing)
             return;
         const [, tiling] = this._findTiling(window);
@@ -495,9 +693,9 @@ class WindowActions {
         if (tiling && !tiling.windows.get(window).tile)
             return;
 
-        // One on all workspaces belongs to no one tiling, so it's set aside at its original size
-        // until it's on one workspace again.
-        if (window.is_on_all_workspaces()) {
+        // One on all workspaces belongs to no one tiling, and one that floats over the others has no
+        // place among them, so they're set aside at their original size until that changes.
+        if (isOnAllByChoice(window) || floats(window)) {
             this._setAsideFrom(tiling, window, original)?.settle();
             this._restoreOriginal(window);
             return;
@@ -512,7 +710,19 @@ class WindowActions {
             // Its original size is taken where it can't be seen, until it's maximized again.
             const thawLater = this._freeze(window);
             this._restoreOriginalThen(window, original, () => {
+                const changedMeanwhile = original.changedMeanwhile;
+                this._forgetGiven(original);
                 this._untrack(window);
+                // Undone in the meantime, as by a second double-click on its title, so it's not
+                // maximized again, and joins tiling as it is.
+                if (changedMeanwhile && !fullscreen) {
+                    thawLater(false, 0);
+                    aside?.settle();
+                    if (isMaximizedAtAll(window))
+                        window.unmaximize();
+                    aside?.check();
+                    return;
+                }
                 // Watched before it's maximized, as an X11 window takes its new size at once.
                 thawLater(true, MAXIMIZE_THAW_TIMEOUT_MS, () => {
                     if (aside && this._tilings.get(tiling.workspace) === tiling)
@@ -533,6 +743,7 @@ class WindowActions {
             const frame = window.get_frame_rect();
             if (original.rect)
                 window.move_resize_frame(true, frame.x, frame.y, original.rect.width, original.rect.height);
+            this._forgetGiven(original);
             this._untrack(window);
         }
     }
@@ -574,12 +785,12 @@ class WindowActions {
     // maximized at that size too.
     _takeClosedSize(window) {
         const appId = appIdOf(window);
-        const closed = appId && this._closedSizes.get(appId);
-        if (!closed || window.get_window_type() !== Meta.WindowType.NORMAL)
+        if (!appId || window.get_window_type() !== Meta.WindowType.NORMAL)
             return null;
-        this._closedSizes.delete(appId);
-        this._saveClosedSizes();
-        return hasSize(window.get_frame_rect(), closed.size) ? closed : null;
+        const closed = takeSize(this._givenSizes, appId, window.get_frame_rect());
+        if (closed)
+            this._scheduleSizesSave();
+        return closed;
     }
 
     // A tiled workspace keeps the order the user touched its windows in, the last one first.
@@ -829,10 +1040,16 @@ class WindowActions {
 
     // Windows are planned with how small each app lets its window get, so that none has to move
     // again. One that turned out not to get as small as it said keeps what it showed instead. One
-    // that says it can't get smaller than most of the screen gets as small as the others.
+    // that says it can't get smaller than most of the screen gets as small as the others. One that
+    // can't be resized at all keeps its size.
     _minimumsOf(tiling, group, area) {
         const minimums = new Map();
         group.forEach((window, i) => {
+            if (isFixedSize(window)) {
+                const frame = window.get_frame_rect();
+                minimums.set(i, {width: frame.width, height: frame.height});
+                return;
+            }
             const believable = size => size && isBelievableMinimum(size, area) ? size : null;
             const reported = believable(minimumFrameSize(window));
             const seen = believable(tiling.windows.get(window)?.minimum);
@@ -885,26 +1102,34 @@ class WindowActions {
         window.unminimize();
     }
 
-    // A maximized, fullscreen, snapped or all-workspaces window is set aside, with the size it had
-    // while tiled, and joins again as the one touched last once it's back to normal, on the tiled
-    // workspace it's on then. It's only
-    // watched once it's settled, as getting its original size back first restores it for a moment.
+    // A maximized, fullscreen, snapped, floating or all-workspaces window is set aside, with the size
+    // it had while tiled, and joins again as the one touched last once it's back to normal, on the
+    // tiled workspace it's on then. One that opened maximized has no such size, and joins at the
+    // size it takes then. It's only watched once it's settled, as getting its original size back
+    // first restores it for a moment.
     _setAside(tiling, window, rect) {
         if (tiling.aside.has(window))
             return;
         const aside = {rect, settled: false, closing: false, checkId: 0};
         const join = () => {
             if (!aside.settled || aside.closing || this._originals.get(window)?.fixing ||
-                isMaximizedAtAll(window) || window.is_fullscreen() || window.is_on_all_workspaces())
+                isMaximizedAtAll(window) || window.is_fullscreen() || isOnAllByChoice(window) ||
+                floats(window))
                 return;
             this._forgetAside(tiling, window);
             // It joins the workspace it's on now, which isn't the one it left when it was on all.
             const workspace = window.get_workspace();
             const joining = workspace && this._tilings.get(workspace);
-            if (!joining || window.minimized || this._findTiling(window)[1])
+            if (!joining || window.minimized || this._findTiling(window)[1] || !isTileable(window))
                 return;
             this._addToTiling(joining, window);
-            this._originals.get(window).rect = copyRect(aside.rect);
+            const original = this._originals.get(window);
+            if (aside.rect)
+                original.rect = copyRect(aside.rect);
+            // Still at the size it had maximized, until its app takes its normal size, which an
+            // X11 window has already.
+            else if (window.get_client_type() !== Meta.WindowClientType.X11)
+                original.rect = null;
             this._layoutWhenReady(joining);
         };
         // Once the Shell is done changing the window, as resizing windows in the middle of that
@@ -920,7 +1145,7 @@ class WindowActions {
         };
         aside.ids = [
             ...['notify::maximized-horizontally', 'notify::maximized-vertically',
-                'notify::fullscreen', 'notify::on-all-workspaces'].map(signal =>
+                'notify::fullscreen', 'notify::on-all-workspaces', 'notify::above'].map(signal =>
                 window.connect(signal, check)),
             // A closing window can stop being maximized or fullscreen as it goes, and mustn't
             // join, as it can't be resized anymore.
@@ -948,6 +1173,7 @@ class WindowActions {
         aside.settle = () => {
             aside.settled = true;
         };
+        aside.check = check;
         tiling.aside.set(window, aside);
     }
 
@@ -1006,6 +1232,9 @@ class WindowActions {
     // stays where it was moved to. One that changed size goes back a few times, and after that
     // keeps what its app wants, as its original size.
     _checkTiles(tiling) {
+        // Windows the Shell moves to the monitors there are now are placed once it's done.
+        if (this._monitorsSettleId)
+            return;
         const now = Date.now();
         let changed = false;
         for (const plan of tiling.plans) {
@@ -1017,6 +1246,13 @@ class WindowActions {
                 const frame = window.get_frame_rect();
                 const tile = state.tile;
                 const area = window.get_work_area_current_monitor();
+                // A bit smaller where it was put fills its tile as well as it can, as a terminal
+                // does with whole lines and columns.
+                if (Math.abs(frame.x - tile.x) <= 1 && Math.abs(frame.y - tile.y) <= 1 &&
+                    frame.width <= tile.width &&
+                    frame.height <= tile.height && tile.width - frame.width < TILE_SLACK &&
+                    tile.height - frame.height < TILE_SLACK)
+                    return;
                 const wider = frame.width > tile.width + 1;
                 const taller = frame.height > tile.height + 1;
                 if ((wider || taller) && tile.width < original.rect.width + 1 &&
@@ -1068,15 +1304,92 @@ class WindowActions {
 
     // Panels and docks change the room windows have, and so does the gap.
     _onWorkAreasChanged() {
+        if (this._monitorsSettleId)
+            return;
         for (const tiling of this._tilings.values())
             this._layout(tiling);
     }
 
+    // A monitor that's plugged in or out moves windows, and numbers the monitors again, which isn't
+    // the user moving them. Once the Shell is done, they're tiled where they are, keeping what
+    // the user did before.
+    _onMonitorsChanged() {
+        if (this._monitorsSettleId)
+            GLib.source_remove(this._monitorsSettleId);
+        this._monitorsSettleId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, MONITORS_SETTLE_MS, () => {
+            this._monitorsSettleId = 0;
+            for (const tiling of this._tilings.values()) {
+                for (const state of tiling.windows.values())
+                    state.monitor = undefined;
+                this._layout(tiling);
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    // Windows on shared monitors are tiled with the workspace in use, so they go to its tiling, in
+    // the order they had, or get their original size back if it isn't tiled.
+    _onActiveWorkspaceChanged() {
+        const active = global.workspace_manager.get_active_workspace();
+        const target = this._tilings.get(active);
+        let moved = false;
+        for (const tiling of this._tilings.values()) {
+            if (tiling === target)
+                continue;
+            const shared = tiling.order.filter(window => isOnSharedMonitor(window));
+            for (const window of shared) {
+                moved = true;
+                const state = tiling.windows.get(window);
+                this._dropFromTiling(tiling, window);
+                if (target) {
+                    this._joinTiling(target, window, state);
+                    target.order.push(window);
+                } else {
+                    this._restoreOriginal(window);
+                }
+            }
+            for (const [window, {rect}] of [...tiling.parked]) {
+                if (!isOnSharedMonitor(window))
+                    continue;
+                this._forgetParked(tiling, window);
+                if (target)
+                    this._park(target, window, rect, false);
+            }
+        }
+        if (!target)
+            return;
+        for (const window of active.list_windows()) {
+            if (!isOnSharedMonitor(window) || !isTileable(window) || this._findTiling(window)[1] ||
+                [...this._tilings.values()].some(tiling => tiling.aside.has(window)))
+                continue;
+            // A maximized one stays that way, as one that opens maximized does.
+            if (isMaximizedAtAll(window)) {
+                this._setAside(target, window, null);
+                target.aside.get(window).settle();
+            } else {
+                this._addToTiling(target, window);
+            }
+            moved = true;
+        }
+        if (moved)
+            this._layoutWhenReady(target);
+    }
+
+    // One that opens maximized or snapped stays that way, set aside until it's back to normal. One
+    // that opens again at a size this gave it is maximized by the Shell only for being that big,
+    // and joins.
     _onWindowMapped(window) {
         const reopened = this._takeClosedSize(window);
         const workspace = window.get_workspace();
         const tiling = workspace && this._tilings.get(workspace);
         if (tiling && !tiling.windows.has(window) && isTileable(window)) {
+            if (isMaximizedAtAll(window) && !reopened) {
+                this._setAside(tiling, window, null);
+                tiling.aside.get(window).settle();
+                if (isSnapped(window))
+                    this._layoutWhenReady(tiling);
+                return;
+            }
             this._addToTiling(tiling, window, reopened);
             this._layoutWhenReady(tiling);
         } else if (reopened) {
@@ -1144,6 +1457,8 @@ class WindowActions {
      * @returns {boolean} whether any window changed
      */
     ToggleTileWindows() {
+        if (this._otherTiling)
+            return false;
         const workspace = global.workspace_manager.get_active_workspace();
         let changed = true;
         if (this._tilings.has(workspace)) {
@@ -1158,10 +1473,13 @@ class WindowActions {
     }
 
     // A workspace with no windows can be tiled too, for the windows that open there next.
-    // Windows join from the bottom up, so the top one ends up as the one touched last.
+    // Windows join from the bottom up, so the top one ends up as the one touched last. Windows on
+    // shared monitors only join the workspace in use.
     _tile(workspace) {
-        const windows = global.display.sort_windows_by_stacking(
-            workspace.list_windows().filter(isTileable));
+        const active = global.workspace_manager.get_active_workspace();
+        const windows = global.display.sort_windows_by_stacking(workspace.list_windows()
+            .filter(window => isTileable(window) &&
+                (workspace === active || !isOnSharedMonitor(window))));
         const tiling = this._startTiling(workspace);
         for (const window of windows)
             this._addToTiling(tiling, window);
@@ -1198,6 +1516,8 @@ class WindowActions {
             this._started = true;
             this._pendingTiled = new Set(this._settings.get_value('tiled-workspaces').deepUnpack());
         }
+        if (this._otherTiling)
+            return;
         const workspaces = this._workspaces();
         for (const index of [...this._pendingTiled]) {
             if (index >= workspaces.length)
@@ -1223,6 +1543,8 @@ class WindowActions {
     // Turned on, it tiles every workspace. Turned off, it puts them all back.
     _onAutoChanged() {
         this._keptUntiled.clear();
+        if (this._otherTiling)
+            return;
         if (this._settings.get_boolean('tile-automatically')) {
             this._tileAll();
             return;
@@ -1230,6 +1552,25 @@ class WindowActions {
         for (const workspace of [...this._tilings.keys()])
             this._untile(workspace);
         this._saveTiled();
+    }
+
+    // While another extension tiles windows, this puts its own back, and tiles them again once it's
+    // off, as they were.
+    _onExtensionStateChanged() {
+        const on = otherTilingIsOn();
+        if (on === this._otherTiling)
+            return;
+        this._otherTiling = on;
+        if (!on) {
+            this.tileRemembered();
+            return;
+        }
+        this._workspaces().forEach((workspace, i) => {
+            if (this._tilings.has(workspace))
+                this._pendingTiled.add(i);
+        });
+        for (const workspace of [...this._tilings.keys()])
+            this._untile(workspace);
     }
 
     // A workspace GNOME removes, as it does with empty ones, isn't tiled anymore, and the places

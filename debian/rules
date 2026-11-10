@@ -39,9 +39,9 @@ override_dh_auto_install:
 	install -D -m 644 extension/extension.js debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/extension.js
 	sh extension/fingerprint.sh debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/metadata.json
 	install -D -m 644 extension/prefs.js debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/prefs.js
-	install -D -m 644 extension/lib/tile.js debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/lib/tile.js
-	install -D -m 644 extension/lib/chooser.js debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/lib/chooser.js
-	install -D -m 644 extension/lib/trail.js debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/lib/trail.js
+	for file in extension/lib/*.js; do \
+		install -D -m 644 $$file debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/lib/$$(basename $$file); \
+	done
 	install -D -m 644 extension/schemas/org.gnome.shell.extensions.gestos.gschema.xml debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/schemas/org.gnome.shell.extensions.gestos.gschema.xml
 	glib-compile-schemas debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/schemas
 
