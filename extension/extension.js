@@ -6,7 +6,6 @@ import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
-import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {GestureChooser} from './lib/chooser.js';
@@ -123,24 +122,6 @@ function isTileable(window) {
         !floats(window) && !window.is_fullscreen();
 }
 
-// Other extensions that tile windows, which would move the same windows as this. Tiling waits
-// while one of them is on.
-const OTHER_TILING_EXTENSIONS = [
-    'tiling-assistant@ubuntu.com',
-    'tiling-assistant@leleat-on-github',
-    'pop-shell@system76.com',
-    'forge@jmmaranan.com',
-    'paperwm@paperwm.github.com',
-    'paperwm@hedning:matrix.org',
-    'tilingshell@ferrarodomenico.com',
-    'material-shell@papyelgringo',
-];
-
-function otherTilingIsOn() {
-    return OTHER_TILING_EXTENSIONS.some(uuid =>
-        Main.extensionManager.lookup(uuid)?.state === ExtensionState.ACTIVE);
-}
-
 // The smallest the app lets its window get, as frame size: the Shell reports it with the window's
 // shadows, which aren't part of the frame.
 function minimumFrameSize(window) {
@@ -228,10 +209,6 @@ class WindowActions {
         this._monitorsSettleId = 0;
         this._monitorsId = Main.layoutManager.connect('monitors-changed',
             () => this._onMonitorsChanged());
-        // Another extension that tiles windows puts tiling on hold while it's on.
-        this._otherTiling = otherTilingIsOn();
-        this._extensionStateId = Main.extensionManager.connect('extension-state-changed',
-            () => this._onExtensionStateChanged());
 
         // Windows closed from the Shell, by its close shortcut, window menu, or overview, get their
         // original size back before they close.
@@ -258,7 +235,6 @@ class WindowActions {
         global.window_manager.disconnect(this._unminimizeId);
         global.workspace_manager.disconnect(this._activeWorkspaceId);
         Main.layoutManager.disconnect(this._monitorsId);
-        Main.extensionManager.disconnect(this._extensionStateId);
         if (this._monitorsSettleId)
             GLib.source_remove(this._monitorsSettleId);
         global.workspace_manager.disconnect(this._workspaceAddedId);
@@ -1457,8 +1433,6 @@ class WindowActions {
      * @returns {boolean} whether any window changed
      */
     ToggleTileWindows() {
-        if (this._otherTiling)
-            return false;
         const workspace = global.workspace_manager.get_active_workspace();
         let changed = true;
         if (this._tilings.has(workspace)) {
@@ -1516,8 +1490,6 @@ class WindowActions {
             this._started = true;
             this._pendingTiled = new Set(this._settings.get_value('tiled-workspaces').deepUnpack());
         }
-        if (this._otherTiling)
-            return;
         const workspaces = this._workspaces();
         for (const index of [...this._pendingTiled]) {
             if (index >= workspaces.length)
@@ -1543,8 +1515,6 @@ class WindowActions {
     // Turned on, it tiles every workspace. Turned off, it puts them all back.
     _onAutoChanged() {
         this._keptUntiled.clear();
-        if (this._otherTiling)
-            return;
         if (this._settings.get_boolean('tile-automatically')) {
             this._tileAll();
             return;
@@ -1552,25 +1522,6 @@ class WindowActions {
         for (const workspace of [...this._tilings.keys()])
             this._untile(workspace);
         this._saveTiled();
-    }
-
-    // While another extension tiles windows, this puts its own back, and tiles them again once it's
-    // off, as they were.
-    _onExtensionStateChanged() {
-        const on = otherTilingIsOn();
-        if (on === this._otherTiling)
-            return;
-        this._otherTiling = on;
-        if (!on) {
-            this.tileRemembered();
-            return;
-        }
-        this._workspaces().forEach((workspace, i) => {
-            if (this._tilings.has(workspace))
-                this._pendingTiled.add(i);
-        });
-        for (const workspace of [...this._tilings.keys()])
-            this._untile(workspace);
     }
 
     // A workspace GNOME removes, as it does with empty ones, isn't tiled anymore, and the places
