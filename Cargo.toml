@@ -1,6 +1,6 @@
 [package]
 name = "gestos"
-version = "7.0.0"
+version = "7.1.0"
 edition = "2021"
 authors = ["Lucas Augusto Deters <lucasdeters@gmail.com>"]
 license = "GPL-2.0-or-later"
