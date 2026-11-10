@@ -11,13 +11,15 @@ pub struct EditorActionOption {
 }
 
 pub struct AppState {
+    /// Short-lived notices, such as one to undo a deletion.
+    pub toasts: adw::ToastOverlay,
     pub config: Configuration,
     pub main_list: gtk::ListBox,
     pub search_entry: gtk::SearchEntry,
     pub window: gtk::ApplicationWindow,
     pub newly_added_gestures: Vec<String>,
     pub dbus_conn: Option<zbus::blocking::Connection>,
-    pub empty_state_box: gtk::Box,
+    pub empty_state_box: adw::StatusPage,
     pub action_options: Vec<EditorActionOption>,
     pub visible_suggestions: Vec<EditorActionOption>,
     pub suggestion_box: gtk::Box,

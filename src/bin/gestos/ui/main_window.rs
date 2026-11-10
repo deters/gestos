@@ -55,8 +55,9 @@ pub fn extension_note(
     })
 }
 
-/// A banner across the top of the window while the extension running is older than this Gestos,
-/// as that lasts until it's updated. It has a short title, and a button for what updates it.
+/// A banner across the top of the window, right under the header bar, while the extension running
+/// is older than this Gestos, as that lasts until it's updated. It has a short title, and a button
+/// for what updates it, as libadwaita's banners do from 1.3 on.
 #[derive(Clone)]
 pub struct ExtensionBanner {
     area: gtk::Box,
@@ -67,22 +68,19 @@ pub struct ExtensionBanner {
 impl ExtensionBanner {
     fn new() -> Self {
         let area = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        area.add_css_class("warning-box");
-        area.set_halign(gtk::Align::Center);
-        area.set_width_request(500);
-        area.set_margin_bottom(12);
-        area.set_margin_start(24);
-        area.set_margin_end(24);
+        area.add_css_class("extension-banner");
         area.set_visible(false);
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        content.set_hexpand(true);
+        content.set_halign(gtk::Align::Center);
+        area.append(&content);
         let title = gtk::Label::new(None);
-        title.add_css_class("warning-label");
-        title.set_hexpand(true);
-        title.set_xalign(0.0);
         title.set_wrap(true);
-        area.append(&title);
+        title.set_justify(gtk::Justification::Center);
+        content.append(&title);
         let button = gtk::Button::new();
         button.set_valign(gtk::Align::Center);
-        area.append(&button);
+        content.append(&button);
         ExtensionBanner { area, title, button }
     }
 
@@ -227,6 +225,8 @@ pub fn refresh_gesture_list(state_rc: &Rc<RefCell<AppState>>, select_name: Optio
     refresh_suggestions(state_rc, no_gestures_shown);
 }
 
+/// Shows the gestures that match the search. The one named, such as the one just saved, gets the
+/// focus, so that the keyboard carries on from it.
 fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) -> bool {
     let state = state_rc.borrow();
 
@@ -236,8 +236,12 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
     }
 
     let visible = get_visible_gestures(&state);
+    let mut focused = false;
 
     if visible.is_empty() {
+        let searching = !state.search_entry.text().trim().is_empty();
+        state.empty_state_box.set_title(if searching { "Nothing Found" } else { "No Gestures" });
+        state.empty_state_box.set_description(searching.then_some("Try different words."));
         state.empty_state_box.set_visible(true);
         state.main_list.set_visible(false);
     } else {
@@ -248,12 +252,14 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
             let row = create_gesture_row(gesture, state_rc);
             state.main_list.append(&row);
 
-            if let Some(name) = select_name {
-                if gesture.name == name {
-                    state.main_list.select_row(Some(&row));
-                }
+            if select_name == Some(gesture.name.as_str()) {
+                focused = row.grab_focus();
             }
         }
+    }
+    // One the search hides can't take it, so it goes back to the search.
+    if select_name.is_some() && !focused {
+        state.search_entry.grab_focus();
     }
     visible.is_empty()
 }
@@ -271,7 +277,109 @@ pub fn show_about_dialog<W: IsA<gtk::Window>>(parent: &W) {
         .issue_url("https://github.com/deters/gestos/issues")
         .license_type(gtk::License::Gpl20)
         .build();
+    crate::ui::components::close_with_ctrl_w(&dialog);
     dialog.present();
+}
+
+const SHORTCUTS_UI: &str = r#"<interface>
+  <object class="GtkShortcutsWindow" id="shortcuts">
+    <property name="modal">1</property>
+    <child>
+      <object class="GtkShortcutsSection">
+        <property name="section-name">shortcuts</property>
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title">General</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Search</property>
+                <property name="accelerator">&lt;Control&gt;f</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Preferences</property>
+                <property name="accelerator">&lt;Control&gt;comma</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Keyboard Shortcuts</property>
+                <property name="accelerator">&lt;Control&gt;question</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Close Window</property>
+                <property name="accelerator">&lt;Control&gt;w</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Quit</property>
+                <property name="accelerator">&lt;Control&gt;q</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>"#;
+
+fn show_shortcuts_window(parent: &gtk::ApplicationWindow) {
+    let builder = gtk::Builder::from_string(SHORTCUTS_UI);
+    let window: gtk::ShortcutsWindow = builder.object("shortcuts").expect("shortcuts window");
+    window.set_transient_for(Some(parent));
+    crate::ui::components::close_with_ctrl_w(&window);
+    window.present();
+}
+
+/// The window's keyboard shortcuts, as actions, the way GNOME's own apps have them. Dialogs aren't
+/// part of the app, so in them Ctrl+Q does nothing, and their unsaved changes are never lost to it.
+fn add_actions(app: &gtk::Application, state: &Rc<RefCell<AppState>>) {
+    let window = state.borrow().window.clone();
+
+    let search = gtk::gio::SimpleAction::new("search", None);
+    let search_entry = state.borrow().search_entry.clone();
+    search.connect_activate(move |_, _| {
+        search_entry.grab_focus();
+    });
+    window.add_action(&search);
+
+    let preferences = gtk::gio::SimpleAction::new("preferences", None);
+    let state_preferences = Rc::clone(state);
+    preferences.connect_activate(move |_, _| open_settings_window(&state_preferences));
+    app.add_action(&preferences);
+
+    let shortcuts = gtk::gio::SimpleAction::new("shortcuts", None);
+    let shortcuts_parent = window.clone();
+    shortcuts.connect_activate(move |_, _| show_shortcuts_window(&shortcuts_parent));
+    app.add_action(&shortcuts);
+
+    // Gestures keep working once Gestos is closed, as the daemon runs them.
+    let quit = gtk::gio::SimpleAction::new("quit", None);
+    let quit_app = app.clone();
+    quit.connect_activate(move |_, _| quit_app.quit());
+    app.add_action(&quit);
+
+    app.set_accels_for_action("win.search", &["<Control>f"]);
+    app.set_accels_for_action("app.preferences", &["<Control>comma"]);
+    app.set_accels_for_action("app.shortcuts", &["<Control>question"]);
+    app.set_accels_for_action("window.close", &["<Control>w"]);
+    app.set_accels_for_action("app.quit", &["<Control>q"]);
+}
+
+/// Holds the window's content at the width it reads best at, with room at the sides, and lets it
+/// narrow along with the window.
+fn clamped(child: &impl IsA<gtk::Widget>) -> adw::Clamp {
+    let clamp = adw::Clamp::new();
+    clamp.set_maximum_size(500);
+    clamp.set_tightening_threshold(500);
+    clamp.set_margin_start(24);
+    clamp.set_margin_end(24);
+    clamp.set_child(Some(child));
+    clamp
 }
 
 /// The actions to make gestures for. Reading the desktop's action lists can be slow, so it doesn't
@@ -311,21 +419,20 @@ pub fn build_ui(app: &gtk::Application) {
     // Content VBox
     let content_vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content_vbox.add_css_class("main-window-content");
-    window.set_child(Some(&content_vbox));
+    let toasts = adw::ToastOverlay::new();
+    toasts.set_child(Some(&content_vbox));
+    window.set_child(Some(&toasts));
 
     // The search stays visible, since it's also how new gestures start. Typing anywhere in the
     // window goes to it.
     let search_entry = gtk::SearchEntry::new();
-    search_entry.set_halign(gtk::Align::Center);
-    search_entry.set_width_request(500);
     search_entry.set_margin_top(12);
     search_entry.set_margin_bottom(12);
-    search_entry.set_margin_start(24);
-    search_entry.set_margin_end(24);
     search_entry.set_placeholder_text(Some("Search gestures and actions…"));
     search_entry.set_key_capture_widget(Some(&window));
     search_entry.connect_stop_search(|entry| entry.set_text(""));
-    content_vbox.append(&search_entry);
+    let search_clamp = clamped(&search_entry);
+    content_vbox.append(&search_clamp);
 
     let scrolled = gtk::ScrolledWindow::new();
     scrolled.set_vexpand(true);
@@ -334,42 +441,17 @@ pub fn build_ui(app: &gtk::Application) {
     let list_container = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
     let main_list = gtk::ListBox::new();
-    main_list.set_halign(gtk::Align::Center);
-    main_list.set_width_request(500);
-    main_list.set_margin_top(0);
     main_list.set_margin_bottom(24);
-    main_list.set_margin_start(24);
-    main_list.set_margin_end(24);
     main_list.add_css_class("boxed-list");
     main_list.set_selection_mode(gtk::SelectionMode::None);
     list_container.append(&main_list);
 
-    let empty_state_box = gtk::Box::new(gtk::Orientation::Vertical, 16);
-    empty_state_box.set_valign(gtk::Align::Center);
-    empty_state_box.set_halign(gtk::Align::Center);
-    empty_state_box.set_margin_top(72);
-    empty_state_box.set_margin_bottom(72);
-
-    let empty_icon = gtk::Image::from_icon_name("view-list-bullet-symbolic");
-    empty_icon.set_pixel_size(80);
-    empty_icon.set_opacity(0.4);
-    empty_state_box.append(&empty_icon);
-
-    let empty_title = gtk::Label::new(None);
-    empty_title.set_markup("<span size='large' weight='bold'>Nothing Found</span>");
-    empty_state_box.append(&empty_title);
-
-    let empty_subtitle = gtk::Label::new(Some("Try different words."));
-    empty_subtitle.set_opacity(0.65);
-    empty_state_box.append(&empty_subtitle);
-
+    let empty_state_box = adw::StatusPage::new();
+    empty_state_box.set_icon_name(Some("edit-find-symbolic"));
+    empty_state_box.set_vexpand(true);
     list_container.append(&empty_state_box);
 
     let suggestion_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    suggestion_box.set_halign(gtk::Align::Center);
-    suggestion_box.set_width_request(500);
-    suggestion_box.set_margin_start(24);
-    suggestion_box.set_margin_end(24);
     suggestion_box.set_margin_bottom(24);
     suggestion_box.set_visible(false);
 
@@ -390,7 +472,7 @@ pub fn build_ui(app: &gtk::Application) {
     suggestion_box.append(&suggestion_list);
 
     list_container.append(&suggestion_box);
-    scrolled.set_child(Some(&list_container));
+    scrolled.set_child(Some(&clamped(&list_container)));
 
     if let Err(e) = gestos::config::initialize_user_config_if_missing() {
         eprintln!("Warning: Failed to initialize configuration: {}", e);
@@ -398,18 +480,17 @@ pub fn build_ui(app: &gtk::Application) {
     let config = Configuration::load_from_defaults();
     let dbus_conn = zbus::blocking::Connection::session().ok();
 
-    let search_entry_widget = search_entry.clone();
-    let gesture_status = GestureStatus::new("Gestures", dbus_conn.clone());
+    let gesture_status = GestureStatus::new("Gestures", dbus_conn.clone(), &toasts);
     let extension_status = crate::extension::status(dbus_conn.as_ref());
     header.set_title_widget(Some(gesture_status.title()));
     header.pack_end(gesture_status.action_button());
-    content_vbox.insert_child_after(gesture_status.error_area(), Some(&search_entry_widget));
-    content_vbox.insert_child_after(gesture_status.notice_area(), Some(gesture_status.error_area()));
+    content_vbox.insert_child_after(&clamped(gesture_status.error_area()), Some(&search_clamp));
     let extension_banner = ExtensionBanner::new();
     extension_banner.show(&extension_status);
-    content_vbox.insert_child_after(&extension_banner.area, Some(gesture_status.notice_area()));
+    content_vbox.prepend(&extension_banner.area);
 
     let state = Rc::new(RefCell::new(AppState {
+        toasts,
         config,
         main_list,
         search_entry,
@@ -498,58 +579,28 @@ pub fn build_ui(app: &gtk::Application) {
             }
         });
 
-    // Connect settings button
-    let state_settings_clone = Rc::clone(&state);
-    settings_btn.connect_clicked(move |_| {
-        open_settings_window(&state_settings_clone);
-    });
-
-    // Global Keyboard Shortcuts
-    let key_controller = gtk::EventControllerKey::new();
-    let state_shortcut_clone = Rc::clone(&state);
-    let window_shortcut_clone = state.borrow().window.clone();
-    key_controller.connect_key_pressed(move |_, keyval, _, state_modifier| {
-        let is_ctrl = state_modifier.contains(gtk::gdk::ModifierType::CONTROL_MASK) 
-                   || state_modifier.contains(gtk::gdk::ModifierType::META_MASK); // meta/cmd on mac
-        
-        if is_ctrl && keyval == gtk::gdk::Key::f {
-            state_shortcut_clone.borrow().search_entry.grab_focus();
-            return glib::Propagation::Stop;
-        }
-        if is_ctrl && keyval == gtk::gdk::Key::comma {
-            open_settings_window(&state_shortcut_clone);
-            return glib::Propagation::Stop;
-        }
-        if is_ctrl && keyval == gtk::gdk::Key::q {
-            window_shortcut_clone.destroy();
-            return glib::Propagation::Stop;
-        }
-        glib::Propagation::Proceed
-    });
-    state.borrow().window.add_controller(key_controller);
+    settings_btn.set_action_name(Some("app.preferences"));
+    add_actions(app, &state);
 
     // Stylesheet injection
     let provider = gtk::CssProvider::new();
     provider.load_from_data(
         "headerbar { background: @window_bg_color; border: none; box-shadow: none; }\n\
          .main-window-content, .dialog-content { background-color: @window_bg_color; }\n\
-         scrolledwindow, viewport { background-color: transparent !important; background-image: none !important; }\n\
          .gesture-preview-frame { background: @window_bg_color; border-radius: 6px; }\n\
          searchentry, entry.search { border-radius: 18px; }\n\
          .context-title { font-size: 1.5em; font-weight: bold; }\n\
          .gesture-row { padding: 6px; }\n\
          .icon-holder { padding: 4px; }\n\
-         .icon-swiss-red { color: #da291c; }\n\
-         .icon-purple { color: #9141ac; }\n\
+         .icon-swiss-red { color: @red_3; }\n\
+         .icon-purple { color: @purple_2; }\n\
          .action-label { font-size: 0.9em; opacity: 0.7; }\n\
-         .status-dot-running { color: #10b981; }\n\
-         .status-dot-stopped { color: #6b7280; }\n\
          .settings-row { padding: 8px; }\n\
          .section-header { font-weight: bold; margin-top: 8px; margin-bottom: 4px; }\n\
          .status-label { font-weight: bold; }\n\
          .warning-box { padding: 8px; background-color: alpha(@warning_color, 0.15); border: 1px solid alpha(@warning_color, 0.3); border-radius: 6px; }\n\
          .warning-label { color: @warning_color; font-size: 0.95em; }\n\
-         .notice-box { padding: 8px 8px 8px 12px; background-color: alpha(currentColor, 0.06); border-radius: 6px; }\n\
+         .extension-banner { padding: 6px 12px; min-height: 36px; background-color: alpha(@warning_color, 0.15); }\n\
          .keycap { padding: 6px 12px; background-color: alpha(currentColor, 0.08); border: 1px solid alpha(currentColor, 0.15); border-radius: 6px; font-weight: bold; font-size: 1.1em; }\n\
          .drag-handle { opacity: 0.55; cursor: grab; margin-right: 4px; }\n\
          .drag-handle:hover { opacity: 1; }\n\

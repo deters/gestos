@@ -3,7 +3,7 @@
 //! in all of them.
 
 use gtk::prelude::*;
-use gtk::{gio, glib};
+use gtk::gio;
 use gtk4 as gtk;
 use crate::extension::ExtensionStatus;
 use std::cell::RefCell;
@@ -275,16 +275,7 @@ pub fn open_app_picker(
     content.append(&scrolled);
     dialog.set_child(Some(&content));
 
-    let keys = gtk::EventControllerKey::new();
-    let dialog_keys = dialog.clone();
-    keys.connect_key_pressed(move |_, keyval, _, _| {
-        if keyval == gtk::gdk::Key::Escape {
-            dialog_keys.destroy();
-            return glib::Propagation::Stop;
-        }
-        glib::Propagation::Proceed
-    });
-    dialog.add_controller(keys);
+    crate::ui::components::close_with_keys(&dialog);
     dialog.present();
     search.grab_focus();
 }

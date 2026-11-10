@@ -9,6 +9,32 @@ use gestos::protractor::Point2D;
 use crate::state::AppState;
 use crate::ui::main_window::refresh_gesture_list;
 
+/// Escape and Ctrl+W close a dialog, as in GNOME's own apps.
+pub fn close_with_keys(window: &impl IsA<gtk::Window>) {
+    add_close_keys(window, true);
+}
+
+/// Ctrl+W closes a libadwaita window, which handles Escape itself, as it also leaves its subpages.
+pub fn close_with_ctrl_w(window: &impl IsA<gtk::Window>) {
+    add_close_keys(window, false);
+}
+
+fn add_close_keys(window: &impl IsA<gtk::Window>, escape: bool) {
+    let keys = gtk::EventControllerKey::new();
+    window.as_ref().add_controller(keys.clone());
+    let closing = window.clone().upcast::<gtk::Window>();
+    keys.connect_key_pressed(move |_, keyval, _, modifiers| {
+        let ctrl_w = modifiers.contains(gdk::ModifierType::CONTROL_MASK)
+            && keyval.to_lower() == gdk::Key::w;
+        if (escape && keyval == gdk::Key::Escape) || ctrl_w {
+            closing.destroy();
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+}
+
 pub fn show_error_dialog<W: IsA<gtk::Window>>(parent: &W, message: &str) {
     let dialog = gtk::Window::new();
     dialog.set_transient_for(Some(parent));
@@ -18,17 +44,7 @@ pub fn show_error_dialog<W: IsA<gtk::Window>>(parent: &W, message: &str) {
     dialog.set_default_size(350, 100);
     dialog.set_resizable(false);
     
-    let esc_controller = gtk::EventControllerKey::new();
-    let dialog_esc = dialog.clone();
-    esc_controller.connect_key_pressed(move |_, keyval, _, _| {
-        if keyval == gtk::gdk::Key::Escape {
-            dialog_esc.destroy();
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
-    });
-    dialog.add_controller(esc_controller);
+    close_with_keys(&dialog);
 
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
     vbox.add_css_class("dialog-content");
@@ -547,17 +563,7 @@ pub fn show_confirm_dialog<W: IsA<gtk::Window>, F: FnOnce() + 'static>(
     dialog.set_default_size(350, 120);
     dialog.set_resizable(false);
     
-    let esc_controller = gtk::EventControllerKey::new();
-    let dialog_esc = dialog.clone();
-    esc_controller.connect_key_pressed(move |_, keyval, _, _| {
-        if keyval == gtk::gdk::Key::Escape {
-            dialog_esc.destroy();
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
-    });
-    dialog.add_controller(esc_controller);
+    close_with_keys(&dialog);
 
     let main_box = gtk::Box::new(gtk::Orientation::Vertical, 18);
     main_box.add_css_class("dialog-content");

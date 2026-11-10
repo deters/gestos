@@ -6,7 +6,7 @@ use crate::system::{
 use gtk::prelude::*;
 use gtk::{gio, glib};
 use gtk4 as gtk;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 const STATUS_POLL_INTERVAL_SECS: u32 = 1;
@@ -44,8 +44,8 @@ fn summarize_error(message: &str) -> String {
 }
 
 /// The app's main control, which lives in the header bar: a title showing whether gestures are
-/// running, a Start or Stop button, and areas for errors and notices in the window's content. Daemon calls
-/// can block, so they all run off the UI thread.
+/// running, a Start or Stop button, an area for errors in the window's content, and toasts for
+/// notices. Daemon calls can block, so they all run off the UI thread.
 #[derive(Clone)]
 pub struct GestureStatus {
     title: gtk::Box,
@@ -55,7 +55,8 @@ pub struct GestureStatus {
     error_summary: gtk::Label,
     error_details: gtk::Expander,
     error_label: gtk::Label,
-    notice_box: gtk::Box,
+    toasts: adw::ToastOverlay,
+    login_toast: Rc<RefCell<Option<adw::Toast>>>,
     dbus_conn: Option<zbus::blocking::Connection>,
     busy: Rc<Cell<bool>>,
     polling: Rc<Cell<bool>>,
@@ -64,7 +65,11 @@ pub struct GestureStatus {
 }
 
 impl GestureStatus {
-    pub fn new(title_text: &str, dbus_conn: Option<zbus::blocking::Connection>) -> Self {
+    pub fn new(
+        title_text: &str,
+        dbus_conn: Option<zbus::blocking::Connection>,
+        toasts: &adw::ToastOverlay,
+    ) -> Self {
         let title = gtk::Box::new(gtk::Orientation::Vertical, 0);
         title.set_valign(gtk::Align::Center);
         let title_label = gtk::Label::new(Some(title_text));
@@ -80,11 +85,7 @@ impl GestureStatus {
 
         let error_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
         error_box.add_css_class("warning-box");
-        error_box.set_halign(gtk::Align::Center);
-        error_box.set_width_request(500);
         error_box.set_margin_bottom(12);
-        error_box.set_margin_start(24);
-        error_box.set_margin_end(24);
         error_box.set_visible(false);
 
         let error_summary = gtk::Label::new(None);
@@ -109,28 +110,6 @@ impl GestureStatus {
         error_details.set_child(Some(&error_scroller));
         error_box.append(&error_details);
 
-        let notice_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        notice_box.add_css_class("notice-box");
-        notice_box.set_halign(gtk::Align::Center);
-        notice_box.set_width_request(500);
-        notice_box.set_margin_bottom(12);
-        notice_box.set_margin_start(24);
-        notice_box.set_margin_end(24);
-        notice_box.set_visible(false);
-        let notice_label = gtk::Label::new(Some("Gestures will also start when you log in."));
-        notice_label.set_hexpand(true);
-        notice_label.set_xalign(0.0);
-        notice_label.set_wrap(true);
-        notice_box.append(&notice_label);
-        let undo_button = gtk::Button::with_mnemonic("_Undo");
-        undo_button.set_valign(gtk::Align::Center);
-        notice_box.append(&undo_button);
-        let dismiss_button = gtk::Button::from_icon_name("window-close-symbolic");
-        dismiss_button.add_css_class("flat");
-        dismiss_button.set_valign(gtk::Align::Center);
-        dismiss_button.set_tooltip_text(Some("Dismiss"));
-        notice_box.append(&dismiss_button);
-
         let status = GestureStatus {
             title,
             status_label,
@@ -139,7 +118,8 @@ impl GestureStatus {
             error_summary,
             error_details,
             error_label,
-            notice_box,
+            toasts: toasts.clone(),
+            login_toast: Rc::new(RefCell::new(None)),
             dbus_conn,
             busy: Rc::new(Cell::new(false)),
             polling: Rc::new(Cell::new(false)),
@@ -152,17 +132,6 @@ impl GestureStatus {
             let start = clicked.last_running.get() != Some(true);
             clicked.set_gestures(start);
         });
-
-        let undone = status.clone();
-        undo_button.connect_clicked(move |_| {
-            undone.notice_box.set_visible(false);
-            if let Err(e) = set_autostart_enabled(false) {
-                undone.show_error(Some(&format!("Could not change the login setting: {e}")));
-            }
-            undone.render();
-        });
-        let dismissed = status.notice_box.clone();
-        dismiss_button.connect_clicked(move |_| dismissed.set_visible(false));
 
         status.start_polling();
         status
@@ -180,18 +149,30 @@ impl GestureStatus {
         &self.error_box
     }
 
-    pub fn notice_area(&self) -> &gtk::Box {
-        &self.notice_box
-    }
-
     /// A new user's first start also turns on login startup, with a way to undo it. Either
     /// way, it's only decided for them once.
     fn enable_autostart_for_new_user(&self) {
         let result = mark_autostart_decided().and_then(|_| set_autostart_enabled(true));
         match result {
-            Ok(()) => self.notice_box.set_visible(true),
+            Ok(()) => self.show_login_toast(),
             Err(e) => self.show_error(Some(&format!("Could not change the login setting: {e}"))),
         }
+    }
+
+    /// Stays until it's dismissed, as it's the only place that says so.
+    fn show_login_toast(&self) {
+        let toast = adw::Toast::new("Gestures will also start when you log in");
+        toast.set_button_label(Some("_Undo"));
+        toast.set_timeout(0);
+        let undone = self.clone();
+        toast.connect_button_clicked(move |_| {
+            if let Err(e) = set_autostart_enabled(false) {
+                undone.show_error(Some(&format!("Could not change the login setting: {e}")));
+            }
+            undone.render();
+        });
+        self.toasts.add_toast(toast.clone());
+        self.login_toast.replace(Some(toast));
     }
 
     fn start_polling(&self) {
@@ -237,7 +218,9 @@ impl GestureStatus {
         }
         self.busy.set(true);
         self.show_error(None);
-        self.notice_box.set_visible(false);
+        if let Some(toast) = self.login_toast.take() {
+            toast.dismiss();
+        }
         self.action_button.set_sensitive(false);
         let new_user = start && should_enable_autostart_on_first_start();
         self.status_label.set_text(if start {

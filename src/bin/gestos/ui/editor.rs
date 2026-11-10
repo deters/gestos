@@ -13,9 +13,9 @@ use crate::ui::shortcut_recorder::open_shortcut_recorder;
 use crate::ui::keyboard_steps::append_steps_rows;
 use crate::ui::app_picker::append_apps_rows;
 use gestos::key_steps::{format_steps, parse_steps, KeyStep};
-use crate::ui::components::{draw_gesture_path, show_confirm_dialog};
+use crate::ui::components::draw_gesture_path;
 use crate::daemon::reload_daemon;
-use crate::ui::main_window::refresh_gesture_list;
+use crate::ui::main_window::{get_visible_gestures, refresh_gesture_list};
 use gestos::protractor::Point2D;
 
 // The width of the editor's content, as the main window's lists have, and the margins around it.
@@ -224,6 +224,61 @@ pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, gesture: Gesture) {
     open_editor(state_rc, Some(gesture), None);
 }
 
+/// Deletes a gesture right away, with a toast to bring it back. The focus moves to the gesture
+/// after it in the list, or before it at the end.
+fn delete_gesture(state_rc: &Rc<RefCell<AppState>>, id: &str) {
+    let mut state = state_rc.borrow_mut();
+    let Some(pos) = state.config.gestures.iter().position(|g| g.id == id) else {
+        return;
+    };
+    let visible = get_visible_gestures(&state);
+    let next = visible.iter().position(|g| g.id == id).and_then(|i| {
+        visible.get(i + 1).or_else(|| i.checked_sub(1).and_then(|i| visible.get(i)))
+    });
+    let next_name = next.map(|g| g.name.clone());
+    let removed = state.config.gestures.remove(pos);
+    if let Err(e) = state.config.save_to_file() {
+        println!("Failed to save config to file on delete: {}", e);
+    }
+    println!("Gesture deleted successfully: {}", removed.name);
+    reload_daemon(state.dbus_conn.as_ref(), Some(&state.window));
+
+    let toast = adw::Toast::new(&format!(
+        "\u{201c}{}\u{201d} deleted",
+        glib::markup_escape_text(&removed.name)
+    ));
+    toast.set_button_label(Some("_Undo"));
+    let state_undo = Rc::downgrade(state_rc);
+    toast.connect_button_clicked(move |_| {
+        if let Some(state_rc) = state_undo.upgrade() {
+            restore_gesture(&state_rc, &removed, pos);
+        }
+    });
+    state.toasts.add_toast(toast);
+    drop(state);
+    refresh_gesture_list(state_rc, next_name.as_deref());
+}
+
+/// Puts a deleted gesture back where it was. Its name may have been taken since, and then it gets
+/// a number, as a new gesture would.
+fn restore_gesture(state_rc: &Rc<RefCell<AppState>>, removed: &Gesture, pos: usize) {
+    let mut state = state_rc.borrow_mut();
+    if state.config.gestures.iter().any(|g| g.id == removed.id) {
+        return;
+    }
+    let mut gesture = removed.clone();
+    gesture.name = unique_gesture_name(&gesture.name, &state.config.gestures, None);
+    let name = gesture.name.clone();
+    let pos = pos.min(state.config.gestures.len());
+    state.config.gestures.insert(pos, gesture);
+    if let Err(e) = state.config.save_to_file() {
+        println!("Failed to save config to file on undo: {}", e);
+    }
+    reload_daemon(state.dbus_conn.as_ref(), Some(&state.window));
+    drop(state);
+    refresh_gesture_list(state_rc, Some(&name));
+}
+
 /// Opens the editor for a new gesture. Its action comes from the main window's search, and the
 /// editor never changes it.
 pub fn open_gesture_editor_for_action(state_rc: &Rc<RefCell<AppState>>, action: EditorActionOption) {
@@ -249,17 +304,7 @@ fn open_editor(
     dialog.set_default_size((state.window.width() - 60).clamp(EDITOR_MIN_WIDTH, 640), -1);
     let max_height = ((state.window.height() - 60) * 6 / 5).clamp(EDITOR_MIN_HEIGHT, 672);
 
-    let esc_controller = gtk::EventControllerKey::new();
-    let dialog_esc = dialog.clone();
-    esc_controller.connect_key_pressed(move |_, keyval, _, _| {
-        if keyval == gtk::gdk::Key::Escape {
-            dialog_esc.destroy();
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
-    });
-    dialog.add_controller(esc_controller);
+    crate::ui::components::close_with_keys(&dialog);
 
     let dialog_header = gtk::HeaderBar::new();
     dialog_header.set_show_title_buttons(false);
@@ -1034,43 +1079,19 @@ fn open_editor(
     dialog_header.pack_end(&save_btn);
 
     if let Some(ref gest) = target_gesture {
-        // It asks first, so its label ends in "…". It comes last in the content, as GNOME's own
-        // apps place their destructive buttons, with room above it to set it apart.
-        let delete_btn = gtk::Button::with_mnemonic("_Delete Gesture…");
+        // It doesn't ask first, as a toast offers to undo it. It comes last in the content, as
+        // GNOME's own apps place their destructive buttons, with room above it to set it apart.
+        let delete_btn = gtk::Button::with_mnemonic("_Delete Gesture");
         delete_btn.add_css_class("destructive-action");
         delete_btn.set_halign(gtk::Align::Center);
         delete_btn.set_margin_top(18);
 
         let state_clone = Rc::clone(state_rc);
         let target_id = gest.id.clone();
-        let name_clone = gest.name.clone();
         let dialog_clone3 = dialog.clone();
         delete_btn.connect_clicked(move |_| {
-            let state_clone = Rc::clone(&state_clone);
-            let target_id = target_id.clone();
-            let name_clone = name_clone.clone();
-            let dialog_for_delete = dialog_clone3.clone();
-            show_confirm_dialog(
-                &dialog_clone3,
-                "Delete Gesture?",
-                &format!("\u{201c}{}\u{201d} will be removed. This can't be undone.", name_clone),
-                "Delete",
-                true,
-                move || {
-                    let mut state = state_clone.borrow_mut();
-                    if let Some(pos) = state.config.gestures.iter().position(|g| g.id == target_id) {
-                        state.config.gestures.remove(pos);
-                        if let Err(e) = state.config.save_to_file() {
-                            println!("Failed to save config to file on delete: {}", e);
-                        }
-                        println!("Gesture deleted successfully: {}", name_clone);
-                        reload_daemon(state.dbus_conn.as_ref(), Some(&dialog_for_delete));
-                        drop(state);
-                        refresh_gesture_list(&state_clone, None);
-                        dialog_for_delete.destroy();
-                    }
-                },
-            );
+            delete_gesture(&state_clone, &target_id);
+            dialog_clone3.destroy();
         });
         scroll_content.append(&delete_btn);
     }

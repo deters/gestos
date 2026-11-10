@@ -233,6 +233,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
         .default_width(560)
         .build();
     let dialog: gtk::Window = preferences.clone().upcast();
+    crate::ui::components::close_with_ctrl_w(&dialog);
     let page = adw::PreferencesPage::new();
     preferences.add(&page);
 
