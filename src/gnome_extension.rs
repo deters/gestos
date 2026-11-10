@@ -17,8 +17,8 @@ pub const STATE_ERROR: f64 = 3.0;
 pub const STATE_OUT_OF_DATE: f64 = 4.0;
 pub const STATE_ACTIVATING: f64 = 8.0;
 
-/// The version the extension has when it comes with this Gestos. It's in its `metadata.json`,
-/// which GNOME reports for the copy it loaded.
+/// The version the extension has when it comes with this Gestos. `extension/fingerprint.sh` writes
+/// it into an installed copy's `metadata.json`, which GNOME reports for the copy it loaded.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// A fingerprint of the code of the extension that comes with this Gestos, which only changes when
@@ -94,9 +94,20 @@ mod tests {
 
     #[test]
     fn the_extension_comes_with_this_version() {
-        let metadata: serde_yaml::Value =
-            serde_yaml::from_str(include_str!("../extension/metadata.json")).unwrap();
+        let name = format!("gestos-metadata-{}.json", std::process::id());
+        let path = std::env::temp_dir().join(name);
+        let status = std::process::Command::new("sh")
+            .arg("extension/fingerprint.sh")
+            .arg(&path)
+            .status()
+            .unwrap();
+        let written = std::fs::read_to_string(&path);
+        let _ = std::fs::remove_file(&path);
+        assert!(status.success());
+        let written = written.unwrap();
+        let metadata: serde_yaml::Value = serde_yaml::from_str(&written).unwrap();
         assert_eq!(metadata["version-name"].as_str(), Some(VERSION));
+        assert!(metadata_is_current(&written));
     }
 
     #[test]

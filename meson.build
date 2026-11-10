@@ -123,6 +123,7 @@ if get_option('gnome_extension')
     output: 'metadata.json',
     command: [find_program('sh'), meson.project_source_root() / 'extension/fingerprint.sh', '@OUTPUT@'],
     depend_files: files(
+      'Cargo.toml',
       'extension/extension.js',
       'extension/prefs.js',
       'extension/lib/tile.js',

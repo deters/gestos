@@ -3,8 +3,9 @@
 # version is Gestos's, which changes with every release. Gestos is built with the same fingerprint,
 # so it can tell when the copy GNOME runs is a different one.
 #
-# Given a file, writes the extension's metadata there instead, with the fingerprint in it, for an
-# installed copy. The metadata in the source tree doesn't have it.
+# Given a file, writes the extension's metadata there instead, with the fingerprint and Gestos's
+# version in it, for an installed copy. The metadata in the source tree has neither, so the version
+# is only ever bumped in Cargo.toml.
 set -e
 
 # Where to write, as given, since the rest runs in the extension's folder.
@@ -31,7 +32,16 @@ if [ "$output" -ef metadata.json ]; then
     exit 1
 fi
 
-awk -v fingerprint="$fingerprint" '
+version=$(sed -n 's/^version = "\(.*\)"$/\1/p' ../Cargo.toml | head -n 1)
+if [ -z "$version" ]; then
+    echo "fingerprint.sh: no version in Cargo.toml" >&2
+    exit 1
+fi
+
+awk -v fingerprint="$fingerprint" -v version="$version" '
     { print }
-    /"uuid":/ { printf "  \"gestos-fingerprint\": \"%s\",\n", fingerprint }
+    /"uuid":/ {
+        printf "  \"version-name\": \"%s\",\n", version
+        printf "  \"gestos-fingerprint\": \"%s\",\n", fingerprint
+    }
 ' metadata.json > "$output"
