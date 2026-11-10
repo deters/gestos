@@ -5,6 +5,6 @@
 - **Smoother maximizing.** Windows keep their own size after tiling and maximizing.
 - **No more GNOME crashes** when closing windows.
 - **Keyboard remaps**, such as Ctrl and Win swapped, are followed.
-- **Overview with the mouse.** Click left while holding right, when turned on.
+- **Show Overview With Both Buttons.** On GNOME and KDE, hold right and click left to see all your windows. Turn it on in Gestos's settings.
 
 Log out and back in after updating.
