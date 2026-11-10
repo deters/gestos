@@ -405,16 +405,13 @@ class WindowActions {
     restoreAll() {
         for (const workspace of [...this._tilings.keys()])
             this._untile(workspace);
-        for (const [window, original] of [...this._originals]) {
-            // A maximized one stays that way, with the size it had tiled to go back to. The size
-            // this gave it stays remembered, so its app opening it at that size is undone.
-            if (original.maximized && (window.get_maximize_flags() === Meta.MaximizeFlags.BOTH ||
-                window.is_fullscreen())) {
+        for (const window of [...this._originals.keys()]) {
+            // A maximized or snapped one stays that way, with the size it had tiled to go back to.
+            // The size this gave it stays remembered, so its app opening it at that size is undone.
+            if (isMaximizedAtAll(window) || window.is_fullscreen()) {
                 this._untrack(window);
                 continue;
             }
-            if (isMaximizedAtAll(window))
-                window.unmaximize();
             this._restoreOriginal(window);
         }
     }
@@ -942,11 +939,17 @@ class WindowActions {
         });
     }
 
-    // Adds a window to the tiling. A maximized or snapped one is restored first, and its normal
-    // size is only known once the app has resized, so it has no original size until then. A window
-    // opened again after closing at a size this gave it gets its original size, at the place it
-    // opened at now.
+    // Adds a window to the tiling. A maximized one is restored first, and its normal size is only
+    // known once the app has resized, so it has no original size until then. A window opened again
+    // after closing at a size this gave it gets its original size, at the place it opened at now.
+    // A snapped one stays snapped, set aside, as the user put it there, and the others are tiled
+    // beside it. Returns whether it joined.
     _addToTiling(tiling, window, reopened = null) {
+        if (isSnapped(window)) {
+            this._setAside(tiling, window, this._originals.get(window)?.rect ?? null);
+            tiling.aside.get(window).settle();
+            return false;
+        }
         const maximized = isMaximizedAtAll(window);
         const frame = window.get_frame_rect();
         // One that has no size yet gets its original size once it does, as a maximized one does.
@@ -965,6 +968,7 @@ class WindowActions {
             if (window.get_client_type() === Meta.WindowClientType.X11)
                 original.rect ??= this._normalSizeOf(window);
         }
+        return true;
     }
 
     // Places the tiles once every window's original size is known.
@@ -1021,7 +1025,9 @@ class WindowActions {
         const gap = this._settings.get_int('window-gap');
         const parked = dragged ? []
             : [...tiling.parked.keys()].filter(window => window.get_workspace() === tiling.workspace);
-        const windows = [...tiling.order.filter(window => tiling.windows.has(window)), ...parked];
+        // One snapped while it's still tiled isn't resized or minimized, and keeps its side.
+        const windows = [...tiling.order.filter(window => tiling.windows.has(window) &&
+            !isSnapped(window)), ...parked];
         tiling.plans = this._byMonitor(windows).map(group => {
             const workArea = group[0].get_work_area_current_monitor();
             // Snapped windows keep their side, and the others are tiled in the room left.
@@ -1066,7 +1072,7 @@ class WindowActions {
     _snappedOn(tiling, monitor) {
         return tiling.workspace.list_windows()
             .filter(window => !window.minimized && window.get_monitor() === monitor &&
-                isSnapped(window) && !tiling.windows.has(window))
+                isSnapped(window))
             .map(window => window.get_frame_rect());
     }
 
@@ -1135,7 +1141,10 @@ class WindowActions {
     _unpark(tiling, window, rect) {
         const {rect: original} = tiling.parked.get(window);
         this._forgetParked(tiling, window);
-        this._addToTiling(tiling, window);
+        if (!this._addToTiling(tiling, window)) {
+            window.unminimize();
+            return;
+        }
         this._originals.get(window).rect = original;
         tiling.order = [...tiling.order.filter(w => w !== window), window];
         tiling.windows.get(window).tile = rect;
@@ -1328,7 +1337,8 @@ class WindowActions {
             plan.windows.forEach(window => {
                 const state = tiling.windows.get(window);
                 const original = this._originals.get(window);
-                if (!state?.tile || !original || original.closing || this._grabbed === window)
+                if (!state?.tile || !original || original.closing || this._grabbed === window ||
+                    isSnapped(window))
                     return;
                 const frame = window.get_frame_rect();
                 const tile = state.tile;
@@ -1510,7 +1520,9 @@ class WindowActions {
         if (!tiling)
             return;
         this._stopDragLayout(tiling);
-        this._originals.get(window).rect = copyRect(window.get_frame_rect());
+        // One dropped on a side is snapped, which isn't a size of its own, and is set aside.
+        if (!isSnapped(window))
+            this._originals.get(window).rect = copyRect(window.get_frame_rect());
         this._layout(tiling);
     }
 
