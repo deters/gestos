@@ -46,8 +46,9 @@ const CLOSE_THAW_TIMEOUT_MS = 1000;
 // How long a window that was asked to close has to stay open to be tiled again, as some apps take
 // long to close, and would save the size of the tile if it came back before.
 const CLOSE_REJOIN_MS = 5000;
-// How long a window that's maximized again stays frozen, if its app doesn't take the new size.
-const MAXIMIZE_THAW_TIMEOUT_MS = 500;
+// How long the others wait for a tiled window that's maximized to be shown at its new size, over
+// them, before they take its room, if its app doesn't take that size.
+const MAXIMIZE_SHOWN_TIMEOUT_MS = 500;
 // How long tiled windows get to settle, after they're placed or change, before they're checked.
 const TILE_CHECK_DELAY_MS = 300;
 // How many times a window that keeps leaving its tile is put back, within the time below.
@@ -157,6 +158,8 @@ class WindowActions {
     _frozen = new Set();
     // Windows kept open as they were asked to close, waiting to join their tiling again.
     _rejoins = new Set();
+    // Windows that opened maximized, waiting to be back to normal to get their original size.
+    _restoreWaits = new Set();
     constructor(settings) {
         this._settings = settings;
         // Sizes this gave windows, with their original sizes, for each app. They're kept across
@@ -252,6 +255,8 @@ class WindowActions {
             frozen.release(true);
         for (const finish of [...this._rejoins])
             finish();
+        for (const stop of [...this._restoreWaits])
+            stop();
         if (this._sizesSaveId) {
             GLib.source_remove(this._sizesSaveId);
             this._saveGivenSizes();
@@ -272,8 +277,8 @@ class WindowActions {
         return {
             originals: [...this._originals]
                 .filter(([, original]) => !original.fixing)
-                .map(([window, {rect, appId, size, snapped}]) =>
-                    [window, {rect, appId, size, snapped}]),
+                .map(([window, {rect, appId, size, snapped, maximized}]) =>
+                    [window, {rect, appId, size, snapped, maximized}]),
             tilings: [...this._tilings].map(([workspace, tiling]) =>
                 [workspace, {windows: copy(tiling.windows), plans: tiling.plans,
                     order: [...tiling.order],
@@ -307,6 +312,15 @@ class WindowActions {
             }
             if (tiling.windows.size < windows.length)
                 this._layoutWhenReady(tiling);
+        }
+        // Tiled windows that are maximized are set aside again, to join once they're back to normal.
+        for (const [window, original] of this._originals) {
+            if (!original.maximized)
+                continue;
+            const workspace = window.get_workspace();
+            const tiling = workspace && this._tilings.get(workspace);
+            if (tiling && (isMaximizedAtAll(window) || window.is_fullscreen()))
+                this._setAsideFrom(tiling, window, original, false)?.settle();
         }
     }
 
@@ -373,6 +387,8 @@ class WindowActions {
             const reopened = this._takeClosedSize(window);
             if (reopened)
                 this._resizeReopened(window, reopened);
+            else
+                this._restoreWhenNormal(window);
         }
     }
 
@@ -389,11 +405,74 @@ class WindowActions {
     restoreAll() {
         for (const workspace of [...this._tilings.keys()])
             this._untile(workspace);
-        for (const window of [...this._originals.keys()]) {
+        for (const [window, original] of [...this._originals]) {
+            // A maximized one stays that way, with the size it had tiled to go back to. The size
+            // this gave it stays remembered, so its app opening it at that size is undone.
+            if (original.maximized && (window.get_maximize_flags() === Meta.MaximizeFlags.BOTH ||
+                window.is_fullscreen())) {
+                this._untrack(window);
+                continue;
+            }
             if (isMaximizedAtAll(window))
                 window.unmaximize();
             this._restoreOriginal(window);
         }
+    }
+
+    // A window that opened maximized, or fullscreen, at a size this gave it before, as its app
+    // saved it while maximized, gets its original size back once it's back to normal. Only for
+    // ones that aren't tiled, which get theirs as they join.
+    _restoreWhenNormal(window) {
+        const appId = appIdOf(window);
+        if ((!isMaximizedAtAll(window) && !window.is_fullscreen()) || !appId ||
+            !this._givenSizes.has(appId))
+            return;
+        const ids = [];
+        let timeoutId = 0;
+        const stop = () => {
+            for (const id of ids)
+                window.disconnect(id);
+            ids.length = 0;
+            if (timeoutId)
+                GLib.source_remove(timeoutId);
+            timeoutId = 0;
+            this._restoreWaits.delete(stop);
+        };
+        const restore = () => {
+            stop();
+            if (this._originals.has(window) || this._isAside(window))
+                return;
+            const reopened = this._takeClosedSize(window);
+            if (reopened)
+                this._resizeReopened(window, reopened);
+        };
+        // Once its app has taken its normal size, or after a while if it doesn't.
+        const onChanged = () => {
+            if (timeoutId || isMaximizedAtAll(window) || window.is_fullscreen())
+                return;
+            ids.push(window.connect('size-changed', restore));
+            timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, UNMAXIMIZE_TIMEOUT_MS, () => {
+                timeoutId = 0;
+                restore();
+                return GLib.SOURCE_REMOVE;
+            });
+        };
+        ids.push(...['notify::maximized-horizontally', 'notify::maximized-vertically',
+            'notify::fullscreen'].map(signal => window.connect(signal, onChanged)));
+        ids.push(window.connect('unmanaging', stop));
+        this._restoreWaits.add(stop);
+    }
+
+    _isAside(window) {
+        return [...this._tilings.values()].some(tiling => tiling.aside.has(window));
+    }
+
+    // The size a window that was maximized has once it's back to normal. One its app opened
+    // maximized at a size this gave it, as it saved it maximized, has its original size instead.
+    _normalSizeOf(window) {
+        const frame = copyRect(window.get_frame_rect());
+        const reopened = this._takeClosedSize(window);
+        return reopened ? {...frame, width: reopened.rect.width, height: reopened.rect.height} : frame;
     }
 
     // Remembers a window's original size, and watches it from then on. A window that's already
@@ -407,6 +486,8 @@ class WindowActions {
             appId: appIdOf(window),
             size: null,
             snapped: false,
+            // Maximized or fullscreen while tiled, with the size it was given still remembered.
+            maximized: false,
             fixing: false,
             closing: false,
             signalIds: [
@@ -421,7 +502,6 @@ class WindowActions {
                     window.connect(signal, () => this._onStateChanged(window))),
             ],
             entry: null,
-            changedMeanwhile: false,
             waitId: 0,
             timeoutId: 0,
         };
@@ -463,14 +543,10 @@ class WindowActions {
     // while if it doesn't.
     _restoreOriginalThen(window, original, done) {
         original.fixing = true;
-        original.changedMeanwhile = false;
-        // Changes this makes itself aren't the user changing their mind.
-        original.ownChange = true;
         if (isMaximizedAtAll(window))
             window.unmaximize();
         if (window.is_fullscreen())
             window.unmake_fullscreen();
-        original.ownChange = false;
         if (!original.rect) {
             done();
             return;
@@ -505,21 +581,20 @@ class WindowActions {
         }
     }
 
-    // Holds the window's picture as it is, so that resizing it doesn't show, until it's thawed: once
-    // it changes size again if asked, or after a while. A window that closes is never thawed, as
-    // its picture goes with it. Thawing also shows a window that was hidden while frozen. `ended`
-    // is called once it's thawed or gone, with whether it was thawed. What's returned can thaw it
-    // early with `release(true)`.
+    // Holds the window's picture as it is, so that resizing it doesn't show, until it's thawed after
+    // a while. A window that closes is never thawed, as its picture goes with it. Thawing also shows
+    // a window that was hidden while frozen. `ended` is called once it's thawed or gone, with
+    // whether it was thawed. What's returned can thaw it early with `release(true)`.
     _freeze(window) {
         const actor = window.get_compositor_private();
         if (!actor) {
-            return (_onResize, _timeout, ended = null) => {
+            return (_timeout, ended = null) => {
                 ended?.(false);
                 return {release: () => {}};
             };
         }
         actor.freeze();
-        return (onResize, timeout, ended = null) => {
+        return (timeout, ended = null) => {
             const frozen = {ids: [], timeoutId: 0};
             frozen.release = thaw => {
                 for (const id of frozen.ids)
@@ -535,8 +610,6 @@ class WindowActions {
                 ended?.(thaw);
             };
             frozen.ids.push(window.connect('unmanaging', () => frozen.release(false)));
-            if (onResize)
-                frozen.ids.push(window.connect('size-changed', () => frozen.release(true)));
             frozen.timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, timeout, () => {
                 frozen.timeoutId = 0;
                 frozen.release(true);
@@ -562,6 +635,10 @@ class WindowActions {
         const original = this._originals.get(window);
         if (!original?.rect || original.fixing || original.closing)
             return false;
+        // A maximized one is kept that way if its app keeps it open, and it gets its original size
+        // first so that's the size it has when it's back to normal.
+        const maximized = window.get_maximize_flags() === Meta.MaximizeFlags.BOTH;
+        const fullscreen = window.is_fullscreen();
         const tiling = this._leave(window);
         // It's gone at once, as the others take its room at once, and takes its original size out
         // of sight before it closes.
@@ -582,9 +659,15 @@ class WindowActions {
                 dialog = created;
                 frozen?.release(true);
             });
-            frozen = thawLater(false, CLOSE_THAW_TIMEOUT_MS, thawed => {
+            frozen = thawLater(CLOSE_THAW_TIMEOUT_MS, thawed => {
                 global.display.disconnect(dialogId);
-                if (thawed && tiling)
+                if (!thawed)
+                    return;
+                if (fullscreen)
+                    window.make_fullscreen();
+                else if (maximized)
+                    window.maximize();
+                else if (tiling)
                     this._rejoinIfKeptOpen(tiling, window, dialog);
             });
             close();
@@ -652,16 +735,12 @@ class WindowActions {
     }
 
     // Maximized, fullscreen and snapped windows can't be tiled, so they're set aside, and the others
-    // take their room until they're back to normal. A maximized or fullscreen window gets its
-    // original size back first, so that's its normal size. A snapped window can't be snapped again
-    // by the Shell, so it gets its original size back once the snap is undone instead.
+    // take their room until they're back to normal. A maximized or fullscreen one goes back to the
+    // size it had tiled, so its original size is kept for when it's back to normal, and the size it
+    // was given stays remembered, in case its app saves that one. A snapped window can't be snapped
+    // again by the Shell, so it gets its original size back once the snap is undone instead.
     _onStateChanged(window) {
         const original = this._originals.get(window);
-        // One maximized again while it gets its original size back, after this restored it, was
-        // toggled once more by the user, who changed their mind. Fullscreen isn't, as apps can
-        // ask for it again themselves.
-        if (original.fixing && !original.ownChange && isMaximizedAtAll(window))
-            original.changedMeanwhile = true;
         if (original.fixing || original.closing)
             return;
         const [, tiling] = this._findTiling(window);
@@ -679,37 +758,14 @@ class WindowActions {
 
         const flags = window.get_maximize_flags();
         if (window.is_fullscreen() || flags === Meta.MaximizeFlags.BOTH) {
-            const fullscreen = window.is_fullscreen();
+            original.maximized = true;
             // The others only take its room once it's shown maximized, over them, as it takes a
             // moment to get there.
             const aside = this._setAsideFrom(tiling, window, original, false);
-            // Its original size is taken where it can't be seen, until it's maximized again.
-            const thawLater = this._freeze(window);
-            this._restoreOriginalThen(window, original, () => {
-                const changedMeanwhile = original.changedMeanwhile;
-                this._forgetGiven(original);
-                this._untrack(window);
-                // Undone in the meantime, as by a second double-click on its title, so it's not
-                // maximized again, and joins tiling as it is.
-                if (changedMeanwhile && !fullscreen) {
-                    thawLater(false, 0);
-                    aside?.settle();
-                    if (isMaximizedAtAll(window))
-                        window.unmaximize();
-                    aside?.check();
-                    return;
-                }
-                // Watched before it's maximized, as an X11 window takes its new size at once.
-                thawLater(true, MAXIMIZE_THAW_TIMEOUT_MS, () => {
-                    if (aside && this._tilings.get(tiling.workspace) === tiling)
-                        this._layoutWhenReady(tiling);
-                });
-                if (fullscreen)
-                    window.make_fullscreen();
-                else
-                    window.maximize();
-                aside?.settle();
-            });
+            if (aside) {
+                aside.settle();
+                aside.makeRoomOnceShown();
+            }
         } else if (flags !== 0) {
             if (!original.snapped) {
                 this._setAsideFrom(tiling, window, original)?.settle();
@@ -721,6 +777,10 @@ class WindowActions {
                 window.move_resize_frame(true, frame.x, frame.y, original.rect.width, original.rect.height);
             this._forgetGiven(original);
             this._untrack(window);
+        } else if (original.maximized && !this._isAside(window)) {
+            // Back to normal where it isn't tiled, as its workspace stopped being tiled meanwhile.
+            // One that's set aside joins tiling instead.
+            this._restoreOriginal(window);
         }
     }
 
@@ -763,7 +823,9 @@ class WindowActions {
         const appId = appIdOf(window);
         if (!appId || window.get_window_type() !== Meta.WindowType.NORMAL)
             return null;
-        const closed = takeSize(this._givenSizes, appId, window.get_frame_rect());
+        // Not one of a window of the app that's still open and keeps its own.
+        const inUse = new Set([...this._originals.values()].map(original => original.entry));
+        const closed = takeSize(this._givenSizes, appId, window.get_frame_rect(), inUse);
         if (closed)
             this._scheduleSizesSave();
         return closed;
@@ -893,6 +955,7 @@ class WindowActions {
             rect = {x: frame.x, y: frame.y, width: reopened.rect.width, height: reopened.rect.height};
         const original = this._track(window, rect);
         original.snapped = false;
+        original.maximized = false;
         this._joinTiling(tiling, window, {tile: null});
         // A window that joins is the one the user touched last, as it's just been opened or shown.
         tiling.order.unshift(window);
@@ -900,7 +963,7 @@ class WindowActions {
             window.unmaximize();
             // An X11 window takes its normal size at once, so there's nothing to wait for.
             if (window.get_client_type() === Meta.WindowClientType.X11)
-                original.rect ??= copyRect(window.get_frame_rect());
+                original.rect ??= this._normalSizeOf(window);
         }
     }
 
@@ -918,13 +981,15 @@ class WindowActions {
             this._stopWaiting(tiling);
             for (const window of tiling.windows.keys()) {
                 const original = this._originals.get(window);
-                original.rect ??= copyRect(window.get_frame_rect());
+                original.rect ??= this._normalSizeOf(window);
             }
             this._layout(tiling);
         };
         for (const window of waiting) {
+            // Its first size once it's back to normal, which is the one taken back from its app if
+            // that's a size this gave it, as that's only found once.
             const id = window.connect('size-changed', () => {
-                this._originals.get(window).rect = copyRect(window.get_frame_rect());
+                this._originals.get(window).rect ??= this._normalSizeOf(window);
                 if ([...tiling.windows.keys()].every(w => this._originals.get(w).rect))
                     finish();
             });
@@ -1086,25 +1151,34 @@ class WindowActions {
     _setAside(tiling, window, rect) {
         if (tiling.aside.has(window))
             return;
-        const aside = {rect, settled: false, closing: false, checkId: 0};
+        const aside = {rect, settled: false, closing: false, checkId: 0, shownIds: [],
+            shownTimeoutId: 0};
         const join = () => {
             if (!aside.settled || aside.closing || this._originals.get(window)?.fixing ||
                 isMaximizedAtAll(window) || window.is_fullscreen() || isOnAllByChoice(window) ||
                 floats(window))
                 return;
             this._forgetAside(tiling, window);
+            if (this._findTiling(window)[1])
+                return;
             // It joins the workspace it's on now, which isn't the one it left when it was on all.
             const workspace = window.get_workspace();
             const joining = workspace && this._tilings.get(workspace);
-            if (!joining || window.minimized || this._findTiling(window)[1] || !isTileable(window))
+            if (!joining || window.minimized || !isTileable(window)) {
+                // One that was maximized while tiled has the size it had tiled until then.
+                if (this._originals.get(window)?.maximized)
+                    this._restoreOriginal(window);
                 return;
+            }
+            // One maximized while tiled, after tiling stopped and started again, still has its own.
+            const known = this._originals.get(window)?.rect;
             this._addToTiling(joining, window);
             const original = this._originals.get(window);
             if (aside.rect)
                 original.rect = copyRect(aside.rect);
             // Still at the size it had maximized, until its app takes its normal size, which an
             // X11 window has already.
-            else if (window.get_client_type() !== Meta.WindowClientType.X11)
+            else if (!known && window.get_client_type() !== Meta.WindowClientType.X11)
                 original.rect = null;
             this._layoutWhenReady(joining);
         };
@@ -1150,7 +1224,43 @@ class WindowActions {
             aside.settled = true;
         };
         aside.check = check;
+        // The others take its room once it's shown at its new size, or after a while if its app
+        // doesn't take it. An X11 one may have it already.
+        aside.makeRoomOnceShown = () => {
+            this._stopShownWait(window, aside);
+            const makeRoom = () => {
+                this._stopShownWait(window, aside);
+                if (this._tilings.get(tiling.workspace) === tiling)
+                    this._layoutWhenReady(tiling);
+            };
+            const frame = window.get_frame_rect();
+            const monitor = window.get_monitor();
+            const full = window.is_fullscreen()
+                ? global.display.get_monitor_geometry(monitor)
+                : window.get_work_area_for_monitor(monitor);
+            if (hasSize(frame, full)) {
+                makeRoom();
+                return;
+            }
+            aside.shownIds.push(window.connect('size-changed', makeRoom));
+            aside.shownTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, MAXIMIZE_SHOWN_TIMEOUT_MS,
+                () => {
+                    aside.shownTimeoutId = 0;
+                    makeRoom();
+                    return GLib.SOURCE_REMOVE;
+                });
+        };
         tiling.aside.set(window, aside);
+    }
+
+    _stopShownWait(window, aside) {
+        for (const id of aside.shownIds)
+            window.disconnect(id);
+        aside.shownIds = [];
+        if (aside.shownTimeoutId) {
+            GLib.source_remove(aside.shownTimeoutId);
+            aside.shownTimeoutId = 0;
+        }
     }
 
     _forgetAside(tiling, window) {
@@ -1161,6 +1271,7 @@ class WindowActions {
             window.disconnect(id);
         if (aside.checkId)
             GLib.source_remove(aside.checkId);
+        this._stopShownWait(window, aside);
         tiling.aside.delete(window);
     }
 
@@ -1370,6 +1481,8 @@ class WindowActions {
             this._layoutWhenReady(tiling);
         } else if (reopened) {
             this._resizeReopened(window, reopened);
+        } else if (!tiling) {
+            this._restoreWhenNormal(window);
         }
     }
 

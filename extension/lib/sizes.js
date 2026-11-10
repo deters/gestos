@@ -84,12 +84,13 @@ export function removeSize(sizes, appId, entry) {
  * @param {Map<string, Array<object>>} sizes - each app's sizes
  * @param {string} appId - the app
  * @param {{width: number, height: number}} frame - the window's size now
+ * @param {Set<object>} [inUse] - entries of windows still open, which aren't taken
  * @returns {object|null} the entry, with the window's original size as `rect`
  */
-export function takeSize(sizes, appId, frame) {
+export function takeSize(sizes, appId, frame, inUse = new Set()) {
     const entries = sizes.get(appId) ?? [];
     const found = entries
-        .filter(entry => hasSize(frame, entry.size))
+        .filter(entry => !inUse.has(entry) && hasSize(frame, entry.size))
         .reduce((last, entry) => (!last || entry.time > last.time ? entry : last), null);
     if (found)
         removeSize(sizes, appId, found);

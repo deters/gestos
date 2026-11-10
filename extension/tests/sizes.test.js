@@ -38,6 +38,17 @@ results.push(['takes nothing at a size it never gave',
 results.push(['takes nothing for an app it knows nothing of',
     takeSize(twice, 'other', {width: 300, height: 300}), null]);
 
+// Two windows of one app given the same size, one of them still open.
+const open = new Map();
+const stillOpen = entry(900, 900, 300, 300, 2);
+addSize(open, 'app', entry(500, 500, 300, 300, 1));
+addSize(open, 'app', stillOpen);
+results.push(['leaves the size of a window still open',
+    takeSize(open, 'app', {width: 300, height: 300}, new Set([stillOpen]))?.rect,
+    {width: 500, height: 500}]);
+results.push(['takes nothing when only windows still open have that size',
+    takeSize(open, 'app', {width: 300, height: 300}, new Set([stillOpen])), null]);
+
 const many = new Map();
 for (let time = 0; time < MAX_SIZES_PER_APP + 2; time++)
     addSize(many, 'app', entry(time, time, time, time, time));
