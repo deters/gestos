@@ -1,6 +1,6 @@
 {
   "uuid": "gestos@deters.github.io",
-  "version-name": "6.9.0",
+  "version-name": "7.1.0",
   "name": "Gestos",
   "description": "Window tiling for Gestos, which GNOME has no shortcut for.",
   "shell-version": ["50", "51"],
