@@ -213,19 +213,32 @@ enum DaemonSignal {
     ActionExecuted(String, String, String),
 }
 
+/// Whether gesture paths are drawn, where Gestos draws them itself, as the configuration says.
+#[cfg(target_os = "linux")]
+static SHOW_PATH: AtomicBool = AtomicBool::new(true);
+
 /// Emits D-Bus signals on their own thread, because a stalled bus must never hold up pointer
-/// forwarding. If the queue fills up, the event loop drops signals instead of waiting.
+/// forwarding. If the queue fills up, the event loop drops signals instead of waiting. On X11,
+/// gestures' paths are drawn from here too, on a thread of their own.
 #[cfg(target_os = "linux")]
 fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
+    use gestos::trail::TrailEvent;
     let (sender, receiver) = std::sync::mpsc::sync_channel::<DaemonSignal>(1024);
     std::thread::spawn(move || {
-        let Ok(conn) = zbus::blocking::Connection::session() else {
-            return;
-        };
+        let trail = gestos::trail::spawn(|| SHOW_PATH.load(Ordering::Relaxed));
+        let conn = zbus::blocking::Connection::session().ok();
         let path = "/io/github/deters/Gestos/Daemon";
         let iface = "io.github.deters.Gestos.Daemon";
         let dest = None::<zbus::names::BusName>;
         for signal in receiver {
+            if let Some(trail) = &trail {
+                match signal {
+                    DaemonSignal::GestureStarted(..) => drop(trail.send(TrailEvent::Started)),
+                    DaemonSignal::GestureEnded => drop(trail.send(TrailEvent::Ended)),
+                    _ => {}
+                }
+            }
+            let Some(conn) = &conn else { continue };
             let _ = match signal {
                 DaemonSignal::GestureStarted(x, y) => {
                     conn.emit_signal(dest.clone(), path, iface, "GestureStarted", &(x, y))
@@ -607,6 +620,7 @@ fn run_session(
                         input.send(&Request::SetChord(new_config.overview_click));
                     }
                     *config = new_config;
+                    SHOW_PATH.store(config.show_path, Ordering::Relaxed);
                     input.send(&Request::SetKeyboards(config.uses_modifiers()));
                     println!("gestosd: Configuration reloaded successfully.");
                 }
@@ -699,6 +713,7 @@ fn run_grabber(
     mut config: gestos::config::Configuration,
     wayland_ctx: gestos::wayland::WaylandContext,
 ) -> Result<(), std::io::Error> {
+    SHOW_PATH.store(config.show_path, Ordering::Relaxed);
     let signals = spawn_signal_thread();
 
     let (mut wake_reader, wake_writer) = UnixStream::pair()?;
@@ -1368,6 +1383,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
+            show_path: true,
         };
         let (signals, received) = std::sync::mpsc::sync_channel(16);
         let (mut wake_reader, _wake_writer) = UnixStream::pair().unwrap();
@@ -1434,6 +1450,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
+            show_path: true,
         };
         let names = |modifiers: &str| -> Vec<String> {
             gesture_templates(&config, Modifiers::parse(modifiers), None)
@@ -1456,6 +1473,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
+            show_path: true,
         };
         let names = |app: Option<&str>| -> Vec<String> {
             gesture_templates(&config, Modifiers::default(), app)
@@ -1485,6 +1503,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
+            show_path: true,
         };
         assert!(matches_app_gesture(&line(10.0), &config, Modifiers::default()));
         assert!(!matches_app_gesture(&line(0.0), &config, Modifiers::default()));

@@ -176,6 +176,31 @@ fn overview_click_row(state_rc: &Rc<RefCell<AppState>>) -> Option<adw::ActionRow
     Some(row)
 }
 
+/// On X11, Gestos draws gestures' paths itself, as its configuration says.
+fn x11_path_row(state_rc: &Rc<RefCell<AppState>>) -> adw::ActionRow {
+    let title = "Show Gesture Path";
+    let description = "Draw each gesture on screen as you draw it";
+    let (row, row_box, subtitle) = settings_row(title, description);
+    let switch = settings_switch(title);
+    switch.set_active(state_rc.borrow().config.show_path);
+    let state_rc = Rc::clone(state_rc);
+    switch.connect_state_set(move |switch, enabled| {
+        let mut state = state_rc.borrow_mut();
+        state.config.show_path = enabled;
+        if let Err(e) = state.config.save_to_file() {
+            state.config.show_path = !enabled;
+            subtitle.set_text(&format!("Could not change this setting: {e}"));
+            return glib::Propagation::Stop;
+        }
+        subtitle.set_text(description);
+        let parent = switch.root().and_downcast::<gtk::Window>();
+        reload_daemon(state.dbus_conn.as_ref(), parent.as_ref());
+        glib::Propagation::Proceed
+    });
+    row_box.append(&switch);
+    row
+}
+
 /// The extension's status, with a switch for it. The rows for what it does follow it, as they
 /// can only be changed while it runs.
 fn append_extension_row(
@@ -261,6 +286,8 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
         path_box.append(&path);
         gestures_list.add(&path_row);
         needs_extension.push(path_row);
+    } else if gestos::active_app::is_x11_session() {
+        gestures_list.add(&x11_path_row(state_rc));
     }
 
     if on_gnome {

@@ -15,5 +15,7 @@ pub mod keymap;
 pub mod keys;
 pub mod modifiers;
 pub mod protractor;
+#[cfg(target_os = "linux")]
+pub mod trail;
 pub mod uinput;
 pub mod wayland;
