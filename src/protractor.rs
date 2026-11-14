@@ -221,6 +221,67 @@ pub fn scale_to_square(points: &mut [Point2D], size: f64) {
     }
 }
 
+/// How far apart, in resampled points, the stroke is looked at on each side of a point to tell how
+/// much it turns there: a few points out of 64, so a corner shows as one sharp turn and a curve as
+/// many small ones.
+const TURN_REACH: usize = 3;
+/// A turn this sharp is a corner, and one this gentle is a curve. Those in between could be either,
+/// as a corner drawn by hand is a little round, so they don't tell shapes apart.
+const CORNER_DEGREES: f64 = 75.0;
+const CURVE_DEGREES: f64 = 40.0;
+/// How many points a corner and the curve it's compared with can be apart, as hands don't put
+/// them in quite the same place.
+const CORNER_SLACK: usize = 6;
+
+/// How much the stroke turns at each of its points, in degrees, looking a few points to each side.
+fn turns(points: &[Point2D]) -> Vec<f64> {
+    let direction = |from: Point2D, to: Point2D| {
+        let (dx, dy) = (to.x - from.x, to.y - from.y);
+        (dx.abs() > 1e-9 || dy.abs() > 1e-9).then(|| dy.atan2(dx))
+    };
+    (0..points.len())
+        .map(|i| {
+            if i < TURN_REACH || i + TURN_REACH >= points.len() {
+                return 0.0;
+            }
+            let before = direction(points[i - TURN_REACH], points[i]);
+            let after = direction(points[i], points[i + TURN_REACH]);
+            match (before, after) {
+                (Some(before), Some(after)) => {
+                    let turn = (after - before).to_degrees().rem_euclid(360.0);
+                    turn.min(360.0 - turn)
+                }
+                _ => 0.0,
+            }
+        })
+        .collect()
+}
+
+/// How much a stroke turns along its length, as `turns` says, once smoothed of wiggles under 2% of
+/// its size, like the steps of whole pixels a short diagonal is drawn in, which would look like
+/// corners.
+fn turn_profile(points: &[Point2D], n: usize) -> Vec<f64> {
+    let (mut min, mut max) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for p in points {
+        min = (min.0.min(p.x), min.1.min(p.y));
+        max = (max.0.max(p.x), max.1.max(p.y));
+    }
+    let size = (max.0 - min.0).hypot(max.1 - min.1);
+    turns(&resample_path(&simplify_points(points, size * 0.02), n))
+}
+
+/// Whether one stroke has a sharp corner where the other only curves, as a V and a U, which are
+/// otherwise much alike. Both are resampled to the same number of points.
+fn corners_differ(a: &[f64], b: &[f64]) -> bool {
+    let sharp_where_round = |sharp: &[f64], round: &[f64]| {
+        sharp.iter().enumerate().any(|(i, turn)| {
+            let near = &round[i.saturating_sub(CORNER_SLACK)..(i + CORNER_SLACK + 1).min(round.len())];
+            *turn >= CORNER_DEGREES && near.iter().all(|other| *other <= CURVE_DEGREES)
+        })
+    };
+    sharp_where_round(a, b) || sharp_where_round(b, a)
+}
+
 /// Scores this close together are too near to tell apart with any confidence.
 const SIMILAR_SCORE_MARGIN: f64 = 0.03;
 const MAX_CANDIDATES: usize = 3;
@@ -239,18 +300,22 @@ pub fn match_gesture_candidates(
     let max_angle = 15.0 * (std::f64::consts::PI / 180.0);
 
     let mut input_vector = resample_path(captured_points, n);
+    let input_turns = turn_profile(captured_points, n);
     scale_to_square(&mut input_vector, 250.0);
     vectorize_path(&mut input_vector);
 
     let mut scored: Vec<(f64, &String)> = templates
         .iter()
         .filter(|(_, template_points)| template_points.len() >= 2)
-        .map(|(name, template_points)| {
+        .filter_map(|(name, template_points)| {
+            if corners_differ(&input_turns, &turn_profile(template_points, n)) {
+                return None;
+            }
             let mut temp_vector = resample_path(template_points, n);
             scale_to_square(&mut temp_vector, 250.0);
             vectorize_path(&mut temp_vector);
             let score = compute_protractor_similarity(&input_vector, &temp_vector, max_angle);
-            (score, name)
+            Some((score, name))
         })
         .filter(|(score, _)| *score >= threshold_score)
         .collect();
@@ -372,6 +437,73 @@ mod tests {
             (50.0, 200.0),
         ];
         assert_eq!(matched(&zigzag), None);
+    }
+
+    /// Points along a curve from one angle to another around a center, in degrees.
+    fn arc(center: (f64, f64), radius: f64, from: f64, to: f64, steps: usize) -> Vec<(f64, f64)> {
+        (0..=steps)
+            .map(|i| {
+                let angle = (from + (to - from) * i as f64 / steps as f64).to_radians();
+                (center.0 + radius * angle.cos(), center.1 + radius * angle.sin())
+            })
+            .collect()
+    }
+
+    fn v() -> Vec<(f64, f64)> {
+        vec![(0.0, 0.0), (50.0, 100.0), (100.0, 0.0)]
+    }
+
+    /// Down, round at the bottom, and up. On screen, y grows downward, so the arc through 90°
+    /// is its bottom.
+    fn u() -> Vec<(f64, f64)> {
+        let mut points = vec![(0.0, 0.0)];
+        points.extend(arc((50.0, 50.0), 50.0, 180.0, 0.0, 24));
+        points.push((100.0, 0.0));
+        points
+    }
+
+    fn templates_v_and_u() -> Vec<(String, Vec<Point2D>)> {
+        vec![("V".to_string(), path(&v())), ("U".to_string(), path(&u()))]
+    }
+
+    #[test]
+    fn a_v_and_a_u_are_told_apart() {
+        assert_eq!(match_gesture_candidates(&path(&v()), &templates_v_and_u()), ["V"]);
+        assert_eq!(match_gesture_candidates(&path(&u()), &templates_v_and_u()), ["U"]);
+        // Each alone isn't taken for the other, as the editor's warning checks.
+        let only_v = vec![("V".to_string(), path(&v()))];
+        assert_eq!(match_gesture(&path(&u()), &only_v), None);
+        let only_u = vec![("U".to_string(), path(&u()))];
+        assert_eq!(match_gesture(&path(&v()), &only_u), None);
+    }
+
+    #[test]
+    fn a_v_drawn_a_little_round_is_still_a_v() {
+        // Its tip is a small arc from one side's end to the other's.
+        let mut rounded = vec![(0.0, 0.0)];
+        rounded.extend(arc((50.0, 87.5), 5.6, 153.4, 26.6, 6));
+        rounded.push((100.0, 0.0));
+        assert_eq!(match_gesture(&path(&rounded), &templates_v_and_u()).as_deref(), Some("V"));
+    }
+
+    #[test]
+    fn turns_are_sharp_at_a_corner_and_gentle_along_a_curve() {
+        let corner = turn_profile(&path(&v()), 64);
+        assert!(corner.iter().cloned().fold(0.0, f64::max) >= CORNER_DEGREES);
+        let curve = turn_profile(&path(&u()), 64);
+        assert!(curve.iter().all(|turn| *turn <= CURVE_DEGREES), "{curve:?}");
+    }
+
+    #[test]
+    fn a_short_line_in_steps_of_whole_pixels_is_still_a_line() {
+        // A diagonal 20 pixels long, as a mouse reports it: a pixel across, then a pixel down.
+        let mut steps = vec![(0.0, 0.0)];
+        for i in 1..=20 {
+            steps.push((f64::from(i), f64::from(i - 1)));
+            steps.push((f64::from(i), f64::from(i)));
+        }
+        let diagonal = vec![("diagonal".to_string(), path(&[(0.0, 0.0), (100.0, 100.0)]))];
+        assert_eq!(match_gesture(&path(&steps), &diagonal).as_deref(), Some("diagonal"));
     }
 
     #[test]
