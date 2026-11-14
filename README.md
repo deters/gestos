@@ -12,7 +12,7 @@ Mouse gestures for Linux.
 - Wayland and X11
 - GNOME, KDE, Sway, Hyprland and XFCE
 
-![Preferences: start at login, the button to draw with, the gesture path and window tiling](docs/screenshots/preferences.png)
+![A Next Track gesture limited to Audio Player](docs/screenshots/gesture-per-app.png)
 
 ## Actions Supported
 
@@ -32,7 +32,7 @@ Mouse gestures for Linux.
 - The path shows on screen while you draw
 - Advanced window tiling that keeps windows from overlapping
 
-![A Next Track gesture limited to Audio Player](docs/screenshots/gesture-per-app.png)
+![Preferences: start at login, the button to draw with, the gesture path and window tiling](docs/screenshots/preferences.png)
 
 ## Install
 
