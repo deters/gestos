@@ -127,6 +127,11 @@ pub fn describe_steps(steps: &[KeyStep]) -> String {
 /// The installed apps a person would look for, as their names and desktop file IDs, sorted by
 /// name.
 pub fn installed_apps() -> Vec<(String, String)> {
+    static APPS: crate::app_cache::AppCache<Vec<(String, String)>> = crate::app_cache::AppCache::new();
+    APPS.get(read_installed_apps)
+}
+
+fn read_installed_apps() -> Vec<(String, String)> {
     use gio::prelude::AppInfoExt;
     let apps = gio::AppInfo::all()
         .into_iter()

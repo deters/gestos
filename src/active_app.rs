@@ -51,14 +51,20 @@ pub struct WindowIds {
 }
 
 /// An installed app, as far as telling its windows goes.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InstalledApp {
     pub id: String,
     pub startup_wm_class: Option<String>,
     pub program: Option<String>,
 }
 
+/// Kept until an app is installed or removed, as the daemon asks for every gesture.
 fn installed_apps() -> Vec<InstalledApp> {
+    static APPS: crate::app_cache::AppCache<Vec<InstalledApp>> = crate::app_cache::AppCache::new();
+    APPS.get(read_installed_apps)
+}
+
+fn read_installed_apps() -> Vec<InstalledApp> {
     gio::AppInfo::all()
         .into_iter()
         .filter_map(|info| {
