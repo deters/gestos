@@ -1,8 +1,8 @@
 use gtk::prelude::*;
 use gtk::{gdk, glib};
 use gtk4 as gtk;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::cell::RefCell;
 
 pub fn open_shortcut_recorder(
     parent: &gtk::Window,
@@ -119,107 +119,168 @@ pub fn open_shortcut_recorder(
     // press a button with Enter.
     let key_controller = gtk::EventControllerKey::new();
     key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let captured_clone = Rc::clone(&captured_combination);
-    let kb_image_clone = kb_image.clone();
-    let display_box_clone = shortcut_display_box.clone();
-    let set_btn_clone = set_btn.clone();
-    let clear_btn_clone = clear_btn.clone();
 
-    key_controller.connect_key_pressed(move |_, keyval, _keycode, state| {
-        // Identify modifiers
-        let mut mods = Vec::new();
-        let mut display_mods = Vec::new();
-        if state.contains(gdk::ModifierType::CONTROL_MASK) {
-            mods.push("Control");
-            display_mods.push("Ctrl");
+    // Shows a combination and keeps it as the one to set, or only shows it while it's held.
+    let show: Rc<dyn Fn(&[&str], Option<&str>, bool)> = {
+        let captured = Rc::clone(&captured_combination);
+        let kb_image = kb_image.clone();
+        let display_box = shortcut_display_box.clone();
+        let set_btn = set_btn.clone();
+        let clear_btn = clear_btn.clone();
+        Rc::new(move |modifiers: &[&str], key: Option<&str>, keep: bool| {
+            if keep {
+                let combo: Vec<&str> = modifiers.iter().copied().chain(key).collect();
+                *captured.borrow_mut() = Some(combo.join("+"));
+                set_btn.set_sensitive(true);
+            }
+            clear_btn.set_visible(false);
+            kb_image.set_visible(false);
+            while let Some(child) = display_box.first_child() {
+                display_box.remove(&child);
+            }
+            let shown = modifiers.iter().map(|m| if *m == "Control" { "Ctrl" } else { m });
+            let key = key.map(|key| if key.len() == 1 { key.to_uppercase() } else { key.to_string() });
+            for (i, part) in shown.map(str::to_string).chain(key).enumerate() {
+                if i > 0 {
+                    let plus = gtk::Label::new(Some("+"));
+                    plus.set_opacity(0.6);
+                    display_box.append(&plus);
+                }
+                let label = gtk::Label::new(Some(&part));
+                label.add_css_class("keycap");
+                display_box.append(&label);
+            }
+            display_box.set_visible(true);
+        })
+    };
+
+    // The modifiers pressed since none were held, and whether another key came with them.
+    // Modifiers alone, like Ctrl+Super, are a shortcut too, set once they're let go.
+    let held = Rc::new(RefCell::new(Vec::<&'static str>::new()));
+    let with_key = Rc::new(Cell::new(false));
+
+    {
+        let held = Rc::clone(&held);
+        let with_key = Rc::clone(&with_key);
+        let show = Rc::clone(&show);
+        key_controller.connect_key_pressed(move |_, keyval, _keycode, state| {
+            if let Some(modifier) = modifier_name(keyval) {
+                // The first modifier of a new combination.
+                if modifiers_in(state).is_empty() {
+                    held.borrow_mut().clear();
+                    with_key.set(false);
+                }
+                let mut held = held.borrow_mut();
+                if !held.contains(&modifier) {
+                    held.push(modifier);
+                }
+                if !with_key.get() {
+                    show(&in_order(&held), None, false);
+                }
+                return glib::Propagation::Stop;
+            }
+            with_key.set(true);
+            // Page Down shares its keysym with the alias "Next", which the daemon reads as the
+            // media key, so the page keys are always named explicitly.
+            // Shift+Tab reports a key of its own, which is Tab with the Shift already listed.
+            let mut key_name = match keyval {
+                gdk::Key::Page_Up => "Page_Up".to_string(),
+                gdk::Key::Page_Down => "Page_Down".to_string(),
+                gdk::Key::ISO_Left_Tab => "Tab".to_string(),
+                _ => keyval.name().map(|s| s.to_string()).unwrap_or_default(),
+            };
+            if key_name.len() == 1 {
+                key_name = key_name.to_uppercase();
+            }
+            let modifiers = in_order(&modifiers_in(state));
+            show(&modifiers, (!key_name.is_empty()).then_some(key_name.as_str()), true);
+            glib::Propagation::Stop
+        });
+    }
+    {
+        key_controller.connect_key_released(move |_, keyval, _keycode, _state| {
+            // The first modifier let go ends a combination of modifiers alone.
+            if modifier_name(keyval).is_some() && !with_key.get() && !held.borrow().is_empty() {
+                let modifiers = in_order(&held.borrow());
+                show(&modifiers, None, true);
+                with_key.set(true);
+            }
+        });
+    }
+    // Shortcuts the desktop keeps for itself, like Ctrl+Alt+Up to change workspaces, reach the
+    // window too while it's open, as in GNOME Settings. On X11 that's done by taking the keyboard.
+    dialog.connect_map(|dialog| {
+        if let Some(toplevel) = dialog.surface().and_downcast::<gdk::Toplevel>() {
+            toplevel.inhibit_system_shortcuts(None::<&gdk::Event>);
         }
-        if state.contains(gdk::ModifierType::ALT_MASK) {
-            mods.push("Alt");
-            display_mods.push("Alt");
+    });
+    dialog.connect_unmap(|dialog| {
+        if let Some(toplevel) = dialog.surface().and_downcast::<gdk::Toplevel>() {
+            toplevel.restore_system_shortcuts();
         }
-        if state.contains(gdk::ModifierType::SHIFT_MASK) {
-            mods.push("Shift");
-            display_mods.push("Shift");
-        }
-        if state.contains(gdk::ModifierType::SUPER_MASK) {
-            mods.push("Super");
-            display_mods.push("Super");
-        }
-
-        let is_modifier = matches!(
-            keyval,
-            gdk::Key::Control_L
-                | gdk::Key::Control_R
-                | gdk::Key::Alt_L
-                | gdk::Key::Alt_R
-                | gdk::Key::Shift_L
-                | gdk::Key::Shift_R
-                | gdk::Key::Super_L
-                | gdk::Key::Super_R
-                | gdk::Key::Meta_L
-                | gdk::Key::Meta_R
-        );
-
-        if is_modifier {
-            return glib::Propagation::Stop;
-        }
-
-        // Page Down shares its keysym with the alias "Next", which the daemon reads as the
-        // media key, so the page keys are always named explicitly.
-        // Shift+Tab reports a key of its own, which is Tab with the Shift already listed.
-        let mut key_name = match keyval {
-            gdk::Key::Page_Up => "Page_Up".to_string(),
-            gdk::Key::Page_Down => "Page_Down".to_string(),
-            gdk::Key::ISO_Left_Tab => "Tab".to_string(),
-            _ => keyval.name().map(|s| s.to_string()).unwrap_or_default(),
-        };
-        let display_key = if key_name.len() == 1 {
-            key_name.to_uppercase()
-        } else {
-            key_name.clone()
-        };
-
-        if key_name.len() == 1 {
-            key_name = key_name.to_uppercase();
-        }
-
-        let mut combo = mods;
-        if !key_name.is_empty() {
-            combo.push(&key_name);
-        }
-
-        let combo_str = combo.join("+");
-        *captured_clone.borrow_mut() = Some(combo_str);
-
-        set_btn_clone.set_sensitive(true);
-        clear_btn_clone.set_visible(false);
-        kb_image_clone.set_visible(false);
-
-        // Clear previous visual keycaps
-        while let Some(child) = display_box_clone.first_child() {
-            display_box_clone.remove(&child);
-        }
-
-        // Append keycaps for modifiers
-        for m in display_mods {
-            let label = gtk::Label::new(Some(m));
-            label.add_css_class("keycap");
-            display_box_clone.append(&label);
-
-            let plus = gtk::Label::new(Some("+"));
-            plus.set_opacity(0.6);
-            display_box_clone.append(&plus);
-        }
-
-        // Append keycap for the final key
-        let label = gtk::Label::new(Some(&display_key));
-        label.add_css_class("keycap");
-        display_box_clone.append(&label);
-
-        display_box_clone.set_visible(true);
-
-        glib::Propagation::Stop
     });
     dialog.add_controller(key_controller);
     dialog.present();
+}
+
+/// The modifier a key is, by the name shortcuts give it. Meta is Alt, as most keyboards have it.
+fn modifier_name(keyval: gdk::Key) -> Option<&'static str> {
+    match keyval {
+        gdk::Key::Control_L | gdk::Key::Control_R => Some("Control"),
+        gdk::Key::Alt_L | gdk::Key::Alt_R | gdk::Key::Meta_L | gdk::Key::Meta_R => Some("Alt"),
+        gdk::Key::Shift_L | gdk::Key::Shift_R => Some("Shift"),
+        gdk::Key::Super_L | gdk::Key::Super_R | gdk::Key::Hyper_L | gdk::Key::Hyper_R => {
+            Some("Super")
+        }
+        _ => None,
+    }
+}
+
+/// The modifiers held as a key is pressed. On X11, Alt can be reported as Meta, and Super as Hyper,
+/// depending on how the keyboard is set up.
+fn modifiers_in(state: gdk::ModifierType) -> Vec<&'static str> {
+    let mut modifiers = Vec::new();
+    if state.contains(gdk::ModifierType::CONTROL_MASK) {
+        modifiers.push("Control");
+    }
+    if state.intersects(gdk::ModifierType::ALT_MASK | gdk::ModifierType::META_MASK) {
+        modifiers.push("Alt");
+    }
+    if state.contains(gdk::ModifierType::SHIFT_MASK) {
+        modifiers.push("Shift");
+    }
+    if state.intersects(gdk::ModifierType::SUPER_MASK | gdk::ModifierType::HYPER_MASK) {
+        modifiers.push("Super");
+    }
+    modifiers
+}
+
+/// Modifiers in the order shortcuts name them: Ctrl, Alt, Shift, Super.
+fn in_order(modifiers: &[&'static str]) -> Vec<&'static str> {
+    ["Control", "Alt", "Shift", "Super"]
+        .into_iter()
+        .filter(|modifier| modifiers.contains(modifier))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modifiers_are_named_in_order_whatever_order_they_were_pressed() {
+        assert_eq!(in_order(&["Super", "Control"]), ["Control", "Super"]);
+        assert_eq!(in_order(&["Super", "Alt", "Control"]), ["Control", "Alt", "Super"]);
+    }
+
+    #[test]
+    fn alt_and_super_are_found_however_x11_reports_them() {
+        let state = gdk::ModifierType::CONTROL_MASK
+            | gdk::ModifierType::META_MASK
+            | gdk::ModifierType::HYPER_MASK;
+        assert_eq!(modifiers_in(state), ["Control", "Alt", "Super"]);
+        assert_eq!(modifier_name(gdk::Key::Meta_L), Some("Alt"));
+        assert_eq!(modifier_name(gdk::Key::Super_R), Some("Super"));
+        assert_eq!(modifier_name(gdk::Key::Up), None);
+    }
 }
