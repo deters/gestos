@@ -70,7 +70,7 @@ pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> Strin
             if detail.trim().is_empty() {
                 opt.name.clone()
             } else {
-                format!("{} ({})", opt.name, detail.trim())
+                format!("{} ({})", opt.name, gestos::config::short_command(detail))
             }
         }
         ActionType::Click(_) => {
@@ -345,13 +345,25 @@ fn open_editor(
     let is_name_customized = Rc::new(RefCell::new(target_gesture.is_some()));
     let is_updating_programmatically = Rc::new(RefCell::new(false));
 
+    // Save can only be pressed once the gesture is complete, as GNOME's guidelines have it. This
+    // checks again whenever something it depends on changes. It's set once Save exists.
+    let check_complete: Rc<RefCell<Rc<dyn Fn()>>> = Rc::new(RefCell::new(Rc::new(|| {})));
+    let check = {
+        let check_complete = Rc::clone(&check_complete);
+        move || {
+            let check = Rc::clone(&check_complete.borrow());
+            check();
+        }
+    };
+
     let cust_clone = Rc::clone(&is_name_customized);
     let prog_clone = Rc::clone(&is_updating_programmatically);
+    let check_name = check.clone();
     name_entry.connect_changed(move |entry| {
-        if *prog_clone.borrow() {
-            return;
+        if !*prog_clone.borrow() {
+            *cust_clone.borrow_mut() = !entry.text().trim().is_empty();
         }
-        *cust_clone.borrow_mut() = !entry.text().trim().is_empty();
+        check_name();
     });
 
     // --- GESTURE PATH SECTION ---
@@ -524,12 +536,14 @@ fn open_editor(
     let check_drag_end = Rc::clone(&check_conflict);
     let pts_hint = Rc::clone(&recorded_points);
     let hint_end = draw_hint.clone();
+    let check_drawn = check.clone();
     drag.connect_drag_end(move |_, _, _| {
         *rec_drag3.borrow_mut() = false;
         hint_end.set_visible(pts_hint.borrow().len() < 2);
         canvas_clone3.queue_draw();
         println!("GUI: Gesture drawing finished.");
         check_drag_end();
+        check_drawn();
     });
 
     let modifiers_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -765,7 +779,9 @@ fn open_editor(
     let name_follows_details = Rc::clone(&is_name_customized);
     let name_entry_details = name_entry.clone();
     let action_details = Rc::clone(&selected_action);
+    let check_details = check.clone();
     action_details_entry.connect_changed(move |_| {
+        check_details();
         // Loading a gesture isn't a change, but editing its keys or command changes its action,
         // and a name made from them follows. A custom action's own name stays, as it has a field
         // for it: only one still made from the action follows its steps.
@@ -885,6 +901,7 @@ fn open_editor(
         let settings_list = settings_list.clone();
         let dialog = dialog.clone();
         let dialog_title = dialog_title.clone();
+        let check = check.clone();
         customize_btn.connect_clicked(move |_| {
             let Some(custom) = custom.clone() else { return };
             let steps = match selected_action.borrow().as_ref().map(|opt| &opt.action_type) {
@@ -909,6 +926,7 @@ fn open_editor(
             );
             dialog.set_title(Some(&custom.name));
             dialog_title.set_text(&custom.name);
+            check();
         });
     }
 
@@ -929,6 +947,67 @@ fn open_editor(
     let save_btn = gtk::Button::with_mnemonic("_Save");
     save_btn.add_css_class("suggested-action");
     save_btn.set_receives_default(true);
+
+    // What the gesture still needs before it can be saved, if anything.
+    let missing: Rc<dyn Fn() -> Option<&'static str>> = {
+        let recorded_points = Rc::clone(&recorded_points);
+        let selected_action = Rc::clone(&selected_action);
+        let action_details_entry = action_details_entry.clone();
+        let name_entry = name_entry.clone();
+        let is_name_customized = Rc::clone(&is_name_customized);
+        let state_rc = Rc::clone(state_rc);
+        let own_id = target_gesture.as_ref().map(|g| g.id.clone());
+        Rc::new(move || {
+            if recorded_points.borrow().len() < 2 {
+                return Some("Draw the gesture first");
+            }
+            let selected = selected_action.borrow();
+            let Some(opt) = selected.as_ref() else { return Some("Choose an action first") };
+            let detail = action_details_entry.text();
+            match &opt.action_type {
+                ActionType::Keyboard(steps) if steps.is_empty() && parse_steps(&detail).is_empty() => {
+                    return Some("Add a step to the custom action first");
+                }
+                ActionType::Execute(_) if opt.category == 7 && detail.trim().is_empty() => {
+                    return Some("Type the command to run first");
+                }
+                _ => {}
+            }
+            let name = name_entry.text();
+            let taken = *is_name_customized.borrow()
+                && state_rc.borrow().config.gestures.iter().any(|g| {
+                    g.name == name.as_str() && Some(&g.id) != own_id.as_ref()
+                });
+            taken.then_some("Another gesture already has this name")
+        })
+    };
+    {
+        let save_btn = save_btn.clone();
+        let name_entry = name_entry.clone();
+        let missing = Rc::clone(&missing);
+        *check_complete.borrow_mut() = Rc::new(move || {
+            let missing = missing();
+            save_btn.set_sensitive(missing.is_none());
+            save_btn.set_tooltip_text(missing);
+            if missing == Some("Another gesture already has this name") {
+                name_entry.add_css_class("error");
+            } else {
+                name_entry.remove_css_class("error");
+            }
+        });
+    }
+    check();
+    // Pressing Enter in a field saves, which an incomplete gesture can't: the system's alert sound
+    // says so, as the user set it up.
+    for entry in [&name_entry, &action_details_entry] {
+        entry.set_activates_default(true);
+        let missing = Rc::clone(&missing);
+        entry.connect_activate(move |entry| {
+            if missing().is_some() {
+                entry.error_bell();
+            }
+        });
+    }
 
     let state_clone = Rc::clone(state_rc);
     let is_edit = target_gesture.is_some();

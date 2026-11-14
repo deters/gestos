@@ -283,7 +283,7 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
             if cmd.is_empty() {
                 "Run Command in Shell".to_string()
             } else {
-                format!("Run Command: {}", cmd)
+                format!("Run Command: {}", gestos::config::short_command(cmd))
             }
         }
         ActionType::WorkspaceLeft => "Workspace Left".to_string(),

@@ -219,7 +219,7 @@ impl ActionType {
             ActionType::ToggleMaximized => "Toggle Maximize".to_string(),
             ActionType::Keypress(keys) => format!("Press keys: {}", keys),
             ActionType::Keyboard(steps) => format!("Custom action: {}", describe_steps(steps)),
-            ActionType::Execute(cmd) => format!("Run: {}", cmd),
+            ActionType::Execute(cmd) => format!("Run: {}", short_command(cmd)),
             ActionType::WorkspaceLeft => "Workspace Left".to_string(),
             ActionType::WorkspaceRight => "Workspace Right".to_string(),
             ActionType::WorkspaceUp => "Workspace Up".to_string(),
@@ -255,6 +255,55 @@ impl ActionType {
     }
 }
 
+
+/// A command as it's shown: a script or program given by its path is named by its file alone,
+/// as "/home/me/bin/backup.sh --now" is "backup.sh --now". Web addresses are left whole. Quoted
+/// words are taken whole, so a path with spaces in quotes keeps them.
+pub fn short_command(command: &str) -> String {
+    let mut words: Vec<String> = Vec::new();
+    let mut word = String::new();
+    let mut quote = None;
+    let mut started = false;
+    for c in command.trim().chars() {
+        match (quote, c) {
+            (None, '\'' | '"') => {
+                quote = Some(c);
+                started = true;
+            }
+            (Some(open), _) if c == open => quote = None,
+            (None, c) if c.is_whitespace() => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            _ => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        words.push(word);
+    }
+    words
+        .iter()
+        .map(|word| {
+            let name = if word.contains('/') && !word.contains("://") {
+                word.trim_end_matches('/').rsplit('/').next().unwrap_or(word)
+            } else {
+                word
+            };
+            let name = if name.is_empty() { word.as_str() } else { name };
+            if name.chars().any(char::is_whitespace) {
+                format!("\"{name}\"")
+            } else {
+                name.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 impl std::fmt::Display for ActionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1589,6 +1638,21 @@ mod tests {
         assert_eq!(kde.action_description(), "");
         let keys = gesture("Back", vec![ActionType::Keypress("Alt+Left".to_string())]);
         assert_eq!(keys.action_description(), "Press keys: Alt+Left");
+    }
+
+    #[test]
+    fn a_command_is_shown_by_its_files_names() {
+        assert_eq!(short_command("/home/me/bin/backup.sh --now"), "backup.sh --now");
+        assert_eq!(short_command("~/scripts/sync.sh"), "sync.sh");
+        assert_eq!(short_command("bash ./tools/run.sh"), "bash run.sh");
+        assert_eq!(short_command("'/home/me/My Scripts/clean up.sh' -v"), "\"clean up.sh\" -v");
+        assert_eq!(short_command("xdg-open https://example.org/page"), "xdg-open https://example.org/page");
+        assert_eq!(short_command("gedit"), "gedit");
+        assert_eq!(short_command("/"), "/");
+        assert_eq!(
+            ActionType::Execute("/usr/local/bin/notes.sh".into()).get_description(),
+            "Run: notes.sh"
+        );
     }
 
     #[test]
