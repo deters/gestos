@@ -55,12 +55,17 @@ pub fn open_shortcut_recorder(
 
     wrapper.append(&vbox);
 
+    // A new gesture has no name yet.
     let prompt_label = gtk::Label::new(None);
-    let escaped_name = glib::markup_escape_text(gesture_name);
-    prompt_label.set_markup(&format!(
-        "Enter new shortcut to change <b>{}</b>",
-        escaped_name
-    ));
+    if gesture_name.is_empty() {
+        prompt_label.set_text("Enter the new shortcut");
+    } else {
+        let escaped_name = glib::markup_escape_text(gesture_name);
+        prompt_label.set_markup(&format!(
+            "Enter new shortcut to change <b>{}</b>",
+            escaped_name
+        ));
+    }
     prompt_label.set_wrap(true);
     prompt_label.set_justify(gtk::Justification::Center);
     vbox.append(&prompt_label);

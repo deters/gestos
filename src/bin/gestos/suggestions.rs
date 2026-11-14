@@ -1,6 +1,6 @@
 use crate::state::EditorActionOption;
 use gestos::config::{ActionType, Gesture};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// What an action actually does, so that different entries for one action count as the same:
 /// the built-in Minimize Window runs GNOME's `minimize`, and `volume-up-static` is `volume-up`.
@@ -177,9 +177,343 @@ pub fn find_suggestions(
         .collect()
 }
 
+/// An entry in the list of what to create a gesture for.
+#[derive(Debug, Clone)]
+pub enum Suggestion {
+    Action(EditorActionOption),
+    Category(Category, usize),
+}
+
+/// How the actions found are offered: as they are, or in their categories when there are many and
+/// nothing is searched for or picked out. A category says how many gestures there are in it, by
+/// the categories of the gestures' actions, and shows when it has gestures or actions to offer. In
+/// a category, the one to make its own of, like a custom keyboard shortcut, is offered apart.
+pub fn arrange_suggestions(
+    found: Vec<EditorActionOption>,
+    searching: bool,
+    open_category: Option<Category>,
+    gestures_in: &BTreeMap<Category, usize>,
+) -> (Vec<EditorActionOption>, Vec<Suggestion>) {
+    if let Some(category) = open_category {
+        let (apart, in_it): (Vec<_>, Vec<_>) = found
+            .into_iter()
+            .filter(|option| category_of(option) == category)
+            .partition(is_custom_shortcut);
+        return (apart, in_it.into_iter().map(Suggestion::Action).collect());
+    }
+    if searching {
+        return (Vec::new(), found.into_iter().map(Suggestion::Action).collect());
+    }
+    let ready = found;
+    if ready.len() < FEWEST_TO_CATEGORIZE {
+        return (Vec::new(), ready.into_iter().map(Suggestion::Action).collect());
+    }
+    let mut categories: BTreeSet<Category> = ready.iter().map(category_of).collect();
+    categories.extend(gestures_in.keys());
+    let categories = categories
+        .into_iter()
+        .map(|category| {
+            Suggestion::Category(category, gestures_in.get(&category).copied().unwrap_or(0))
+        })
+        .collect();
+    (Vec::new(), categories)
+}
+
+/// The category a gesture is in: the one its action is offered in.
+pub fn gesture_category(gesture: &Gesture, options: &[EditorActionOption]) -> Option<Category> {
+    let action = gesture.actions.first()?;
+    let category = match options.iter().find(|option| crate::actions::action_matches(action, option)) {
+        Some(option) => category_of(option),
+        None => category_of(&EditorActionOption {
+            category: 0,
+            action_type: action.clone(),
+            name: String::new(),
+            tooltip: String::new(),
+        }),
+    };
+    Some(category)
+}
+
+/// How many gestures there are in each category.
+pub fn gestures_by_category(
+    gestures: &[Gesture],
+    options: &[EditorActionOption],
+) -> BTreeMap<Category, usize> {
+    let mut counts = BTreeMap::new();
+    for gesture in gestures.iter().filter(|gesture| !gesture.is_deleted) {
+        if let Some(category) = gesture_category(gesture, options) {
+            *counts.entry(category).or_default() += 1;
+        }
+    }
+    counts
+}
+
+/// Below this many actions to offer, they're listed as they are, as sorting so few into
+/// categories would only hide them.
+pub const FEWEST_TO_CATEGORIZE: usize = 20;
+
+/// The groups the actions to create gestures for are offered in: GNOME's own, as its Settings
+/// list its shortcuts, and Gestos's for the apps and the shortcuts apps share.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Category {
+    CustomActions,
+    Windows,
+    Navigation,
+    Screenshots,
+    SoundAndMedia,
+    Launchers,
+    Apps,
+    KeyboardShortcuts,
+    System,
+    Accessibility,
+    Typing,
+    CustomShortcuts,
+    Other,
+}
+
+impl Category {
+    pub fn name(self) -> &'static str {
+        match self {
+            Category::CustomActions => "Custom Actions",
+            Category::Windows => "Windows",
+            Category::Navigation => "Navigation",
+            Category::Screenshots => "Screenshots",
+            Category::SoundAndMedia => "Sound and Media",
+            Category::Launchers => "Launchers",
+            Category::Apps => "Apps",
+            Category::KeyboardShortcuts => "Keyboard Shortcuts",
+            Category::System => "System",
+            Category::Accessibility => "Accessibility",
+            Category::Typing => "Typing",
+            Category::CustomShortcuts => "Custom Shortcuts",
+            Category::Other => "Other",
+        }
+    }
+
+    pub fn icon_name(self) -> &'static str {
+        match self {
+            Category::CustomActions => "document-edit-symbolic",
+            Category::Windows => "focus-windows-symbolic",
+            Category::Navigation => "preferences-desktop-multitasking-symbolic",
+            Category::Screenshots => "camera-photo-symbolic",
+            Category::SoundAndMedia => "audio-volume-high-symbolic",
+            Category::Launchers => "system-run-symbolic",
+            Category::Apps => "view-app-grid-symbolic",
+            Category::KeyboardShortcuts => "input-keyboard-symbolic",
+            Category::System => "emblem-system-symbolic",
+            Category::Accessibility => "preferences-desktop-accessibility-symbolic",
+            Category::Typing => "preferences-desktop-locale-symbolic",
+            Category::CustomShortcuts => "utilities-terminal-symbolic",
+            Category::Other => "view-more-symbolic",
+        }
+    }
+}
+
+/// Whether an action is one the user builds, rather than one that's ready: a custom action, a
+/// command or a click. A custom keyboard shortcut goes with the other shortcuts instead.
+fn is_build_your_own(option: &EditorActionOption) -> bool {
+    match &option.action_type {
+        ActionType::Keyboard(steps) => steps.is_empty(),
+        ActionType::Execute(command) => command.is_empty(),
+        ActionType::Click(_) => true,
+        _ => false,
+    }
+}
+
+/// Whether it's the keyboard shortcut whose keys are recorded, rather than one that's ready.
+pub fn is_custom_shortcut(option: &EditorActionOption) -> bool {
+    matches!(&option.action_type, ActionType::Keypress(keys) if keys.is_empty())
+}
+
+/// The category an action is offered in, as GNOME's Settings sort its shortcuts. Gestos's own
+/// actions go where GNOME's for the same thing do.
+pub fn category_of(option: &EditorActionOption) -> Category {
+    match &option.action_type {
+        _ if is_build_your_own(option) => Category::CustomActions,
+        _ if crate::ui::app_picker::opened_app(&option.action_type).is_some() => Category::Apps,
+        ActionType::Keypress(_) => Category::KeyboardShortcuts,
+        // GNOME's own custom shortcuts, which run commands.
+        ActionType::Execute(command) if !command.is_empty() => Category::CustomShortcuts,
+        ActionType::Gnome(key) => gnome_category(key),
+        ActionType::Kde(component, shortcut) => kde_category(component, shortcut),
+        ActionType::ToggleTileWindows | ActionType::Lower | ActionType::Raise => Category::Windows,
+        ActionType::ControlCenter | ActionType::Lookup => Category::Launchers,
+        other => match other.gnome_key() {
+            Some(key) => gnome_category(key),
+            None => Category::Other,
+        },
+    }
+}
+
+fn gnome_category(key: &str) -> Category {
+    let key = key.trim_end_matches("-static");
+    let starts = |prefixes: &[&str]| prefixes.iter().any(|prefix| key.starts_with(prefix));
+    match key {
+        _ if starts(&["screenshot", "window-screenshot", "area-screenshot", "show-screenshot-ui",
+            "show-screen-recording-ui"]) => Category::Screenshots,
+        _ if starts(&["volume-", "mic-mute", "media", "play", "pause", "stop", "next",
+            "previous", "eject"]) => Category::SoundAndMedia,
+        "terminal" | "www" | "home" | "email" | "search" | "calculator" | "help"
+        | "control-center" => Category::Launchers,
+        _ if starts(&["switch-input-source"]) => Category::Typing,
+        _ if starts(&["screenreader", "on-screen-keyboard", "magnifier", "increase-text-size",
+            "decrease-text-size", "toggle-contrast"]) => Category::Accessibility,
+        _ if starts(&["switch-to-workspace", "move-to-workspace", "switch-windows",
+            "cycle-windows", "switch-group", "cycle-group", "switch-panels", "cycle-panels",
+            "switch-applications", "switch-to-application", "move-to-monitor", "show-desktop",
+            "shift-overview"]) => Category::Navigation,
+        _ if starts(&["close", "minimize", "maximize", "unmaximize", "toggle-maximized",
+            "toggle-fullscreen", "toggle-tiled", "toggle-above", "toggle-on-all-workspaces",
+            "always-on-top", "raise", "lower", "begin-move", "begin-resize", "move-to-side",
+            "move-to-corner", "move-to-center", "activate-window-menu",
+            "open-new-window-application"]) => Category::Windows,
+        _ => Category::System,
+    }
+}
+
+/// KDE's shortcuts, by the part of KDE they belong to, and for KWin, by what they do.
+fn kde_category(component: &str, shortcut: &str) -> Category {
+    let shortcut = shortcut.to_lowercase();
+    match component {
+        "kwin" if ["desktop", "switch", "walk", "overview", "expose", "grid"]
+            .iter()
+            .any(|word| shortcut.contains(word)) => Category::Navigation,
+        "kwin" => Category::Windows,
+        "kmix" | "mediacontrol" => Category::SoundAndMedia,
+        "org_kde_spectacle_desktop" | "org.kde.spectacle.desktop" => Category::Screenshots,
+        "kaccess" => Category::Accessibility,
+        "KDE Keyboard Layout Switcher" => Category::Typing,
+        "ksmserver" | "plasmashell" | "org_kde_powerdevil" | "kded5" => Category::System,
+        _ if component.ends_with(".desktop") || component.ends_with("_desktop") => {
+            Category::Launchers
+        }
+        _ => Category::Other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn actions_go_where_gnome_puts_its_own() {
+        let category = |action: ActionType| category_of(&option("", action));
+        assert_eq!(category(ActionType::Gnome("close".into())), Category::Windows);
+        assert_eq!(category(ActionType::Kill), Category::Windows);
+        assert_eq!(category(ActionType::WorkspaceLeft), Category::Navigation);
+        assert_eq!(
+            category(ActionType::Gnome("move-to-workspace-left".into())),
+            Category::Navigation
+        );
+        assert_eq!(category(ActionType::Gnome("volume-up-static".into())), Category::SoundAndMedia);
+        assert_eq!(category(ActionType::MediaNext), Category::SoundAndMedia);
+        assert_eq!(category(ActionType::ScreenshotArea), Category::Screenshots);
+        assert_eq!(category(ActionType::Calculator), Category::Launchers);
+        assert_eq!(category(ActionType::LockScreen), Category::System);
+        assert_eq!(category(ActionType::ShowOverview), Category::System);
+        assert_eq!(category(ActionType::Gnome("magnifier".into())), Category::Accessibility);
+        assert_eq!(category(ActionType::Gnome("switch-input-source".into())), Category::Typing);
+        assert_eq!(category(ActionType::Keypress("Control+T".into())), Category::KeyboardShortcuts);
+        assert_eq!(category(ActionType::Execute("backup.sh".into())), Category::CustomShortcuts);
+        assert_eq!(
+            category(ActionType::Kde("kwin".into(), "Switch to Desktop 2".into())),
+            Category::Navigation
+        );
+        assert_eq!(category(ActionType::Kde("kwin".into(), "Window Close".into())), Category::Windows);
+    }
+
+    fn names_of(suggestions: &[Suggestion]) -> Vec<String> {
+        suggestions
+            .iter()
+            .map(|suggestion| match suggestion {
+                Suggestion::Action(option) => option.name.clone(),
+                Suggestion::Category(category, count) => format!("{} {count}", category.name()),
+            })
+            .collect()
+    }
+
+    fn many_actions() -> Vec<EditorActionOption> {
+        let mut options = vec![option("Custom Action", ActionType::Keyboard(Vec::new()))];
+        options.extend((0..15).map(|i| gnome(&format!("Workspace {i}"), &format!("switch-to-workspace-{i}"))));
+        options.extend((0..5).map(|i| gnome(&format!("Volume {i}"), "volume-up")));
+        options
+    }
+
+    #[test]
+    fn many_actions_are_offered_in_categories() {
+        let (apart, others) = arrange_suggestions(many_actions(), false, None, &BTreeMap::new());
+        assert!(apart.is_empty());
+        assert_eq!(names_of(&others), ["Custom Actions 0", "Navigation 0", "Sound and Media 0"]);
+    }
+
+    #[test]
+    fn a_category_shows_its_actions_and_a_search_shows_them_all() {
+        let (builds, others) =
+            arrange_suggestions(many_actions(), false, Some(Category::SoundAndMedia), &BTreeMap::new());
+        assert!(builds.is_empty());
+        assert_eq!(names_of(&others).len(), 5);
+        let (builds, others) = arrange_suggestions(many_actions(), true, None, &BTreeMap::new());
+        assert!(builds.is_empty());
+        assert_eq!(others.len(), 21);
+    }
+
+    #[test]
+    fn the_custom_keyboard_shortcut_comes_apart_in_its_category() {
+        let mut options: Vec<_> = (0..20)
+            .map(|i| option(&format!("Shortcut {i}"), ActionType::Keypress(format!("Control+{i}"))))
+            .collect();
+        options.push(option("Custom Keyboard Shortcut", ActionType::Keypress(String::new())));
+        let (builds, others) = arrange_suggestions(options.clone(), false, None, &BTreeMap::new());
+        assert!(builds.is_empty());
+        assert_eq!(names_of(&others), ["Keyboard Shortcuts 0"]);
+        let (apart, others) =
+            arrange_suggestions(options, false, Some(Category::KeyboardShortcuts), &BTreeMap::new());
+        assert_eq!(names(&apart), ["Custom Keyboard Shortcut"]);
+        assert_eq!(others.len(), 20);
+    }
+
+    #[test]
+    fn gestures_are_in_their_actions_categories_and_counted_there() {
+        let options = vec![
+            option("Close Window", ActionType::Kill),
+            option("Custom Action", ActionType::Keyboard(Vec::new())),
+        ];
+        let mut steps = gesture(ActionType::Keyboard(vec![
+            gestos::key_steps::KeyStep::Type("hello".into()),
+        ]));
+        steps.name = "Say hello".into();
+        let gestures = [gesture(ActionType::Kill), gesture(ActionType::Kill), steps];
+        assert_eq!(gesture_category(&gestures[0], &options), Some(Category::Windows));
+        assert_eq!(gesture_category(&gestures[2], &options), Some(Category::CustomActions));
+        let counts = gestures_by_category(&gestures, &options);
+        assert_eq!(counts.get(&Category::Windows), Some(&2));
+        assert_eq!(counts.get(&Category::CustomActions), Some(&1));
+        // A category with gestures and nothing left to offer still shows, with its count.
+        let (_, categories) = arrange_suggestions(many_actions(), false, None, &counts);
+        assert_eq!(
+            names_of(&categories),
+            ["Custom Actions 1", "Windows 2", "Navigation 0", "Sound and Media 0"]
+        );
+    }
+
+    #[test]
+    fn a_few_actions_are_not_put_in_categories() {
+        let mut few = many_actions();
+        few.truncate(10);
+        let (apart, others) = arrange_suggestions(few, false, None, &BTreeMap::new());
+        assert!(apart.is_empty());
+        assert_eq!(names_of(&others)[..2], ["Custom Action", "Workspace 0"]);
+    }
+
+    #[test]
+    fn actions_to_build_are_custom_actions() {
+        let category = |action: ActionType| category_of(&option("", action));
+        assert_eq!(category(ActionType::Keyboard(Vec::new())), Category::CustomActions);
+        assert_eq!(category(ActionType::Execute(String::new())), Category::CustomActions);
+        assert_eq!(category(ActionType::Click(None)), Category::CustomActions);
+        assert_eq!(category(ActionType::Keypress(String::new())), Category::KeyboardShortcuts);
+        assert_eq!(category(ActionType::Execute("backup.sh".into())), Category::CustomShortcuts);
+    }
 
     fn option(name: &str, action_type: ActionType) -> EditorActionOption {
         EditorActionOption {

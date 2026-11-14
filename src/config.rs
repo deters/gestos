@@ -49,6 +49,9 @@ pub enum ActionType {
     Gnome(String),
     Kde(String, String),
     Abort,
+    /// Opens the text selected, as a web address, email address or file, works it out as a sum,
+    /// or searches the web for it.
+    Lookup,
 }
 
 impl ActionType {
@@ -113,6 +116,7 @@ impl ActionType {
                 Some(ActionType::Kde(comp, short))
             }
             "disabled" | "abort" => Some(ActionType::Abort),
+            "lookup" => Some(ActionType::Lookup),
             _ => None,
         }
     }
@@ -175,6 +179,7 @@ impl ActionType {
             ActionType::Keypress(_) | ActionType::Keyboard(_) => "input-keyboard-symbolic",
             ActionType::Gnome(key) => gnome_icon_name(key),
             ActionType::Kde(_, _) => "preferences-system-symbolic",
+            ActionType::Lookup => "edit-find-symbolic",
             ActionType::Iconify => "window-minimize-symbolic",
             ActionType::Kill => "window-close-symbolic",
             ActionType::Maximize | ActionType::ToggleMaximized => "window-maximize-symbolic",
@@ -251,6 +256,7 @@ impl ActionType {
             ActionType::Gnome(cmd) => format!("GNOME: {}", cmd),
             ActionType::Kde(comp, method) => format!("KDE: {} {}", comp, method),
             ActionType::Abort => "Abort".to_string(),
+            ActionType::Lookup => "Look Up Selection".to_string(),
         }
     }
 }
@@ -355,6 +361,7 @@ impl std::fmt::Display for ActionType {
             ActionType::Gnome(arg) => write!(f, "gnome {}", arg),
             ActionType::Kde(comp, short) => write!(f, "kde {} {}", comp, short),
             ActionType::Abort => write!(f, "abort"),
+            ActionType::Lookup => write!(f, "lookup"),
         }
     }
 }

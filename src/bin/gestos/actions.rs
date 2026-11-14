@@ -17,9 +17,13 @@ pub fn action_matches(a: &ActionType, opt: &EditorActionOption) -> bool {
                 opt.category == 7
             }
         }
-        (ActionType::Keypress(k1), ActionType::Keypress(k2)) => opt.category == 0 && k1 == k2,
-        // The generic Custom Action has no steps of its own, so it matches any, and a single
-        // shortcut that isn't a standard one is a custom action with one step. One that only
+        // A shortcut that isn't a standard one is the Custom Keyboard Shortcut's, which has no
+        // keys of its own.
+        (ActionType::Keypress(k1), ActionType::Keypress(k2)) => {
+            opt.category == 0
+                && (same_keys(k1, k2) || (k2.is_empty() && standard_shortcut_name(k1).is_none()))
+        }
+        // The generic Custom Action has no steps of its own, so it matches any. One that only
         // opens an app is that app's own action instead, which edits more simply.
         (ActionType::Keyboard(_) | ActionType::Keypress(_), ActionType::Keyboard(steps))
             if steps.is_empty() =>
@@ -29,6 +33,17 @@ pub fn action_matches(a: &ActionType, opt: &EditorActionOption) -> bool {
         (ActionType::Click(_), ActionType::Click(_)) => opt.category == 0,
         (at1, at2) => at1 == at2,
     }
+}
+
+/// Whether two shortcuts are the same keys, whatever order their modifiers are written in:
+/// Shift+Control+S is Control+Shift+S.
+pub fn same_keys(a: &str, b: &str) -> bool {
+    let keys = |shortcut: &str| {
+        let mut keys: Vec<String> = shortcut.split('+').map(str::to_lowercase).collect();
+        keys.sort();
+        keys
+    };
+    keys(a) == keys(b)
 }
 
 /// Whether an action does nothing but open an app, which is that app's own action.
@@ -42,6 +57,7 @@ pub fn only_opens_an_app(action: &ActionType) -> bool {
 /// Action takes keys, and only the generic Run Command takes a command.
 pub fn action_needs_parameter(opt: &EditorActionOption) -> bool {
     match &opt.action_type {
+        ActionType::Keypress(keys) => keys.is_empty(),
         ActionType::Keyboard(steps) => steps.is_empty(),
         ActionType::Click(_) => true,
         ActionType::Execute(_) => opt.category == 7,
@@ -114,8 +130,8 @@ const STANDARD_SHORTCUTS: &[(&str, &str, &str)] = &[
     ("Last Page", "Control+End", "Go to the last page"),
 ];
 
-/// A standard shortcut's name with its keys as the GNOME guidelines write them: "Copy (Ctrl+C)".
-fn labelled_shortcut_name(name: &str, keys: &str) -> String {
+/// A shortcut's name with its keys as the GNOME guidelines write them: "Copy (Ctrl+C)".
+pub fn labelled_shortcut_name(name: &str, keys: &str) -> String {
     let label = keys
         .split('+')
         .map(|key| match key {
@@ -140,7 +156,7 @@ fn labelled_shortcut_name(name: &str, keys: &str) -> String {
 pub fn standard_shortcut_name(keys: &str) -> Option<String> {
     STANDARD_SHORTCUTS
         .iter()
-        .find(|(_, shortcut_keys, _)| *shortcut_keys == keys)
+        .find(|(_, shortcut_keys, _)| same_keys(shortcut_keys, keys))
         .map(|(name, keys, _)| labelled_shortcut_name(name, keys))
 }
 
@@ -157,6 +173,13 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
         .collect();
     options.extend([
         // Input Emulation (0)
+        // Before Custom Action, which also matches a single shortcut, as one opens more simply here.
+        EditorActionOption {
+            category: 0,
+            action_type: ActionType::Keypress(String::new()),
+            name: "Custom Keyboard Shortcut".to_string(),
+            tooltip: "Press one shortcut".to_string(),
+        },
         EditorActionOption {
             category: 0,
             action_type: ActionType::Keyboard(Vec::new()),
@@ -365,6 +388,12 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
             action_type: ActionType::Calculator,
             name: "Calculator".to_string(),
             tooltip: "Open calculator application".to_string(),
+        },
+        EditorActionOption {
+            category: 5,
+            action_type: ActionType::Lookup,
+            name: "Look Up Selection".to_string(),
+            tooltip: "Open the text selected, work it out, or search the web for it".to_string(),
         },
         // Other/Internal (7)
         EditorActionOption {
@@ -607,6 +636,7 @@ mod tests {
     fn only_keys_clicks_and_run_command_need_a_parameter() {
         assert!(action_needs_parameter(&option(0, ActionType::Keyboard(Vec::new()))));
         assert!(action_needs_parameter(&option(0, ActionType::Click(None))));
+        assert!(action_needs_parameter(&option(0, ActionType::Keypress(String::new()))));
         assert!(action_needs_parameter(&option(7, ActionType::Execute(String::new()))));
 
         assert!(!action_needs_parameter(&option(6, ActionType::Gnome("close".to_string()))));
@@ -628,7 +658,7 @@ mod tests {
             options.iter().find(|opt| action_matches(&action, opt)).unwrap().name.clone()
         };
         assert_eq!(find("Control+C"), "Copy (Ctrl+C)");
-        assert_eq!(find("Control+Alt+T"), "Custom Action");
+        assert_eq!(find("Control+Alt+T"), "Custom Keyboard Shortcut");
     }
 
     #[test]
@@ -656,6 +686,11 @@ mod tests {
     #[test]
     fn standard_shortcuts_are_known_by_their_keys() {
         assert_eq!(standard_shortcut_name("Control+C").as_deref(), Some("Copy (Ctrl+C)"));
+        // As the recorder writes them, Ctrl first.
+        assert_eq!(
+            standard_shortcut_name("Control+Shift+S").as_deref(),
+            Some("Save As (Shift+Ctrl+S)")
+        );
         assert_eq!(standard_shortcut_name("Control+Alt+T"), None);
     }
 

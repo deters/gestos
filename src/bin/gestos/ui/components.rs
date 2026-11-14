@@ -101,6 +101,10 @@ pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static 
         // The two actions that can do what the others can't stand out.
         ActionType::Execute(_) => ("utilities-terminal-symbolic", "icon-swiss-red"),
         ActionType::Keyboard(_) => ("input-keyboard-symbolic", "icon-swiss-red"),
+        // A custom shortcut is one of those too. A standard one is ready as it is.
+        ActionType::Keypress(keys) if keys.is_empty() || standard_shortcut_name(keys).is_none() => {
+            ("input-keyboard-symbolic", "icon-swiss-red")
+        }
         ActionType::Keypress(_) => (
             "input-keyboard-symbolic",
             "icon-bg-orange",
@@ -202,9 +206,11 @@ pub fn draw_gesture_path(
     pat.add_color_stop_rgba(1.0, 0.98, 0.72, 0.80, 0.9);
     cr.set_source(&pat).unwrap();
 
+    // In curves, as it was drawn, with its sharp corners kept.
     cr.move_to(points[0].x, points[0].y);
-    for p in &points[1..] {
-        cr.line_to(p.x, p.y);
+    for curve in gestos::smooth::smooth(points) {
+        let (c1, c2, to) = (curve.control1, curve.control2, curve.to);
+        cr.curve_to(c1.x, c1.y, c2.x, c2.y, to.x, to.y);
     }
     cr.stroke().unwrap();
 
@@ -262,11 +268,11 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
         ActionType::ToggleMaximized => "Toggle Maximized".to_string(),
         ActionType::Keypress(keys) => {
             if keys.is_empty() {
-                "Custom Action".to_string()
+                "Custom Keyboard Shortcut".to_string()
             } else if let Some(name) = standard_shortcut_name(keys) {
                 name.to_string()
             } else {
-                format!("Custom Action ({})", keys)
+                format!("Custom Keyboard Shortcut ({})", keys)
             }
         }
         ActionType::Keyboard(steps) => {
@@ -333,6 +339,7 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
             format!("{} - {}", comp, short)
         }
         ActionType::Abort => "Abort Gesture".to_string(),
+        ActionType::Lookup => "Look Up Selection".to_string(),
     }
 }
 pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -> gtk::ListBoxRow {
@@ -350,22 +357,29 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     drag_handle.set_valign(gtk::Align::Center);
     main_hbox.append(&drag_handle);
 
-    // A custom action named by the user shows that name. Others are named after their action, as
-    // "Custom Action", followed by its keys or steps, or as "Custom Keyboard Action" from before.
+    // A custom action or shortcut named by the user shows that name, even one with a standard
+    // shortcut's keys. Others are named after their action, as "Custom Action", followed by its
+    // keys or steps, as the standard shortcut they are, or as "Custom Keyboard Action" from before.
     let is_keyboard_action = matches!(
         gesture.actions.first(),
         Some(ActionType::Keyboard(_)) | Some(ActionType::Keypress(_))
-    ) && !gesture.actions.first().is_some_and(|action| {
-        matches!(action, ActionType::Keypress(keys) if standard_shortcut_name(keys).is_some())
-    });
+    );
+    let standard_name = match gesture.actions.first() {
+        Some(ActionType::Keypress(keys)) => standard_shortcut_name(keys),
+        _ => None,
+    };
     let named = is_keyboard_action
+        && standard_name.as_deref() != Some(gesture.name.as_str())
         && !gesture.name.starts_with("Custom Action")
+        && !gesture.name.starts_with("Keyboard Shortcut")
+        && !gesture.name.starts_with("Custom Keyboard Shortcut")
         && !gesture.name.starts_with("Custom Keyboard Action");
 
     let has_keypress = if !gesture.actions.is_empty() && !named {
-        // A standard shortcut shows its name, like the other actions.
+        // A standard shortcut shows its name, like the other actions. A custom one shows its keys,
+        // even ones a standard shortcut has.
         if let ActionType::Keypress(ref keys) = gesture.actions[0] {
-            standard_shortcut_name(keys).is_none().then_some(keys)
+            (standard_name.as_deref() != Some(gesture.name.as_str())).then_some(keys)
         } else {
             None
         }
@@ -375,7 +389,14 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
 
     // 1. Icon Category Holder (only if not a keypress action)
     if has_keypress.is_none() {
-        let (icon_name, bg_class) = if !gesture.actions.is_empty() {
+        let (icon_name, bg_class) = if let Some(ActionType::Keypress(_)) = gesture.actions.first() {
+            // Named by the user, it's a custom shortcut, whatever its keys.
+            if named {
+                ("input-keyboard-symbolic", "icon-swiss-red")
+            } else {
+                get_action_category_icon(&gesture.actions[0])
+            }
+        } else if !gesture.actions.is_empty() {
             get_action_category_icon(&gesture.actions[0])
         } else {
             ("system-run-symbolic", "icon-bg-blue")
@@ -417,6 +438,8 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
                     plus.set_valign(gtk::Align::Center);
                     row_hbox.append(&plus);
                 }
+                // As shortcuts' names write it.
+                let part = if *part == "Control" { "Ctrl" } else { part };
                 let keycap_label = gtk::Label::new(Some(part));
                 keycap_label.add_css_class("keycap");
                 keycap_label.set_valign(gtk::Align::Center);
@@ -484,7 +507,7 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         draw_gesture_path(cr, &pts_clone, width as f64, height as f64, true, true);
     });
     preview_frame.set_child(Some(&preview_canvas));
-    for label in gesture.modifiers.labels() {
+    for label in gesture.modifiers.shown_labels(&gestos::keyboards::modifier_names()) {
         let keycap = gtk::Label::new(Some(label));
         keycap.add_css_class("keycap");
         keycap.set_valign(gtk::Align::Center);

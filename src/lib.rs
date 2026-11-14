@@ -14,9 +14,11 @@ pub mod keyboards;
 pub mod keymap;
 #[cfg(target_os = "linux")]
 pub mod keys;
+pub mod lookup;
 pub mod modifiers;
 pub mod protractor;
 #[cfg(target_os = "linux")]
+pub mod smooth;
 pub mod trail;
 pub mod uinput;
 pub mod wayland;

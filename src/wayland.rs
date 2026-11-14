@@ -172,6 +172,65 @@ fn choose_in_extension(
 // the next login, so saying it once is enough.
 static TOLD_OUTDATED: AtomicBool = AtomicBool::new(false);
 
+type FailureReporter = Box<dyn Fn(String) + Send + Sync>;
+static FAILURE_REPORTER: OnceLock<FailureReporter> = OnceLock::new();
+
+/// Where an action that couldn't run is told, said in a few words. Set once, by the daemon.
+pub fn report_failures_to(reporter: impl Fn(String) + Send + Sync + 'static) {
+    let _ = FAILURE_REPORTER.set(Box::new(reporter));
+}
+
+type ResultReporter = Box<dyn Fn(String, &'static str) + Send + Sync>;
+static RESULT_REPORTER: OnceLock<ResultReporter> = OnceLock::new();
+
+/// Where an action's result to show is told, with an icon for it, as a sum's. Set once, by the
+/// daemon.
+pub fn report_results_to(reporter: impl Fn(String, &'static str) + Send + Sync + 'static) {
+    let _ = RESULT_REPORTER.set(Box::new(reporter));
+}
+
+fn action_result(text: String, icon: &'static str) {
+    log::info!("Action result: {text}");
+    if let Some(report) = RESULT_REPORTER.get() {
+        report(text, icon);
+    }
+}
+
+/// The text selected in another app, read through the Shell, which knows it on Wayland.
+fn ask_selected_text(conn: &zbus::blocking::Connection, shell: &str) -> zbus::Result<String> {
+    let reply = conn.call_method(
+        Some(shell),
+        GESTOS_EXTENSION_PATH,
+        Some(GESTOS_EXTENSION_INTERFACE),
+        "SelectedText",
+        &(),
+    )?;
+    reply.body().deserialize()
+}
+
+/// Says that the action being run failed, and why, in a few words.
+fn action_failed(why: String) {
+    log::warn!("Action failed: {why}");
+    if let Some(report) = FAILURE_REPORTER.get() {
+        report(why);
+    }
+}
+
+/// What a command that ended badly says about it, or None if it went well.
+fn command_failure(program: &str, status: std::io::Result<std::process::ExitStatus>) -> Option<String> {
+    match status {
+        Ok(status) if status.success() => None,
+        Ok(status) => Some(match status.code() {
+            Some(code) => format!("{program} failed with code {code}"),
+            None => format!("{program} was stopped"),
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Some(format!("{program} isn't installed"))
+        }
+        Err(e) => Some(format!("{program} couldn't start: {e}")),
+    }
+}
+
 /// Runs a window action in the GNOME Shell extension. The extension stays as the user left it, so
 /// when it isn't running, a notification says so instead of doing nothing. An old copy can lack
 /// the action, or run it the way an older Gestos did, so a notification says that once a session.
@@ -378,6 +437,7 @@ fn spawn_extension_action(method: &'static str) {
         });
         if let Err(e) = result {
             log::warn!("Failed to run {}: {}", method, e);
+            action_failed("The \u{201c}Gestos\u{201d} GNOME extension didn't answer".to_string());
         }
     });
 }
@@ -487,6 +547,10 @@ impl WaylandContext {
 
     pub fn execute_action(&self, action: &ActionType, uinput_handler: &dyn Fn(&str)) {
         match action {
+            ActionType::Lookup => {
+                let self_clone = self.clone();
+                std::thread::spawn(move || self_clone.look_up_selection());
+            }
             ActionType::Execute(cmd) => {
                 // Spawn the command asynchronously in shell
                 let self_clone = self.clone();
@@ -510,7 +574,7 @@ impl WaylandContext {
                 } else if self.is_xfce {
                     self.execute_xfce(action, uinput_handler);
                 } else {
-                    log::warn!("No active desktop compositor detected. Action ignored.");
+                    action_failed("This desktop can't run this action".to_string());
                 }
             }
         }
@@ -884,6 +948,8 @@ impl WaylandContext {
 
         if !fallback_keys.is_empty() {
             uinput_handler(fallback_keys);
+        } else {
+            action_failed(format!("GNOME has no shortcut for \u{201c}{key}\u{201d}"));
         }
     }
 
@@ -908,20 +974,83 @@ impl WaylandContext {
         self.run_user_cmd("gsettings", &["set", schema, key, value]);
     }
 
+    /// The text selected in any app, its primary selection: through the extension on GNOME, and
+    /// with the tools for it elsewhere. None if nothing is, or it can't be read.
+    fn selected_text(&self) -> Option<String> {
+        if self.is_gnome {
+            let text = zbus::blocking::Connection::session()
+                .and_then(|conn| ask_selected_text(&conn, GNOME_SHELL_NAME));
+            return match text {
+                Ok(text) => Some(text),
+                Err(e) => {
+                    log::warn!("Couldn't ask the extension for the selection: {e}");
+                    action_failed("The \u{201c}Gestos\u{201d} GNOME extension didn't answer".to_string());
+                    None
+                }
+            };
+        }
+        let readers: &[(&str, &[&str])] = if crate::active_app::is_x11_session() {
+            &[("xclip", &["-o", "-selection", "primary"]), ("xsel", &["-o", "-p"])]
+        } else {
+            &[("wl-paste", &["--primary", "--no-newline"])]
+        };
+        for (program, args) in readers {
+            match self.build_user_command(program, args).stderr(Stdio::null()).output() {
+                Ok(output) => return Some(String::from_utf8_lossy(&output.stdout).into_owned()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => return None,
+            }
+        }
+        action_failed(format!("{} isn't installed", readers[0].0));
+        None
+    }
+
+    /// Opens the text selected, works it out, or searches the web for it.
+    fn look_up_selection(&self) {
+        let Some(text) = self.selected_text() else { return };
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        match crate::lookup::lookup_for(&text, home.as_deref()) {
+            None => action_failed("Nothing is selected".to_string()),
+            Some(crate::lookup::Lookup::Sum(written, result)) => {
+                action_result(format!("{written} = {result}"), "accessories-calculator-symbolic");
+            }
+            Some(crate::lookup::Lookup::Email(address)) => {
+                self.run_user_cmd("xdg-open", &[&format!("mailto:{address}")]);
+            }
+            Some(crate::lookup::Lookup::File(path)) => {
+                self.run_user_cmd("xdg-open", &[&path.to_string_lossy()]);
+            }
+            Some(crate::lookup::Lookup::Web(url) | crate::lookup::Lookup::Search(url)) => {
+                self.run_user_cmd("xdg-open", &[&url]);
+            }
+        }
+    }
+
     // The one place a shell belongs: Run Command takes whatever the user would type in one.
     fn run_shell_cmd(&self, cmd: &str) {
-        let _ = Command::new("sh").arg("-c").arg(cmd).status();
+        let status = Command::new("sh").arg("-c").arg(cmd).status();
+        // The shell says 127 when it can't find the program.
+        let failure = match status {
+            Ok(status) if status.code() == Some(127) => {
+                Some(format!("{} isn't installed", crate::config::short_command(cmd)))
+            }
+            status => command_failure(&crate::config::short_command(cmd), status),
+        };
+        if let Some(failure) = failure {
+            action_failed(failure);
+        }
     }
 
     // Runs a program in the user session's DBUS environment
     fn run_user_cmd(&self, program: &str, args: &[&str]) {
-        if let Ok(mut child) = self
+        let status = self
             .build_user_command(program, args)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-        {
-            let _ = child.wait();
+            .and_then(|mut child| child.wait());
+        if let Some(failure) = command_failure(program, status) {
+            action_failed(failure);
         }
     }
 

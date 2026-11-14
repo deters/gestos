@@ -31,6 +31,12 @@ fn is_custom_action(option: &EditorActionOption) -> bool {
     matches!(&option.action_type, ActionType::Keyboard(steps) if steps.is_empty())
 }
 
+/// Whether a gesture with this action is named by the user, as a custom action or a custom
+/// keyboard shortcut are, since the action alone doesn't say what they're for.
+fn has_own_name(option: &EditorActionOption) -> bool {
+    is_custom_action(option) || crate::suggestions::is_custom_shortcut(option)
+}
+
 /// Whether a custom action's name is one made from the action, rather than one the user gave it.
 /// Names from before the action was renamed count too.
 fn is_automatic_name(name: &str, action_name: &str) -> bool {
@@ -57,7 +63,8 @@ pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> Strin
             if detail.trim().is_empty() || detail.trim() == keys {
                 opt.name.clone()
             } else {
-                format!("{} ({})", opt.name, detail.trim())
+                // Its keys as the standard shortcuts' names write them: Ctrl+Y.
+                crate::actions::labelled_shortcut_name(&opt.name, detail.trim())
             }
         }
         // A single shortcut is named after its keys, as it always was. Longer actions would make
@@ -99,10 +106,23 @@ fn option_for_gesture(
             .filter(|_| matches!(action, ActionType::Keyboard(_)))
             .cloned()
     };
-    options
-        .iter()
-        .find(|option| action_matches(action, option))
-        .cloned()
+    // A custom keyboard shortcut whose keys are a predefined one's stays custom, as it was made:
+    // it goes by a name other than the predefined one's.
+    let custom_shortcut = || {
+        options.iter().find(|option| crate::suggestions::is_custom_shortcut(option)).cloned()
+    };
+    let found = options.iter().find(|option| action_matches(action, option)).cloned();
+    let made_custom = matches!(
+        (&found, action),
+        (Some(option), ActionType::Keypress(_))
+            if !crate::suggestions::is_custom_shortcut(option) && option.name != gesture.name
+    );
+    if made_custom {
+        if let Some(option) = custom_shortcut() {
+            return Some(option);
+        }
+    }
+    found
         .or_else(custom)
         .or_else(|| {
             Some(EditorActionOption {
@@ -131,45 +151,122 @@ fn unique_gesture_name(name: &str, gestures: &[Gesture], own_id: Option<&str>) -
         .unwrap()
 }
 
-/// The modifier keys a gesture needs. Holding them while drawing sets them too.
+/// The modifier keys a gesture needs, which are those held while it's drawn. They're shown as the
+/// keyboard's keys name them, as on a Mac's, or as there being none. While keys are held in the
+/// editor, they show instead, lit up, so that the key each name means can be found by pressing it.
 #[derive(Clone)]
-struct ModifierToggles {
-    ctrl: gtk::ToggleButton,
-    alt: gtk::ToggleButton,
-    shift: gtk::ToggleButton,
-    super_key: gtk::ToggleButton,
+struct ModifierKeys {
+    recorded: Rc<Cell<Modifiers>>,
+    held: Rc<Cell<Modifiers>>,
+    label: gtk::Label,
+    keys: gtk::Box,
 }
 
-impl ModifierToggles {
+impl ModifierKeys {
     fn new(initial: Modifiers) -> Self {
-        let toggles = ModifierToggles {
-            ctrl: gtk::ToggleButton::with_label("Ctrl"),
-            alt: gtk::ToggleButton::with_label("Alt"),
-            shift: gtk::ToggleButton::with_label("Shift"),
-            super_key: gtk::ToggleButton::with_label("Super"),
+        let label = gtk::Label::new(None);
+        label.set_halign(gtk::Align::Start);
+        label.set_hexpand(true);
+        let keys = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        keys.set_valign(gtk::Align::Center);
+        let modifier_keys = ModifierKeys {
+            recorded: Rc::new(Cell::new(initial)),
+            held: Rc::new(Cell::new(Modifiers::default())),
+            label,
+            keys,
         };
-        toggles.set(initial);
-        toggles
+        modifier_keys.show();
+        modifier_keys
     }
 
     fn set(&self, modifiers: Modifiers) {
-        self.ctrl.set_active(modifiers.ctrl);
-        self.alt.set_active(modifiers.alt);
-        self.shift.set_active(modifiers.shift);
-        self.super_key.set_active(modifiers.super_key);
+        self.recorded.set(modifiers);
+        self.show();
     }
 
     fn get(&self) -> Modifiers {
-        Modifiers {
-            ctrl: self.ctrl.is_active(),
-            alt: self.alt.is_active(),
-            shift: self.shift.is_active(),
-            super_key: self.super_key.is_active(),
+        self.recorded.get()
+    }
+
+    fn show(&self) {
+        let held = self.held.get();
+        let shown = if held.is_empty() { self.recorded.get() } else { held };
+        self.label.set_text(if shown.is_empty() { "No Modifier Keys" } else { "Modifier Keys" });
+        while let Some(child) = self.keys.first_child() {
+            self.keys.remove(&child);
+        }
+        let names = gestos::keyboards::modifier_names();
+        for (i, name) in shown.shown_labels(&names).into_iter().enumerate() {
+            if i > 0 {
+                let plus = gtk::Label::new(Some("+"));
+                plus.add_css_class("dim-label");
+                self.keys.append(&plus);
+            }
+            let key = gtk::Label::new(Some(name));
+            key.add_css_class("keycap");
+            if !held.is_empty() {
+                key.add_css_class("key-held");
+            }
+            self.keys.append(&key);
         }
     }
 
-    fn buttons(&self) -> [&gtk::ToggleButton; 4] {
-        [&self.ctrl, &self.alt, &self.shift, &self.super_key]
+    /// The modifier a key is, by its key.
+    fn modifier_of(key: gtk::gdk::Key) -> Option<Modifiers> {
+        use gtk::gdk::Key;
+        let mut modifier = Modifiers::default();
+        match key {
+            Key::Control_L | Key::Control_R => modifier.ctrl = true,
+            Key::Alt_L | Key::Alt_R | Key::ISO_Level3_Shift => modifier.alt = true,
+            Key::Shift_L | Key::Shift_R => modifier.shift = true,
+            // Some keyboards' Super key comes as Meta or Hyper.
+            Key::Super_L | Key::Super_R | Key::Meta_L | Key::Meta_R | Key::Hyper_L
+            | Key::Hyper_R => modifier.super_key = true,
+            _ => return None,
+        }
+        Some(modifier)
+    }
+
+    /// Shows the keys held in the window, while they are.
+    fn light_up_held_keys(&self, window: &gtk::Window) {
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let pressed = self.clone();
+        keys.connect_key_pressed(move |_, key, _, _| {
+            if let Some(modifier) = Self::modifier_of(key) {
+                let held = pressed.held.get();
+                pressed.held.set(Modifiers {
+                    ctrl: held.ctrl || modifier.ctrl,
+                    alt: held.alt || modifier.alt,
+                    shift: held.shift || modifier.shift,
+                    super_key: held.super_key || modifier.super_key,
+                });
+                pressed.show();
+            }
+            glib::Propagation::Proceed
+        });
+        let released = self.clone();
+        keys.connect_key_released(move |_, key, _, _| {
+            if let Some(modifier) = Self::modifier_of(key) {
+                let held = released.held.get();
+                released.held.set(Modifiers {
+                    ctrl: held.ctrl && !modifier.ctrl,
+                    alt: held.alt && !modifier.alt,
+                    shift: held.shift && !modifier.shift,
+                    super_key: held.super_key && !modifier.super_key,
+                });
+                released.show();
+            }
+        });
+        window.add_controller(keys);
+        // A key let go in another window would stay lit.
+        let left = self.clone();
+        window.connect_is_active_notify(move |window| {
+            if !window.is_active() {
+                left.held.set(Modifiers::default());
+                left.show();
+            }
+        });
     }
 }
 
@@ -193,15 +290,16 @@ fn show_action_parameter(
     show_steps: &dyn Fn(bool),
 ) {
     // A custom action has its list of steps instead of the one value other actions take. An app's
-    // own action, which only opens it, has none to show.
+    // own action, which only opens it, has none to show. A shortcut's keys are recorded before the
+    // editor opens, and are what it is, so they're only shown, in the title.
     let has_steps = is_custom_action(opt);
+    let is_keypress = matches!(&opt.action_type, ActionType::Keypress(_));
     // The list's own rows, because hiding only their content leaves an empty strip.
     if let Some(list_row) = row.parent() {
-        list_row.set_visible(action_needs_parameter(opt) && !has_steps);
+        list_row.set_visible(action_needs_parameter(opt) && !has_steps && !is_keypress);
     }
     show_steps(has_steps);
 
-    let is_keypress = matches!(&opt.action_type, ActionType::Keypress(_));
     entry.set_visible(!is_keypress);
     shortcut_display.set_visible(is_keypress);
     record_button.set_visible(is_keypress);
@@ -221,7 +319,7 @@ fn show_action_parameter(
 }
 
 pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, gesture: Gesture) {
-    open_editor(state_rc, Some(gesture), None);
+    open_editor(state_rc, Some(gesture), None, None);
 }
 
 /// Deletes a gesture right away, with a toast to bring it back. The focus moves to the gesture
@@ -280,15 +378,31 @@ fn restore_gesture(state_rc: &Rc<RefCell<AppState>>, removed: &Gesture, pos: usi
 }
 
 /// Opens the editor for a new gesture. Its action comes from the main window's search, and the
-/// editor never changes it.
+/// editor never changes it. A custom keyboard shortcut is recorded first, as its keys are all
+/// there is to it, and the editor only opens once they're set.
 pub fn open_gesture_editor_for_action(state_rc: &Rc<RefCell<AppState>>, action: EditorActionOption) {
-    open_editor(state_rc, None, Some(action));
+    if !crate::suggestions::is_custom_shortcut(&action) {
+        open_editor(state_rc, None, Some(action), None);
+        return;
+    }
+    let keys = gtk::Entry::new();
+    let window = state_rc.borrow().window.clone().upcast::<gtk::Window>();
+    let state_set = Rc::downgrade(state_rc);
+    let keys_set = keys.clone();
+    let on_set: Rc<dyn Fn()> = Rc::new(move || {
+        let keys = keys_set.text().to_string();
+        if let (Some(state_rc), false) = (state_set.upgrade(), keys.is_empty()) {
+            open_editor(&state_rc, None, Some(action.clone()), Some(&keys));
+        }
+    });
+    open_shortcut_recorder(&window, "", &keys, on_set);
 }
 
 fn open_editor(
     state_rc: &Rc<RefCell<AppState>>,
     target_gesture: Option<Gesture>,
     preset_action: Option<EditorActionOption>,
+    preset_keys: Option<&str>,
 ) {
     let state = state_rc.borrow();
     let dialog = gtk::Window::new();
@@ -298,11 +412,18 @@ fn open_editor(
     let title_text = if target_gesture.is_some() { "Edit Gesture" } else { "Add Gesture" };
     dialog.set_title(Some(title_text));
     // A little narrower than the main window, so that it reads as being on top of it, and as tall
-    // as what's in it, up to a fifth taller than that. It doesn't grow along with a maximized
-    // window, nor shrink below what the trigger and its details need.
+    // as what's in it, so that nothing in it is out of sight when it opens. Only what doesn't fit
+    // on the screen scrolls. It never shrinks below what the trigger and its details need.
     dialog.set_size_request(EDITOR_MIN_WIDTH, EDITOR_MIN_HEIGHT);
     dialog.set_default_size((state.window.width() - 60).clamp(EDITOR_MIN_WIDTH, 640), -1);
-    let max_height = ((state.window.height() - 60) * 6 / 5).clamp(EDITOR_MIN_HEIGHT, 672);
+    let screen_height = state
+        .window
+        .surface()
+        .and_then(|surface| surface.display().monitor_at_surface(&surface))
+        .map(|monitor| monitor.geometry().height())
+        .unwrap_or(768);
+    // Room for the header bar, the top bar and the window's frame.
+    let max_height = (screen_height - 160).max(EDITOR_MIN_HEIGHT);
 
     crate::ui::components::close_with_keys(&dialog);
 
@@ -381,17 +502,22 @@ fn open_editor(
             .unwrap_or_default(),
     ));
     let is_recording = Rc::new(RefCell::new(false));
+    // Drawn with Gestos's own button, anywhere on screen, rather than in the drawing area.
+    let drawn_on_screen = Rc::new(std::cell::Cell::new(false));
 
     let pts_clone = Rc::clone(&recorded_points);
     let rec_clone = Rc::clone(&is_recording);
+    let on_screen_clone = Rc::clone(&drawn_on_screen);
     canvas.set_draw_func(move |_, cr, width, height| {
         let pts = pts_clone.borrow();
-        let active = *rec_clone.borrow();
+        let active = *rec_clone.borrow() && !on_screen_clone.get();
         draw_gesture_path(cr, &pts, width as f64, height as f64, true, !active);
     });
 
-    // GestureDrag controller for recording drawing
+    // GestureDrag controller for recording drawing. Any button draws, as people try the one
+    // gestures are drawn with.
     let drag = gtk::GestureDrag::new();
+    drag.set_button(0);
 
     let conflict_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     conflict_box.add_css_class("warning-box");
@@ -411,15 +537,31 @@ fn open_editor(
     conflict_label.set_max_width_chars(1);
     conflict_box.append(&conflict_label);
 
-    let modifier_toggles = ModifierToggles::new(
+    let modifier_toggles = ModifierKeys::new(
         target_gesture
             .as_ref()
             .map(|gesture| gesture.modifiers)
             .unwrap_or_default(),
     );
+    modifier_toggles.light_up_held_keys(&dialog);
 
     // Shown over the drawing area while there's no gesture in it.
-    let draw_hint = gtk::Label::new(Some("Draw the gesture here"));
+    // Named after the button gestures are drawn with, which is the one to draw with here too.
+    let draw_button = state_rc.borrow().config.button.unwrap_or(crate::ui::settings::DEFAULT_DRAW_BUTTON);
+    let button_name = crate::ui::settings::DRAW_BUTTONS
+        .iter()
+        .find(|(_, button)| *button == draw_button)
+        .map_or("right", |(name, _)| name)
+        .to_lowercase();
+    let draw_hint = gtk::Label::new(Some(&format!(
+        "Draw your gesture with the {button_name} mouse button. Hold a modifier key while drawing \
+         to make it part of the trigger."
+    )));
+    draw_hint.set_wrap(true);
+    draw_hint.set_justify(gtk::Justification::Center);
+    draw_hint.set_max_width_chars(36);
+    draw_hint.set_margin_start(24);
+    draw_hint.set_margin_end(24);
     draw_hint.add_css_class("dim-label");
     draw_hint.set_can_target(false);
     draw_hint.set_visible(recorded_points.borrow().len() < 2);
@@ -430,14 +572,13 @@ fn open_editor(
     let conflict_box_begin = conflict_box.clone();
     let toggles_begin = modifier_toggles.clone();
     let hint_begin = draw_hint.clone();
+    let on_screen_begin = Rc::clone(&drawn_on_screen);
     drag.connect_drag_begin(move |gesture, start_x, start_y| {
         *rec_drag.borrow_mut() = true;
+        on_screen_begin.set(false);
         hint_begin.set_visible(false);
-        // Nothing held keeps what the toggles say, so they can be set before drawing.
-        let held = held_modifiers(gesture.current_event_state());
-        if !held.is_empty() {
-            toggles_begin.set(held);
-        }
+        // The keys held as it's drawn are the ones it needs, and none held is none.
+        toggles_begin.set(held_modifiers(gesture.current_event_state()));
         let mut pts = pts_drag.borrow_mut();
         pts.clear();
         pts.push(Point2D {
@@ -537,7 +678,7 @@ fn open_editor(
     let pts_hint = Rc::clone(&recorded_points);
     let hint_end = draw_hint.clone();
     let check_drawn = check.clone();
-    drag.connect_drag_end(move |_, _, _| {
+    let finish_drawing: Rc<dyn Fn()> = Rc::new(move || {
         *rec_drag3.borrow_mut() = false;
         hint_end.set_visible(pts_hint.borrow().len() < 2);
         canvas_clone3.queue_draw();
@@ -545,17 +686,104 @@ fn open_editor(
         check_drag_end();
         check_drawn();
     });
+    let finish_drag = Rc::clone(&finish_drawing);
+    drag.connect_drag_end(move |_, _, _| finish_drag());
+
+    // While Gestos runs, the button it draws with doesn't reach any window: the gesture is drawn
+    // on screen. Its path then comes from the daemon as it's drawn, and isn't run meanwhile.
+    let editor_lock = gestos::ipc::EditorLock::acquire().ok();
+    let bus = editor_lock
+        .as_ref()
+        .and_then(|_| gtk::gio::bus_get_sync(gtk::gio::BusType::Session, gtk::gio::Cancellable::NONE).ok());
+    let mut subscriptions = Vec::new();
+    if let Some(bus) = &bus {
+        let subscribe = |signal: &str, handler: Box<dyn Fn(&glib::Variant)>| {
+            bus.signal_subscribe(
+                None,
+                Some("io.github.deters.Gestos.Daemon"),
+                Some(signal),
+                Some("/io/github/deters/Gestos/Daemon"),
+                None,
+                gtk::gio::DBusSignalFlags::NONE,
+                move |_, _, _, _, _, parameters| handler(parameters),
+            )
+        };
+        // The path so far, which only takes the place of the one drawn once it moves, as a
+        // click with the button starts one too.
+        let new_path: Rc<RefCell<Vec<Point2D>>> = Rc::default();
+        let held_at_start = Rc::new(std::cell::Cell::new(Modifiers::default()));
+        let path = Rc::clone(&new_path);
+        let held = Rc::clone(&held_at_start);
+        let canvas_started = canvas.clone();
+        subscriptions.push(subscribe("GestureStarted", Box::new(move |parameters| {
+            let Some((x, y)) = parameters.get::<(f64, f64)>() else { return };
+            *path.borrow_mut() = vec![Point2D { x, y }];
+            held.set(
+                canvas_started
+                    .display()
+                    .default_seat()
+                    .and_then(|seat| seat.keyboard())
+                    .map(|keyboard| held_modifiers(keyboard.modifier_state()))
+                    .unwrap_or_default(),
+            );
+        })));
+        let path = Rc::clone(&new_path);
+        let held = Rc::clone(&held_at_start);
+        let pts = Rc::clone(&recorded_points);
+        let recording = Rc::clone(&is_recording);
+        let on_screen = Rc::clone(&drawn_on_screen);
+        let hint = draw_hint.clone();
+        let conflict = conflict_box.clone();
+        let toggles = modifier_toggles.clone();
+        let canvas_updated = canvas.clone();
+        subscriptions.push(subscribe("GestureUpdated", Box::new(move |parameters| {
+            let Some((x, y)) = parameters.get::<(f64, f64)>() else { return };
+            let mut path = path.borrow_mut();
+            if path.is_empty() {
+                return;
+            }
+            path.push(Point2D { x, y });
+            if !*recording.borrow() {
+                *recording.borrow_mut() = true;
+                on_screen.set(true);
+                hint.set_visible(false);
+                conflict.set_visible(false);
+                // As when drawing in the window, the keys held then are the ones it needs.
+                toggles.set(held.get());
+            }
+            *pts.borrow_mut() = path.clone();
+            canvas_updated.queue_draw();
+        })));
+        let path = Rc::clone(&new_path);
+        let recording = Rc::clone(&is_recording);
+        let on_screen = Rc::clone(&drawn_on_screen);
+        let finish_on_screen = Rc::clone(&finish_drawing);
+        subscriptions.push(subscribe("GestureEnded", Box::new(move |_| {
+            path.borrow_mut().clear();
+            if *recording.borrow() && on_screen.get() {
+                finish_on_screen();
+            }
+        })));
+    }
+    let recording_from_screen = RefCell::new(Some((editor_lock, subscriptions)));
+    // When the window goes from the screen, rather than when it's destroyed: GTK only destroys a
+    // window once nothing holds it, and the editor's own handlers do. Closing it doesn't say
+    // it's hidden either, only that it's no longer realized.
+    dialog.connect_unrealize(move |_| {
+        if let Some((lock, subscriptions)) = recording_from_screen.take() {
+            if let Some(bus) = &bus {
+                for id in subscriptions {
+                    bus.signal_unsubscribe(id);
+                }
+            }
+            drop(lock);
+        }
+    });
 
     let modifiers_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     modifiers_row.add_css_class("settings-row");
-    let modifiers_label = gtk::Label::new(Some("Modifier Keys"));
-    modifiers_label.set_halign(gtk::Align::Start);
-    modifiers_label.set_hexpand(true);
-    modifiers_row.append(&modifiers_label);
-    for button in modifier_toggles.buttons() {
-        button.set_tooltip_text(Some("Hold this key while drawing the gesture to use it"));
-        modifiers_row.append(button);
-    }
+    modifiers_row.append(&modifier_toggles.label);
+    modifiers_row.append(&modifier_toggles.keys);
     // The keys to hold and the shape to draw are one gesture, so they share a list: the keys on
     // top, the shape right below them.
     let gesture_list = gtk::ListBox::new();
@@ -764,6 +992,8 @@ fn open_editor(
                         plus.set_opacity(0.6);
                         display_box.append(&plus);
                     }
+                    // As the recorder shows it.
+                    let part = if *part == "Control" { "Ctrl" } else { part };
                     let label = gtk::Label::new(Some(part));
                     label.add_css_class("keycap");
                     display_box.append(&label);
@@ -828,7 +1058,12 @@ fn open_editor(
             }
             option
         }
-        None => preset_action.clone(),
+        None => {
+            if let Some(keys) = preset_keys {
+                action_details_entry.set_text(keys);
+            }
+            preset_action.clone()
+        }
     };
 
     // Nothing to fill in until an action is known, such as one that's no longer available
@@ -837,7 +1072,7 @@ fn open_editor(
     }
     if let Some(opt) = initial_opt {
         *selected_action.borrow_mut() = Some(opt.clone());
-        name_list.set_visible(is_custom_action(&opt));
+        name_list.set_visible(has_own_name(&opt));
         show_action_parameter(
             &opt,
             &action_details_row,
@@ -857,13 +1092,18 @@ fn open_editor(
         let query = state_rc.borrow().search_entry.text();
         if let Some(name) = preset_action
             .as_ref()
-            .filter(|preset| is_custom_action(preset))
+            .filter(|preset| has_own_name(preset))
             .and_then(|preset| name_from_search(&query, &preset.name))
         {
             name_entry.set_text(&name);
         }
-        dialog.set_title(Some(&opt.name));
-        dialog_title.set_text(&opt.name);
+        // A shortcut is named with its keys, which it can't be told from otherwise.
+        let title = match &opt.action_type {
+            ActionType::Keypress(_) => get_default_gesture_name(&opt, &action_details_entry.text()),
+            _ => opt.name.clone(),
+        };
+        dialog.set_title(Some(&title));
+        dialog_title.set_text(&title);
         let note = crate::ui::main_window::extension_note(
             &opt.action_type,
             &state_rc.borrow().extension_status,
@@ -873,7 +1113,8 @@ fn open_editor(
         // Most actions have nothing to fill in, which leaves this section empty. An app's own
         // action can become a custom action, to do more once the app is open.
         customize_btn.set_visible(crate::actions::only_opens_an_app(&opt.action_type));
-        let has_details = action_needs_parameter(&opt);
+        let has_details =
+            action_needs_parameter(&opt) && !matches!(opt.action_type, ActionType::Keypress(_));
         settings_section_label.set_visible(has_details);
         settings_list.set_visible(has_details);
     }
@@ -971,6 +1212,9 @@ fn open_editor(
                 ActionType::Execute(_) if opt.category == 7 && detail.trim().is_empty() => {
                     return Some("Type the command to run first");
                 }
+                ActionType::Keypress(keys) if keys.is_empty() && detail.trim().is_empty() => {
+                    return Some("Record the shortcut first");
+                }
                 _ => {}
             }
             let name = name_entry.text();
@@ -1064,6 +1308,14 @@ fn open_editor(
                 steps => ActionType::Keyboard(steps.to_vec()),
             },
             ActionType::Execute(_) if opt.category == 7 => ActionType::Execute(detail),
+            // The keys recorded, which a standard shortcut's are too.
+            ActionType::Keypress(_) => {
+                if detail.trim().is_empty() {
+                    println!("Gesture save failed: The shortcut has no keys.");
+                    return;
+                }
+                ActionType::Keypress(detail.trim().to_string())
+            }
             ActionType::Click(_) => {
                 let btn = if detail.trim().is_empty() {
                     None
@@ -1246,6 +1498,17 @@ mod tests {
         let mut command = gesture("b", "Editor");
         command.actions = vec![ActionType::Execute("gedit".to_string())];
         assert!(action_needs_parameter(&option_for_gesture(&command, &[]).unwrap()));
+    }
+
+    #[test]
+    fn a_custom_shortcut_with_predefined_keys_stays_custom() {
+        let options = crate::actions::get_static_action_options();
+        let mut undo = gesture("a", "Undo (Ctrl+Z)");
+        undo.actions = vec![ActionType::Keypress("Control+Z".to_string())];
+        assert_eq!(option_for_gesture(&undo, &options).unwrap().name, "Undo (Ctrl+Z)");
+        let mut own = gesture("b", "Take it back");
+        own.actions = undo.actions.clone();
+        assert_eq!(option_for_gesture(&own, &options).unwrap().name, "Custom Keyboard Shortcut");
     }
 
     #[test]

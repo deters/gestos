@@ -83,8 +83,8 @@ fn append_autostart_row(list: &adw::PreferencesGroup) {
 }
 
 /// The mouse buttons gestures can be drawn with, numbered as in `gestosd --button`.
-const DRAW_BUTTONS: [(&str, i32); 4] = [("Right", 3), ("Middle", 2), ("Back", 8), ("Forward", 9)];
-const DEFAULT_DRAW_BUTTON: i32 = 3;
+pub const DRAW_BUTTONS: [(&str, i32); 4] = [("Right", 3), ("Middle", 2), ("Back", 8), ("Forward", 9)];
+pub const DEFAULT_DRAW_BUTTON: i32 = 3;
 
 /// Which mouse button draws gestures. The daemon only picks it as it starts, so a change
 /// restarts gestures if they're on.

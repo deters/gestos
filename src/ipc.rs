@@ -99,6 +99,45 @@ impl DaemonIpc {
     }
 }
 
+/// The lock Gestos's gesture editor holds while it's open, for this user.
+fn editor_lock_name() -> String {
+    format!("/gestos_uid_{}_editor", unsafe { libc::getuid() })
+}
+
+/// Held while the gesture editor is open. A gesture drawn then is the one being recorded, so it
+/// isn't run. The kernel lets go of it when the app ends, however it ends.
+pub struct EditorLock {
+    _lock_file: File,
+}
+
+impl EditorLock {
+    pub fn acquire() -> Result<Self, Error> {
+        let c_name = CString::new(editor_lock_name()).expect("no NUL byte in the lock name");
+        let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_CREAT | libc::O_RDWR, 0o600) };
+        if fd < 0 {
+            return Err(Error::last_os_error());
+        }
+        let file = unsafe { File::from_raw_fd(fd) };
+        if !try_lock(&file)? {
+            return Err(Error::new(ErrorKind::WouldBlock, "another editor is open"));
+        }
+        Ok(EditorLock { _lock_file: file })
+    }
+}
+
+/// Whether the gesture editor is open in another process, to record the gesture drawn next.
+pub fn editor_is_open() -> bool {
+    let Ok(c_name) = CString::new(editor_lock_name()) else {
+        return false;
+    };
+    let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o600) };
+    if fd < 0 {
+        return false;
+    }
+    let file = unsafe { File::from_raw_fd(fd) };
+    matches!(lock_holder(&file), Ok(Some(_)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +158,38 @@ mod tests {
         writeln!(stdout, "locked").unwrap();
         stdout.flush().unwrap();
         std::thread::sleep(Duration::from_secs(30));
+    }
+
+    const EDITOR_HOLDER_ENV: &str = "GESTOS_TEST_EDITOR_LOCK";
+
+    // Runs as an open editor when re-executed by the test below.
+    #[test]
+    fn editor_lock_holder_process() {
+        if std::env::var(EDITOR_HOLDER_ENV).is_err() {
+            return;
+        }
+        let _lock = EditorLock::acquire().unwrap();
+        println!("locked");
+        std::io::stdout().flush().unwrap();
+        std::thread::sleep(Duration::from_secs(30));
+    }
+
+    #[test]
+    fn an_open_editor_is_seen_until_its_process_ends() {
+        let mut editor = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "ipc::tests::editor_lock_holder_process", "--nocapture"])
+            .env(EDITOR_HOLDER_ENV, "1")
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdout = editor.stdout.take().unwrap();
+        assert!(BufReader::new(stdout).lines().map_while(Result::ok).any(|l| l.contains("locked")));
+        assert!(editor_is_open());
+        // Only one editor records at a time.
+        assert!(EditorLock::acquire().is_err());
+        editor.kill().unwrap();
+        editor.wait().unwrap();
+        assert!(!editor_is_open());
     }
 
     fn spawn_holder(device: &str) -> std::process::Child {

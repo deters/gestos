@@ -88,9 +88,78 @@ impl Keyboards {
     }
 }
 
+/// Apple's vendor IDs: for its keyboards over USB, and over Bluetooth.
+const APPLE_VENDORS: [&str; 2] = ["05ac", "004c"];
+
+/// Whether a list of input devices, as `/proc/bus/input/devices` has it, has a keyboard from Apple.
+fn has_apple_keyboard(devices: &str) -> bool {
+    devices.split("\n\n").any(|device| {
+        let from_apple = device.lines().any(|line| {
+            line.starts_with("I:")
+                && APPLE_VENDORS.iter().any(|vendor| line.contains(&format!("Vendor={vendor}")))
+        });
+        let keyboard = device
+            .lines()
+            .any(|line| line.starts_with("H:") && line.split_whitespace().any(|word| word == "kbd"));
+        from_apple && keyboard
+    })
+}
+
+/// Whether one of the driver for Apple keyboards' options is on, as `1` or `Y`.
+fn apple_option(name: &str) -> bool {
+    std::fs::read_to_string(format!("/sys/module/hid_apple/parameters/{name}"))
+        .is_ok_and(|value| matches!(value.trim(), "1" | "Y"))
+}
+
+/// What the modifier keys are called on the keyboards connected: a Mac's names if one is from
+/// Apple, as the person using it reads them on its keys. Found once, when first asked.
+pub fn modifier_names() -> crate::modifiers::ModifierNames {
+    use crate::modifiers::ModifierNames;
+    static NAMES: std::sync::OnceLock<ModifierNames> = std::sync::OnceLock::new();
+    *NAMES.get_or_init(|| {
+        let devices = std::fs::read_to_string("/proc/bus/input/devices").unwrap_or_default();
+        if has_apple_keyboard(&devices) {
+            ModifierNames::mac(apple_option("swap_opt_cmd"), apple_option("swap_ctrl_cmd"))
+        } else {
+            ModifierNames::PC
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const DEVICES: &str = "I: Bus=0003 Vendor=046d Product=c52b Version=0111
+N: Name=\"Logitech USB Receiver\"
+H: Handlers=sysrq kbd event4
+
+I: Bus=0003 Vendor=05ac Product=024f Version=0111
+N: Name=\"Apple Inc. Magic Keyboard\"
+H: Handlers=sysrq kbd leds event7
+
+I: Bus=0005 Vendor=004c Product=0269 Version=0001
+N: Name=\"Magic Mouse\"
+H: Handlers=mouse2 event9
+";
+
+    #[test]
+    fn a_keyboard_from_apple_is_found_and_its_mouse_is_not_a_keyboard() {
+        assert!(has_apple_keyboard(DEVICES));
+        let without = DEVICES.replace("Vendor=05ac", "Vendor=1234");
+        assert!(!has_apple_keyboard(&without));
+    }
+
+    #[test]
+    fn a_mac_keyboard_names_its_keys_as_they_are_set() {
+        use crate::modifiers::ModifierNames;
+        let names = ModifierNames::mac(false, false);
+        assert_eq!((names.super_key, names.alt), ("\u{2318} Command", "\u{2325} Option"));
+        let swapped = ModifierNames::mac(true, false);
+        assert_eq!((swapped.super_key, swapped.alt), ("\u{2325} Option", "\u{2318} Command"));
+        let swapped = ModifierNames::mac(false, true);
+        assert_eq!((swapped.super_key, swapped.ctrl), ("\u{2303} Control", "\u{2318} Command"));
+    }
 
     #[test]
     fn capabilities_are_read_from_the_lowest_word_last() {

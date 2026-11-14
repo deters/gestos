@@ -113,6 +113,9 @@ impl DaemonDbus {
     async fn gesture_ended(&self, ctxt: &zbus::object_server::SignalContext<'_>) -> zbus::Result<()>;
 
     #[zbus(signal)]
+    async fn action_failed(&self, ctxt: &zbus::object_server::SignalContext<'_>, reason: String) -> zbus::Result<()>;
+
+    #[zbus(signal)]
     async fn action_executed(&self, ctxt: &zbus::object_server::SignalContext<'_>, gesture_name: String, action_desc: String, icon_name: String) -> zbus::Result<()>;
 }
 
@@ -211,6 +214,8 @@ enum DaemonSignal {
     GestureUpdated(f64, f64),
     GestureEnded,
     ActionExecuted(String, String, String),
+    /// The action that just ran couldn't, and why, in a few words.
+    ActionFailed(String),
 }
 
 /// Whether gesture paths are drawn, where Gestos draws them itself, as the configuration says.
@@ -230,6 +235,9 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
         let path = "/io/github/deters/Gestos/Daemon";
         let iface = "io.github.deters.Gestos.Daemon";
         let dest = None::<zbus::names::BusName>;
+        // KDE shows what ran, or that it failed, in its own on-screen display. On GNOME the
+        // extension shows it, from the signals.
+        let on_kde = gestos::config::get_environment_suffix() == Some("kde");
         for signal in receiver {
             if let Some(trail) = &trail {
                 match signal {
@@ -239,6 +247,13 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
                 }
             }
             let Some(conn) = &conn else { continue };
+            if on_kde {
+                match &signal {
+                    DaemonSignal::ActionExecuted(name, _, icon) => show_kde_osd(conn, icon, name),
+                    DaemonSignal::ActionFailed(reason) => show_kde_osd(conn, "dialog-warning", reason),
+                    _ => {}
+                }
+            }
             let _ = match signal {
                 DaemonSignal::GestureStarted(x, y) => {
                     conn.emit_signal(dest.clone(), path, iface, "GestureStarted", &(x, y))
@@ -252,10 +267,28 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
                 DaemonSignal::ActionExecuted(name, desc, icon) => {
                     conn.emit_signal(dest.clone(), path, iface, "ActionExecuted", &(name, desc, icon))
                 }
+                DaemonSignal::ActionFailed(reason) => {
+                    conn.emit_signal(dest.clone(), path, iface, "ActionFailed", &(reason,))
+                }
             };
         }
     });
     sender
+}
+
+/// Shows text with an icon in KDE's on-screen display, as its volume and brightness keys do.
+#[cfg(target_os = "linux")]
+fn show_kde_osd(conn: &zbus::blocking::Connection, icon: &str, text: &str) {
+    let shown = conn.call_method(
+        Some("org.kde.plasmashell"),
+        "/org/kde/osdService",
+        Some("org.kde.osdService"),
+        "showText",
+        &(icon, text),
+    );
+    if let Err(e) = shown {
+        log::warn!("KDE's on-screen display didn't show it: {e}");
+    }
 }
 
 /// A shortcut sent while a modifier is still held would combine with it and mean something else.
@@ -688,6 +721,12 @@ fn run_session(
                 Some(Event::Point(x, y)) => points.push(gestos::protractor::Point2D { x, y }),
                 Some(Event::Finished(held)) => {
                     println!("Gesture drawing finished. Path points: {}", points.len());
+                    // The editor records it instead, from the signals of it being drawn.
+                    if gestos::ipc::editor_is_open() {
+                        println!("Not running the gesture, as the editor is recording it.");
+                        points.clear();
+                        continue;
+                    }
                     let modifiers = gestos::keymap::held_modifiers(&held);
                     dispatch_gesture(&points, config, modifiers, &input, signals, wayland_ctx);
                     points.clear();
@@ -715,6 +754,15 @@ fn run_grabber(
 ) -> Result<(), std::io::Error> {
     SHOW_PATH.store(config.show_path, Ordering::Relaxed);
     let signals = spawn_signal_thread();
+    let failures = std::sync::Mutex::new(signals.clone());
+    gestos::wayland::report_failures_to(move |reason| {
+        let _ = failures.lock().unwrap().try_send(DaemonSignal::ActionFailed(reason));
+    });
+    let results = std::sync::Mutex::new(signals.clone());
+    gestos::wayland::report_results_to(move |text, icon| {
+        let signal = DaemonSignal::ActionExecuted(text, String::new(), icon.to_string());
+        let _ = results.lock().unwrap().try_send(signal);
+    });
 
     let (mut wake_reader, wake_writer) = UnixStream::pair()?;
     wake_writer.set_nonblocking(true)?;

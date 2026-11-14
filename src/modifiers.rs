@@ -44,6 +44,20 @@ impl Modifiers {
         modifiers
     }
 
+    /// The names of the keys, as the keyboard's own keys show them, in the same order as `labels`.
+    pub fn shown_labels(&self, names: &ModifierNames) -> Vec<&'static str> {
+        [
+            (self.ctrl, names.ctrl),
+            (self.alt, names.alt),
+            (self.shift, names.shift),
+            (self.super_key, names.super_key),
+        ]
+        .into_iter()
+        .filter(|(held, _)| *held)
+        .map(|(_, label)| label)
+        .collect()
+    }
+
     /// Names for showing to the user, in a fixed order.
     pub fn labels(&self) -> Vec<&'static str> {
         [
@@ -56,6 +70,40 @@ impl Modifiers {
         .filter(|(held, _)| *held)
         .map(|(_, label)| label)
         .collect()
+    }
+}
+
+/// What the modifier keys are called on the keyboard in use: on a Mac's, the keys that are Super
+/// and Alt to Linux say ⌘ Command and ⌥ Option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModifierNames {
+    pub ctrl: &'static str,
+    pub alt: &'static str,
+    pub shift: &'static str,
+    pub super_key: &'static str,
+}
+
+impl ModifierNames {
+    pub const PC: ModifierNames =
+        ModifierNames { ctrl: "Ctrl", alt: "Alt", shift: "Shift", super_key: "Super" };
+
+    /// A Mac keyboard's names, for the keys Linux's driver for them gives each modifier: Command
+    /// is Super and Option is Alt, unless it's set to swap them, so that the key next to the space
+    /// bar is Alt, as on other keyboards, or to swap Control and Command.
+    pub fn mac(swap_option_command: bool, swap_control_command: bool) -> ModifierNames {
+        let mut names = ModifierNames {
+            ctrl: "\u{2303} Control",
+            alt: "\u{2325} Option",
+            shift: "\u{21e7} Shift",
+            super_key: "\u{2318} Command",
+        };
+        if swap_option_command {
+            std::mem::swap(&mut names.alt, &mut names.super_key);
+        }
+        if swap_control_command {
+            std::mem::swap(&mut names.ctrl, &mut names.super_key);
+        }
+        names
     }
 }
 

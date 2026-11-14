@@ -10,6 +10,8 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {smoothPath} from './smooth.js';
+
 const DAEMON_INTERFACE = 'io.github.deters.Gestos.Daemon';
 const DAEMON_PATH = '/io/github/deters/Gestos/Daemon';
 
@@ -108,8 +110,8 @@ export class GestureTrail {
         cr.setLineCap(Cairo.LineCap.ROUND);
         cr.setLineJoin(Cairo.LineJoin.ROUND);
         cr.moveTo(...this._points[0]);
-        for (const point of this._points.slice(1))
-            cr.lineTo(...point);
+        for (const curve of smoothPath(this._points))
+            cr.curveTo(...curve);
         cr.stroke();
         cr.$dispose();
     }

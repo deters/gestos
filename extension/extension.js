@@ -4,11 +4,13 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
+import St from 'gi://St';
 
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {GestureChooser} from './lib/chooser.js';
+import {ActionPanel} from './lib/panel.js';
 import {GestureTrail} from './lib/trail.js';
 import {addSize, readSizes, removeSize, takeSize, writeSizes} from './lib/sizes.js';
 import {fitSize, freeArea, hasSize, isBelievableMinimum, keepInside, restoreRect, tileWindows} from './lib/tile.js';
@@ -29,6 +31,9 @@ const INTERFACE_XML = `
     <method name="OpenApp">
       <arg type="s" direction="in" name="app"/>
       <arg type="b" direction="out" name="found"/>
+    </method>
+    <method name="SelectedText">
+      <arg type="s" direction="out" name="text"/>
     </method>
     <method name="ChooseGesture">
       <arg type="a(ssad)" direction="in" name="gestures"/>
@@ -1694,6 +1699,18 @@ class WindowActions {
     }
 
     /**
+     * The text selected in any app, which the Shell knows on Wayland, where apps can't read each
+     * other's selection.
+     *
+     * @param {Array} _params - none
+     * @param {Gio.DBusMethodInvocation} invocation - answered with the text, empty with none
+     */
+    SelectedTextAsync(_params, invocation) {
+        St.Clipboard.get_default().get_text(St.ClipboardType.PRIMARY, (_clipboard, text) =>
+            invocation.return_value(new GLib.Variant('(s)', [text ?? ''])));
+    }
+
+    /**
      * Asks which of several similar gestures was meant, on a card at the pointer. Gestos asks here
      * on GNOME, as the Shell can show it without a window that takes focus. A new question
      * replaces one still open, which counts as cancelled.
@@ -1751,6 +1768,7 @@ export default class GestosExtension extends Extension {
         this._dbus = Gio.DBusExportedObject.wrapJSObject(INTERFACE_XML, this._actions);
         this._dbus.export(Gio.DBus.session, OBJECT_PATH);
         this._trail = new GestureTrail(this.getSettings());
+        this._panel = new ActionPanel();
     }
 
     // This runs when the extension is turned off, and also when the screen locks: other extensions
@@ -1759,6 +1777,8 @@ export default class GestosExtension extends Extension {
     disable() {
         this._trail.destroy();
         this._trail = null;
+        this._panel.destroy();
+        this._panel = null;
         this._dbus.unexport();
         this._dbus = null;
         if (Main.sessionMode.isLocked)
