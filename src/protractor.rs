@@ -228,7 +228,7 @@ const TURN_REACH: usize = 3;
 /// A turn this sharp is a corner, and one this gentle is a curve. Those in between could be either,
 /// as a corner drawn by hand is a little round, so they don't tell shapes apart.
 const CORNER_DEGREES: f64 = 75.0;
-const CURVE_DEGREES: f64 = 40.0;
+const CURVE_DEGREES: f64 = 55.0;
 /// How many points a corner and the curve it's compared with can be apart, as hands don't put
 /// them in quite the same place.
 const CORNER_SLACK: usize = 6;
@@ -484,6 +484,26 @@ mod tests {
         rounded.extend(arc((50.0, 87.5), 5.6, 153.4, 26.6, 6));
         rounded.push((100.0, 0.0));
         assert_eq!(match_gesture(&path(&rounded), &templates_v_and_u()).as_deref(), Some("V"));
+    }
+
+    #[test]
+    fn a_u_with_tight_bends_is_not_a_v() {
+        // Both drawn by hand in the editor. The U turns at two bends instead of one round
+        // bottom, and more tightly than the curve of a circle.
+        let u = path(&[
+            (137.0, 28.0), (136.0, 33.0), (135.0, 64.0), (139.0, 91.0), (154.0, 119.0),
+            (175.0, 144.0), (198.0, 161.0), (220.0, 167.0), (238.0, 169.0), (255.0, 169.0),
+            (273.0, 153.0), (288.0, 121.0), (297.0, 86.0), (299.0, 19.0), (299.0, -10.0),
+            (299.0, -26.0), (299.0, -30.0),
+        ]);
+        let v = path(&[
+            (162.0, 36.0), (166.0, 42.0), (174.0, 56.0), (208.0, 104.0), (231.0, 135.0),
+            (251.0, 167.0), (268.0, 190.0), (280.0, 206.0), (283.0, 209.0), (291.0, 198.0),
+            (311.0, 169.0), (334.0, 136.0), (352.0, 105.0), (364.0, 82.0), (372.0, 68.0),
+            (376.0, 58.0),
+        ]);
+        assert_eq!(match_gesture(&u, &[("V".to_string(), v.clone())]), None);
+        assert_eq!(match_gesture(&v, &[("U".to_string(), u)]), None);
     }
 
     #[test]
