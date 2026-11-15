@@ -68,8 +68,6 @@ const MONITORS_SETTLE_MS = 500;
 // How much smaller than its tile a window may be and still fill it: terminals only take whole
 // lines and columns, and leave the rest of the tile empty.
 const TILE_SLACK = 40;
-// How often tiled windows make room for one that's being moved or resized.
-const DRAG_LAYOUT_DELAY_MS = 100;
 
 // Apps without a desktop file get a made-up app for each window, so those go by their own id.
 function appIdOf(window) {
@@ -1310,10 +1308,12 @@ class WindowActions {
         this._layoutWhenReady(tiling);
     }
 
+    // The others make room for the window being moved or resized just before the next frame is
+    // drawn, so they move in the same frame it does, once however often it moved since.
     _scheduleDragLayout(tiling) {
         if (tiling.dragId)
             return;
-        tiling.dragId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, DRAG_LAYOUT_DELAY_MS, () => {
+        tiling.dragId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
             tiling.dragId = 0;
             if (this._grabbed && tiling.windows.has(this._grabbed))
                 this._layout(tiling, this._grabbed);
@@ -1323,7 +1323,7 @@ class WindowActions {
 
     _stopDragLayout(tiling) {
         if (tiling.dragId) {
-            GLib.source_remove(tiling.dragId);
+            global.compositor.get_laters().remove(tiling.dragId);
             tiling.dragId = 0;
         }
     }
