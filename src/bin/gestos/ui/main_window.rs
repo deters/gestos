@@ -90,16 +90,15 @@ impl PageHeading {
     }
 }
 
-/// A category's page, in a window over the gestures: the gestures in it, then its actions to make
-/// more, with the one to make its own of first.
+/// A category's page, in a window over the gestures: its actions to make gestures for, with the
+/// one to make its own of first. Its gestures are on the main page, after the category.
 #[derive(Clone)]
 pub struct CategoryPage {
     window: gtk::Window,
-    gestures: gtk::ListBox,
     apart: gtk::ListBox,
     actions: gtk::ListBox,
     /// What the lists show, by row, for when one is activated.
-    shown: Rc<RefCell<(Vec<String>, Vec<crate::state::EditorActionOption>, Vec<Suggestion>)>>,
+    shown: Rc<RefCell<(Vec<crate::state::EditorActionOption>, Vec<Suggestion>)>>,
 }
 
 /// The window the editor and other dialogs open over: a category's, while one is open.
@@ -141,7 +140,6 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
         content.append(&list);
         list
     };
-    let gestures = list();
     let apart = list();
     apart.set_margin_bottom(16);
     let actions = list();
@@ -151,26 +149,12 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
     scrolled.set_child(Some(&clamped(&content)));
     window.set_child(Some(&scrolled));
 
-    let page = CategoryPage { window: window.clone(), gestures, apart, actions, shown: Default::default() };
-    {
-        let state_rc = Rc::downgrade(state_rc);
-        let shown = Rc::clone(&page.shown);
-        page.gestures.connect_row_activated(move |_, row| {
-            let Some(state_rc) = state_rc.upgrade() else { return };
-            let id = shown.borrow().0.get(row.index() as usize).cloned();
-            let gesture = id.and_then(|id| {
-                state_rc.borrow().config.gestures.iter().find(|g| g.id == id).cloned()
-            });
-            if let Some(gesture) = gesture {
-                open_gesture_editor(&state_rc, gesture);
-            }
-        });
-    }
+    let page = CategoryPage { window: window.clone(), apart, actions, shown: Default::default() };
     {
         let state_rc = Rc::downgrade(state_rc);
         let shown = Rc::clone(&page.shown);
         page.apart.connect_row_activated(move |_, row| {
-            let option = shown.borrow().1.get(row.index() as usize).cloned();
+            let option = shown.borrow().0.get(row.index() as usize).cloned();
             if let (Some(state_rc), Some(option)) = (state_rc.upgrade(), option) {
                 open_gesture_editor_for_action(&state_rc, option);
             }
@@ -180,7 +164,7 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
         let state_rc = Rc::downgrade(state_rc);
         let shown = Rc::clone(&page.shown);
         page.actions.connect_row_activated(move |_, row| {
-            let suggestion = shown.borrow().2.get(row.index() as usize).cloned();
+            let suggestion = shown.borrow().1.get(row.index() as usize).cloned();
             let Some(state_rc) = state_rc.upgrade() else { return };
             match suggestion {
                 Some(Suggestion::Action(option)) => open_gesture_editor_for_action(&state_rc, option),
@@ -216,32 +200,21 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
     });
 
     state_rc.borrow_mut().category_page = Some(page);
-    refresh_category_page(state_rc, None);
+    refresh_category_page(state_rc);
     window.present();
 }
 
-/// Shows what's in the category open, if one is. The gesture named, such as the one just saved,
-/// gets the focus.
-fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) {
+/// Shows the actions left in the category open, if one is.
+fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>) {
     let state = state_rc.borrow();
     let (Some(page), Some(category)) = (state.category_page.clone(), state.open_category) else {
         return;
     };
-    for list in [&page.gestures, &page.apart, &page.actions] {
+    for list in [&page.apart, &page.actions] {
         while let Some(child) = list.first_child() {
             list.remove(&child);
         }
     }
-    let gestures = get_visible_gestures(&state, Some(category));
-    for gesture in &gestures {
-        let row = create_gesture_row(gesture, state_rc);
-        page.gestures.append(&row);
-        if select_name == Some(gesture.name.as_str()) {
-            row.grab_focus();
-        }
-    }
-    page.gestures.set_visible(!gestures.is_empty());
-
     let found = find_suggestions(&state.action_options, &state.config.gestures, "");
     let gestures_in = gestures_by_category(&state.config.gestures, &state.action_options);
     let (apart, found) = arrange_suggestions(found, false, Some(category), &gestures_in);
@@ -254,32 +227,48 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
     for suggestion in &found {
         let row = match suggestion {
             Suggestion::Action(option) => suggestion_row(option, &state.extension_status, ""),
-            Suggestion::Category(category, count) => category_row(*category, *count),
+            Suggestion::Category(category, count) => category_row(state_rc, *category, *count),
         };
         page.actions.append(&row);
     }
     page.actions.set_visible(!found.is_empty());
-    *page.shown.borrow_mut() = (gestures.into_iter().map(|g| g.id).collect(), apart, found);
+    *page.shown.borrow_mut() = (apart, found);
 }
 
-fn category_row(category: Category, count: usize) -> gtk::ListBoxRow {
+/// A category, with how many gestures there are in it, if any. Its gestures follow it, so the row
+/// itself does nothing, and its button opens the category to add more.
+fn category_row(state_rc: &Rc<RefCell<AppState>>, category: Category, count: usize) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
+    row.set_activatable(false);
     let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row_box.set_margin_start(16);
-    row_box.set_margin_end(16);
-    row_box.set_margin_top(12);
-    row_box.set_margin_bottom(12);
+    row_box.set_margin_end(10);
+    // As tall as the other rows, with the button in it.
+    row_box.set_margin_top(6);
+    row_box.set_margin_bottom(6);
     row_box.append(&gtk::Image::from_icon_name(category.icon_name()));
     let name = gtk::Label::new(Some(category.name()));
     name.set_xalign(0.0);
     name.set_hexpand(true);
     row_box.append(&name);
-    // How many gestures there are in it, if any.
     let count = gtk::Label::new(Some(&count.to_string()));
     count.add_css_class("dim-label");
     count.set_visible(count.text() != "0");
     row_box.append(&count);
-    row_box.append(&gtk::Image::from_icon_name("go-next-symbolic"));
+    let add = gtk::Button::from_icon_name("list-add-symbolic");
+    add.add_css_class("flat");
+    add.add_css_class("circular");
+    add.set_valign(gtk::Align::Center);
+    let label = format!("Add to {}", category.name());
+    add.set_tooltip_text(Some(&label));
+    add.update_property(&[gtk::accessible::Property::Label(&label)]);
+    let state_add = Rc::downgrade(state_rc);
+    add.connect_clicked(move |_| {
+        if let Some(state_rc) = state_add.upgrade() {
+            open_category(&state_rc, Some(category));
+        }
+    });
+    row_box.append(&add);
     row.set_child(Some(&row_box));
     row
 }
@@ -414,9 +403,57 @@ fn suggestion_row(
     row
 }
 
-/// Below the search results, offers actions that match the search but no gesture uses yet.
-fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool) {
-    let mut state = state_rc.borrow_mut();
+/// Scrolls the window to a row just made, so that it's seen, once it has its place: until then
+/// it has no size, as a new row isn't laid out until the next frame.
+fn scroll_to(row: &gtk::ListBoxRow) {
+    row.add_tick_callback(|row, _| {
+        if row.height() == 0 {
+            return glib::ControlFlow::Continue;
+        }
+        let scrolled = row.ancestor(gtk::ScrolledWindow::static_type()).and_downcast::<gtk::ScrolledWindow>();
+        // The scrolled content, where the row's place doesn't depend on the scrolling.
+        let content = scrolled.as_ref().and_then(|s| s.child()).and_then(|viewport| viewport.first_child());
+        if let (Some(scrolled), Some(content)) = (scrolled, content) {
+            if let Some(bounds) = row.compute_bounds(&content) {
+                let adjustment = scrolled.vadjustment();
+                let (top, height) = (bounds.y() as f64, bounds.height() as f64);
+                let page = adjustment.page_size();
+                // Centered, unless it's already in sight.
+                if top < adjustment.value() || top + height > adjustment.value() + page {
+                    adjustment.set_value(top - (page - height).max(0.0) / 2.0);
+                }
+            }
+        }
+        glib::ControlFlow::Break
+    });
+}
+
+/// A row of the list of actions: an action or category, or a gesture in the category above it.
+#[derive(Clone)]
+pub enum ShownRow {
+    Suggestion(Suggestion),
+    Gesture(String),
+}
+
+/// Whether the gestures are shown in their categories, after each one's row, instead of on their
+/// own: while nothing is searched for and there are enough actions to sort into categories.
+fn nests_gestures(state: &AppState) -> bool {
+    state.search_entry.text().trim().is_empty()
+        && find_suggestions(&state.action_options, &state.config.gestures, "").len()
+            >= crate::suggestions::FEWEST_TO_CATEGORIZE
+}
+
+/// Below the search results, offers actions that match the search but no gesture uses yet. In
+/// categories, each one's gestures follow it, and the one named, such as the one just saved, gets
+/// the focus.
+fn refresh_suggestions(
+    state_rc: &Rc<RefCell<AppState>>,
+    no_gestures_shown: bool,
+    select_name: Option<&str>,
+) {
+    let nested = nests_gestures(&state_rc.borrow());
+    // Only read, as the gestures' rows read it too.
+    let state = state_rc.borrow();
     for list in [&state.suggestion_list, &state.apart_list] {
         while let Some(child) = list.first_child() {
             list.remove(&child);
@@ -434,15 +471,41 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
         state.apart_list.append(&row);
     }
     state.apart_list.set_visible(!apart.is_empty());
+    let mut rows = Vec::new();
+    let mut focused = false;
     for suggestion in &found {
         let row = match suggestion {
             Suggestion::Action(option) => suggestion_row(option, &state.extension_status, &query),
-            Suggestion::Category(category, count) => category_row(*category, *count),
+            Suggestion::Category(category, count) => category_row(state_rc, *category, *count),
         };
         state.suggestion_list.append(&row);
+        rows.push(ShownRow::Suggestion(suggestion.clone()));
+        let Suggestion::Category(category, _) = suggestion else { continue };
+        if !nested {
+            continue;
+        }
+        let in_it: Vec<Gesture> = state
+            .config
+            .gestures
+            .iter()
+            .filter(|g| !g.is_deleted && gesture_category(g, &state.action_options) == Some(*category))
+            .cloned()
+            .collect();
+        for gesture in in_it {
+            let row = create_gesture_row(&gesture, state_rc);
+            row.add_css_class("nested-gesture");
+            state.suggestion_list.append(&row);
+            if select_name == Some(gesture.name.as_str()) {
+                focused = row.grab_focus();
+                scroll_to(&row);
+            }
+            rows.push(ShownRow::Gesture(gesture.id));
+        }
+    }
+    if nested && select_name.is_some() && !focused {
+        state.search_entry.grab_focus();
     }
     state.suggestion_list.set_visible(!found.is_empty());
-    state.visible_apart = apart.clone();
 
     state
         .suggestion_no_match
@@ -455,7 +518,10 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
     if no_gestures_shown && any {
         state.empty_state_box.set_visible(false);
     }
-    state.visible_suggestions = found;
+    drop(state);
+    let mut state = state_rc.borrow_mut();
+    state.visible_apart = apart;
+    state.visible_suggestions = rows;
 }
 
 pub fn refresh_extension_status(state_rc: &Rc<RefCell<AppState>>) {
@@ -469,8 +535,8 @@ pub fn refresh_extension_status(state_rc: &Rc<RefCell<AppState>>) {
 
 pub fn refresh_gesture_list(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) {
     let no_gestures_shown = show_gestures(state_rc, select_name);
-    refresh_suggestions(state_rc, no_gestures_shown);
-    refresh_category_page(state_rc, select_name);
+    refresh_suggestions(state_rc, no_gestures_shown, select_name);
+    refresh_category_page(state_rc);
 }
 
 /// Shows the gestures that match the search. The one named, such as the one just saved, gets the
@@ -481,6 +547,12 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
     // Clear list
     while let Some(child) = state.main_list.first_child() {
         state.main_list.remove(&child);
+    }
+    // In their categories instead.
+    if nests_gestures(&state) {
+        state.main_list.set_visible(false);
+        state.empty_state_box.set_visible(false);
+        return true;
     }
 
     let visible = get_visible_gestures(&state, None);
@@ -502,6 +574,7 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
 
             if select_name == Some(gesture.name.as_str()) {
                 focused = row.grab_focus();
+                scroll_to(&row);
             }
         }
     }
@@ -801,11 +874,23 @@ pub fn build_ui(app: &gtk::Application) {
                 .get(row.index() as usize)
                 .cloned();
             match suggestion {
-                Some(Suggestion::Action(option)) => {
+                Some(ShownRow::Suggestion(Suggestion::Action(option))) => {
                     open_gesture_editor_for_action(&state_suggestion, option)
                 }
-                Some(Suggestion::Category(category, _)) => {
+                Some(ShownRow::Suggestion(Suggestion::Category(category, _))) => {
                     open_category(&state_suggestion, Some(category))
+                }
+                Some(ShownRow::Gesture(id)) => {
+                    let gesture = state_suggestion
+                        .borrow()
+                        .config
+                        .gestures
+                        .iter()
+                        .find(|g| g.id == id)
+                        .cloned();
+                    if let Some(gesture) = gesture {
+                        open_gesture_editor(&state_suggestion, gesture);
+                    }
                 }
                 None => {}
             }
@@ -879,6 +964,7 @@ pub fn build_ui(app: &gtk::Application) {
          .drag-handle:hover { opacity: 1; }\n\
          .drag-handle:active { cursor: grabbing; }\n\
          .build-your-own label { font-weight: bold; }\n\
+         .boxed-list > row.nested-gesture { background-image: linear-gradient(@shade_color, @shade_color); }\n\
          togglebutton.key-held, button.key-held { box-shadow: 0 0 0 3px alpha(@accent_bg_color, 0.6); }\n\
          .dialog-content scrolledwindow > undershoot.bottom { box-shadow: inset 0 -12px 12px -12px alpha(black, 0.25); }\n\
          .dialog-content scrolledwindow > undershoot.top { box-shadow: inset 0 12px 12px -12px alpha(black, 0.25); }\n"

@@ -1406,8 +1406,10 @@ fn open_editor(
         reload_daemon(state.dbus_conn.as_ref(), Some(&dialog_clone2));
         drop(state);
 
-        refresh_gesture_list(&state_clone, Some(&name));
+        // Back on the main page, at the gesture saved, as a category's window has no gestures.
         dialog_clone2.destroy();
+        crate::ui::main_window::open_category(&state_clone, None);
+        refresh_gesture_list(&state_clone, Some(&name));
     });
     dialog_header.pack_end(&save_btn);
 
