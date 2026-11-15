@@ -20,10 +20,9 @@ use crate::ui::settings::open_settings_window;
 use crate::ui::components::create_gesture_row;
 use crate::ui::gesture_status::GestureStatus;
 
-/// The gestures shown: those that match the search, and in a category, those in it.
-pub fn get_visible_gestures(state: &AppState) -> Vec<Gesture> {
-    let filter = state.search_entry.text().to_string();
-    let category = state.open_category;
+/// The gestures shown: in a category, those in it, and otherwise those that match the search.
+pub fn get_visible_gestures(state: &AppState, category: Option<Category>) -> Vec<Gesture> {
+    let filter = if category.is_some() { String::new() } else { state.search_entry.text().to_string() };
 
     let gestures: Vec<Gesture> = state
         .config
@@ -65,92 +64,202 @@ pub fn extension_note(
     })
 }
 
-/// The header's parts for a category of actions: a button back to the gestures, and the
-/// category's name in place of the title.
-#[derive(Clone)]
-pub struct CategoryHeader {
-    back: gtk::Button,
-    titles: gtk::Stack,
-    name: gtk::Label,
-}
-
-impl CategoryHeader {
-    fn new(header: &gtk::HeaderBar, status_title: &gtk::Box) -> Self {
-        let back = gtk::Button::from_icon_name("go-previous-symbolic");
-        back.set_tooltip_text(Some("Back"));
-        back.update_property(&[gtk::accessible::Property::Label("Back")]);
-        back.set_action_name(Some("win.back"));
-        back.set_visible(false);
-        header.pack_start(&back);
-
-        let name = gtk::Label::new(None);
-        name.add_css_class("title");
-        name.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        let titles = gtk::Stack::new();
-        titles.set_transition_type(gtk::StackTransitionType::Crossfade);
-        titles.add_named(status_title, Some("status"));
-        titles.add_named(&name, Some("category"));
-        header.set_title_widget(Some(&titles));
-        CategoryHeader { back, titles, name }
-    }
-
-    /// Shows the category of actions open, or the usual title for none.
-    fn show(&self, category: Option<Category>) {
-        self.back.set_visible(category.is_some());
-        match category {
-            Some(category) => {
-                self.name.set_text(category.name());
-                self.titles.set_visible_child_name("category");
-            }
-            None => self.titles.set_visible_child_name("status"),
-        }
-    }
-}
-
 /// At the top of a category's page, so that it's plain which one it is: its icon, large, with its
 /// name.
 #[derive(Clone)]
-pub struct PageHeading {
+struct PageHeading {
     area: gtk::Box,
-    icon: gtk::Image,
-    title: gtk::Label,
 }
 
 impl PageHeading {
-    fn new() -> Self {
+    fn new(category: Category) -> Self {
         let area = gtk::Box::new(gtk::Orientation::Vertical, 6);
         area.set_margin_top(12);
         area.set_margin_bottom(18);
         area.set_halign(gtk::Align::Center);
-        let icon = gtk::Image::new();
+        let icon = gtk::Image::from_icon_name(category.icon_name());
         icon.set_pixel_size(64);
         icon.add_css_class("dim-label");
         area.append(&icon);
-        let title = gtk::Label::new(None);
+        let title = gtk::Label::new(Some(category.name()));
         title.add_css_class("title-1");
         title.set_wrap(true);
         title.set_justify(gtk::Justification::Center);
         area.append(&title);
-        area.set_visible(false);
-        PageHeading { area, icon, title }
-    }
-
-    fn show(&self, category: Option<Category>) {
-        if let Some(category) = category {
-            self.icon.set_icon_name(Some(category.icon_name()));
-            self.title.set_text(category.name());
-        }
-        self.area.set_visible(category.is_some());
+        PageHeading { area }
     }
 }
 
-/// Shows the actions of a category in place of the gestures, or with None, goes back to them. The
-/// search starts over.
+/// A category's page, in a window over the gestures: the gestures in it, then its actions to make
+/// more, with the one to make its own of first.
+#[derive(Clone)]
+pub struct CategoryPage {
+    window: gtk::Window,
+    gestures: gtk::ListBox,
+    apart: gtk::ListBox,
+    actions: gtk::ListBox,
+    /// What the lists show, by row, for when one is activated.
+    shown: Rc<RefCell<(Vec<String>, Vec<crate::state::EditorActionOption>, Vec<Suggestion>)>>,
+}
+
+/// The window the editor and other dialogs open over: a category's, while one is open.
+pub fn dialog_parent(state: &AppState) -> gtk::Window {
+    match &state.category_page {
+        Some(page) => page.window.clone(),
+        None => state.window.clone().upcast(),
+    }
+}
+
+/// Opens a category's page in a window of its own, or with None, closes it.
 pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category>) {
+    let open = state_rc.borrow_mut().category_page.take();
+    if let Some(page) = open {
+        page.window.destroy();
+    }
     state_rc.borrow_mut().open_category = category;
-    let search_entry = state_rc.borrow().search_entry.clone();
-    search_entry.set_text("");
-    refresh_gesture_list(state_rc, None);
+    let Some(category) = category else { return };
+
+    let parent = state_rc.borrow().window.clone();
+    let window = gtk::Window::new();
+    window.set_transient_for(Some(&parent));
+    window.set_modal(true);
+    window.set_destroy_with_parent(true);
+    window.set_title(Some(category.name()));
+    window.set_default_size((parent.width() - 60).clamp(360, 640), (parent.height() - 60).max(400));
+    // The page's heading names it, large, so the header doesn't too.
+    let header = gtk::HeaderBar::new();
+    header.set_title_widget(Some(&gtk::Label::new(None)));
+    window.set_titlebar(Some(&header));
+
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.append(&PageHeading::new(category).area);
+    let list = || {
+        let list = gtk::ListBox::new();
+        list.add_css_class("boxed-list");
+        list.set_selection_mode(gtk::SelectionMode::None);
+        list.set_margin_bottom(24);
+        content.append(&list);
+        list
+    };
+    let gestures = list();
+    let apart = list();
+    apart.set_margin_bottom(16);
+    let actions = list();
+    let scrolled = gtk::ScrolledWindow::new();
+    scrolled.set_vexpand(true);
+    scrolled.set_hscrollbar_policy(gtk::PolicyType::Never);
+    scrolled.set_child(Some(&clamped(&content)));
+    window.set_child(Some(&scrolled));
+
+    let page = CategoryPage { window: window.clone(), gestures, apart, actions, shown: Default::default() };
+    {
+        let state_rc = Rc::downgrade(state_rc);
+        let shown = Rc::clone(&page.shown);
+        page.gestures.connect_row_activated(move |_, row| {
+            let Some(state_rc) = state_rc.upgrade() else { return };
+            let id = shown.borrow().0.get(row.index() as usize).cloned();
+            let gesture = id.and_then(|id| {
+                state_rc.borrow().config.gestures.iter().find(|g| g.id == id).cloned()
+            });
+            if let Some(gesture) = gesture {
+                open_gesture_editor(&state_rc, gesture);
+            }
+        });
+    }
+    {
+        let state_rc = Rc::downgrade(state_rc);
+        let shown = Rc::clone(&page.shown);
+        page.apart.connect_row_activated(move |_, row| {
+            let option = shown.borrow().1.get(row.index() as usize).cloned();
+            if let (Some(state_rc), Some(option)) = (state_rc.upgrade(), option) {
+                open_gesture_editor_for_action(&state_rc, option);
+            }
+        });
+    }
+    {
+        let state_rc = Rc::downgrade(state_rc);
+        let shown = Rc::clone(&page.shown);
+        page.actions.connect_row_activated(move |_, row| {
+            let suggestion = shown.borrow().2.get(row.index() as usize).cloned();
+            let Some(state_rc) = state_rc.upgrade() else { return };
+            match suggestion {
+                Some(Suggestion::Action(option)) => open_gesture_editor_for_action(&state_rc, option),
+                Some(Suggestion::Category(category, _)) => open_category(&state_rc, Some(category)),
+                None => {}
+            }
+        });
+    }
+
+    // Escape closes it, as other dialogs.
+    let keys = gtk::ShortcutController::new();
+    keys.add_shortcut(gtk::Shortcut::new(
+        gtk::ShortcutTrigger::parse_string("Escape|<Control>w"),
+        Some(gtk::CallbackAction::new(|window, _| {
+            if let Some(window) = window.downcast_ref::<gtk::Window>() {
+                window.close();
+            }
+            glib::Propagation::Stop
+        })),
+    ));
+    window.add_controller(keys);
+    let state_close = Rc::downgrade(state_rc);
+    window.connect_close_request(move |window| {
+        if let Some(state_rc) = state_close.upgrade() {
+            if let Ok(mut state) = state_rc.try_borrow_mut() {
+                if state.category_page.as_ref().is_some_and(|page| &page.window == window) {
+                    state.category_page = None;
+                    state.open_category = None;
+                }
+            }
+        }
+        glib::Propagation::Proceed
+    });
+
+    state_rc.borrow_mut().category_page = Some(page);
+    refresh_category_page(state_rc, None);
+    window.present();
+}
+
+/// Shows what's in the category open, if one is. The gesture named, such as the one just saved,
+/// gets the focus.
+fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) {
+    let state = state_rc.borrow();
+    let (Some(page), Some(category)) = (state.category_page.clone(), state.open_category) else {
+        return;
+    };
+    for list in [&page.gestures, &page.apart, &page.actions] {
+        while let Some(child) = list.first_child() {
+            list.remove(&child);
+        }
+    }
+    let gestures = get_visible_gestures(&state, Some(category));
+    for gesture in &gestures {
+        let row = create_gesture_row(gesture, state_rc);
+        page.gestures.append(&row);
+        if select_name == Some(gesture.name.as_str()) {
+            row.grab_focus();
+        }
+    }
+    page.gestures.set_visible(!gestures.is_empty());
+
+    let found = find_suggestions(&state.action_options, &state.config.gestures, "");
+    let gestures_in = gestures_by_category(&state.config.gestures, &state.action_options);
+    let (apart, found) = arrange_suggestions(found, false, Some(category), &gestures_in);
+    for option in &apart {
+        let row = suggestion_row(option, &state.extension_status, "");
+        row.add_css_class("build-your-own");
+        page.apart.append(&row);
+    }
+    page.apart.set_visible(!apart.is_empty());
+    for suggestion in &found {
+        let row = match suggestion {
+            Suggestion::Action(option) => suggestion_row(option, &state.extension_status, ""),
+            Suggestion::Category(category, count) => category_row(*category, *count),
+        };
+        page.actions.append(&row);
+    }
+    page.actions.set_visible(!found.is_empty());
+    *page.shown.borrow_mut() = (gestures.into_iter().map(|g| g.id).collect(), apart, found);
 }
 
 fn category_row(category: Category, count: usize) -> gtk::ListBoxRow {
@@ -317,10 +426,8 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
     let query = state.search_entry.text().to_string();
     let found = find_suggestions(&state.action_options, &state.config.gestures, &query);
     let searching = !query.trim().is_empty();
-    // In a category, the one to make its own of comes after the category's own, apart, as it's
-    // for when none of them will do.
     let gestures_in = gestures_by_category(&state.config.gestures, &state.action_options);
-    let (apart, found) = arrange_suggestions(found, searching, state.open_category, &gestures_in);
+    let (apart, found) = arrange_suggestions(found, searching, None, &gestures_in);
     for option in &apart {
         let row = suggestion_row(option, &state.extension_status, &query);
         row.add_css_class("build-your-own");
@@ -363,25 +470,12 @@ pub fn refresh_extension_status(state_rc: &Rc<RefCell<AppState>>) {
 pub fn refresh_gesture_list(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) {
     let no_gestures_shown = show_gestures(state_rc, select_name);
     refresh_suggestions(state_rc, no_gestures_shown);
+    refresh_category_page(state_rc, select_name);
 }
 
 /// Shows the gestures that match the search. The one named, such as the one just saved, gets the
 /// focus, so that the keyboard carries on from it.
 fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) -> bool {
-    {
-        let state = state_rc.borrow();
-        state.category_header.show(state.open_category);
-        state.page_heading.show(state.open_category);
-        // A category is for browsing: the search is on the gestures' page, and typing in a
-        // category goes back to it, to search among every action.
-        let in_category = state.open_category.is_some();
-        if let Some(search) = state.search_entry.parent() {
-            search.set_visible(!in_category);
-        }
-        state
-            .search_entry
-            .set_key_capture_widget((!in_category).then_some(&state.window));
-    }
     let state = state_rc.borrow();
 
     // Clear list
@@ -389,14 +483,10 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
         state.main_list.remove(&child);
     }
 
-    let visible = get_visible_gestures(&state);
+    let visible = get_visible_gestures(&state, None);
     let mut focused = false;
 
-    if visible.is_empty() && state.open_category.is_some() {
-        // A category with no gestures in it shows only what can be made.
-        state.empty_state_box.set_visible(false);
-        state.main_list.set_visible(false);
-    } else if visible.is_empty() {
+    if visible.is_empty() {
         let searching = !state.search_entry.text().trim().is_empty();
         state.empty_state_box.set_title(if searching { "Nothing Found" } else { "No Gestures" });
         state.empty_state_box.set_description(searching.then_some("Try different words."));
@@ -505,36 +595,6 @@ fn add_actions(app: &gtk::Application, state: &Rc<RefCell<AppState>>) {
     });
     window.add_action(&search);
 
-    let back = gtk::gio::SimpleAction::new("back", None);
-    let state_back = Rc::clone(state);
-    back.connect_activate(move |_, _| {
-        if state_back.borrow().open_category.is_some() {
-            open_category(&state_back, None);
-        }
-    });
-    window.add_action(&back);
-
-    // Typing in a category goes back to the gestures' page and searches there.
-    let typing = gtk::EventControllerKey::new();
-    let state_typing = Rc::clone(state);
-    typing.connect_key_pressed(move |_, key, _, modifiers| {
-        let shortcut = modifiers.intersects(
-            gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK | gdk::ModifierType::SUPER_MASK,
-        );
-        let typed = key.to_unicode().filter(|c| !c.is_control() && !c.is_whitespace() && !shortcut);
-        let Some(typed) = typed else { return glib::Propagation::Proceed };
-        if state_typing.borrow().open_category.is_none() {
-            return glib::Propagation::Proceed;
-        }
-        open_category(&state_typing, None);
-        let search = state_typing.borrow().search_entry.clone();
-        search.set_text(&typed.to_string());
-        search.grab_focus();
-        search.set_position(-1);
-        glib::Propagation::Stop
-    });
-    window.add_controller(typing);
-
     let preferences = gtk::gio::SimpleAction::new("preferences", None);
     let state_preferences = Rc::clone(state);
     preferences.connect_activate(move |_, _| open_settings_window(&state_preferences));
@@ -552,7 +612,6 @@ fn add_actions(app: &gtk::Application, state: &Rc<RefCell<AppState>>) {
     app.add_action(&quit);
 
     app.set_accels_for_action("win.search", &["<Control>f"]);
-    app.set_accels_for_action("win.back", &["<Alt>Left"]);
     app.set_accels_for_action("app.preferences", &["<Control>comma"]);
     app.set_accels_for_action("app.shortcuts", &["<Control>question"]);
     app.set_accels_for_action("window.close", &["<Control>w"]);
@@ -628,8 +687,6 @@ pub fn build_ui(app: &gtk::Application) {
     content_vbox.append(&scrolled);
 
     let list_container = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    let page_heading = PageHeading::new();
-    list_container.append(&page_heading.area);
 
     let main_list = gtk::ListBox::new();
     main_list.set_margin_bottom(24);
@@ -657,16 +714,16 @@ pub fn build_ui(app: &gtk::Application) {
     suggestion_heading.set_xalign(0.0);
     suggestion_box.append(&suggestion_heading);
 
+    let apart_list = gtk::ListBox::new();
+    apart_list.add_css_class("boxed-list");
+    apart_list.set_selection_mode(gtk::SelectionMode::None);
+    apart_list.set_margin_bottom(16);
+    suggestion_box.append(&apart_list);
+
     let suggestion_list = gtk::ListBox::new();
     suggestion_list.add_css_class("boxed-list");
     suggestion_list.set_selection_mode(gtk::SelectionMode::None);
     suggestion_box.append(&suggestion_list);
-
-    let apart_list = gtk::ListBox::new();
-    apart_list.add_css_class("boxed-list");
-    apart_list.set_selection_mode(gtk::SelectionMode::None);
-    apart_list.set_margin_top(16);
-    suggestion_box.append(&apart_list);
 
     list_container.append(&suggestion_box);
     scrolled.set_child(Some(&clamped(&list_container)));
@@ -679,7 +736,7 @@ pub fn build_ui(app: &gtk::Application) {
 
     let gesture_status = GestureStatus::new("Gestures", dbus_conn.clone(), &toasts);
     let extension_status = crate::extension::status(dbus_conn.as_ref());
-    let category_header = CategoryHeader::new(&header, gesture_status.title());
+    header.set_title_widget(Some(gesture_status.title()));
     header.pack_end(gesture_status.action_button());
     content_vbox.insert_child_after(&clamped(gesture_status.error_area()), Some(&search_clamp));
     let extension_banner = ExtensionBanner::new();
@@ -705,8 +762,7 @@ pub fn build_ui(app: &gtk::Application) {
         extension_status,
         extension_banner: extension_banner.clone(),
         open_category: None,
-        category_header,
-        page_heading,
+        category_page: None,
     }));
 
 
@@ -787,7 +843,7 @@ pub fn build_ui(app: &gtk::Application) {
             let idx = row.index();
             let state_borrow = state_clone3.borrow();
 
-            let visible_gestures = get_visible_gestures(&state_borrow);
+            let visible_gestures = get_visible_gestures(&state_borrow, None);
 
             if idx >= 0 && (idx as usize) < visible_gestures.len() {
                 let gesture = visible_gestures[idx as usize].clone();

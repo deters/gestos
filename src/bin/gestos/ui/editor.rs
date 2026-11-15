@@ -329,7 +329,7 @@ fn delete_gesture(state_rc: &Rc<RefCell<AppState>>, id: &str) {
     let Some(pos) = state.config.gestures.iter().position(|g| g.id == id) else {
         return;
     };
-    let visible = get_visible_gestures(&state);
+    let visible = get_visible_gestures(&state, state.open_category);
     let next = visible.iter().position(|g| g.id == id).and_then(|i| {
         visible.get(i + 1).or_else(|| i.checked_sub(1).and_then(|i| visible.get(i)))
     });
@@ -386,7 +386,7 @@ pub fn open_gesture_editor_for_action(state_rc: &Rc<RefCell<AppState>>, action: 
         return;
     }
     let keys = gtk::Entry::new();
-    let window = state_rc.borrow().window.clone().upcast::<gtk::Window>();
+    let window = crate::ui::main_window::dialog_parent(&state_rc.borrow());
     let state_set = Rc::downgrade(state_rc);
     let keys_set = keys.clone();
     let on_set: Rc<dyn Fn()> = Rc::new(move || {
@@ -406,7 +406,7 @@ fn open_editor(
 ) {
     let state = state_rc.borrow();
     let dialog = gtk::Window::new();
-    dialog.set_transient_for(Some(&state.window));
+    dialog.set_transient_for(Some(&crate::ui::main_window::dialog_parent(&state)));
     dialog.set_modal(true);
     dialog.set_destroy_with_parent(true);
     let title_text = if target_gesture.is_some() { "Edit Gesture" } else { "Add Gesture" };
@@ -1308,13 +1308,15 @@ fn open_editor(
                 steps => ActionType::Keyboard(steps.to_vec()),
             },
             ActionType::Execute(_) if opt.category == 7 => ActionType::Execute(detail),
-            // The keys recorded, which a standard shortcut's are too.
-            ActionType::Keypress(_) => {
-                if detail.trim().is_empty() {
+            // The keys recorded, or a standard shortcut's own, as a new gesture for one has none
+            // recorded.
+            ActionType::Keypress(keys) => {
+                let keys = if detail.trim().is_empty() { keys.trim() } else { detail.trim() };
+                if keys.is_empty() {
                     println!("Gesture save failed: The shortcut has no keys.");
                     return;
                 }
-                ActionType::Keypress(detail.trim().to_string())
+                ActionType::Keypress(keys.to_string())
             }
             ActionType::Click(_) => {
                 let btn = if detail.trim().is_empty() {

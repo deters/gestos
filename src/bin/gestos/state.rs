@@ -22,7 +22,7 @@ pub struct AppState {
     pub empty_state_box: adw::StatusPage,
     pub action_options: Vec<EditorActionOption>,
     pub visible_suggestions: Vec<crate::suggestions::Suggestion>,
-    /// What a category offers apart, after its own: the one to make its own of.
+    /// What a category offers apart, before its own: the one to make its own of.
     pub apart_list: gtk::ListBox,
     pub visible_apart: Vec<EditorActionOption>,
     pub suggestion_box: gtk::Box,
@@ -32,9 +32,7 @@ pub struct AppState {
     pub extension_status: ExtensionStatus,
     /// Says when the extension running is older than this Gestos, and what updates it.
     pub extension_banner: crate::ui::main_window::ExtensionBanner,
-    /// The category of actions shown, in place of the gestures.
+    /// The category of actions open, in a window of its own over the gestures.
     pub open_category: Option<crate::suggestions::Category>,
-    pub category_header: crate::ui::main_window::CategoryHeader,
-    /// Says on the page which category is open.
-    pub page_heading: crate::ui::main_window::PageHeading,
+    pub category_page: Option<crate::ui::main_window::CategoryPage>,
 }
