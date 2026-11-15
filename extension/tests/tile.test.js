@@ -43,47 +43,19 @@ results.push(['moves both windows before shrinking either, with a gap',
 results.push(['moves a window below when it overlaps more across',
     tileWindows([rect(0, 0, 600, 300), rect(400, 200, 600, 500)], bounds),
     [rect(0, 0, 600, 300), rect(400, 300, 600, 500)]]);
-// While a window is dragged, the others keep their order across the screen.
-const dragging = {rearrange: false};
-const threeRects = [rect(0, 0, 500, 300), rect(300, 0, 400, 300), rect(600, 0, 400, 300)];
-const three = tileWindows(threeRects, bounds, 0, new Map(), dragging);
-results.push(['shrinks the others in proportion while dragging', three.map(r => r.width),
-    [500, 250, 250]]);
+const three = tileWindows([rect(0, 0, 500, 300), rect(300, 0, 400, 300), rect(600, 0, 400, 300)],
+    bounds);
+results.push(['shrinks the others in proportion', three.map(r => r.width), [500, 250, 250]]);
 
 // Windows get no smaller than a quarter of the width, as tiles do.
 // The one moved last keeps its 300, and the other three can't fit in the 700 left.
 const row = Array.from({length: 4}, (_, i) => rect(i * 200, 0, 300, 300));
-results.push(['minimizes the window touched longest ago while dragging',
-    tileWindows(row, bounds, 0, new Map(), dragging).map(r => r !== null),
+results.push(['minimizes the window touched longest ago',
+    tileWindows(row, bounds).map(r => r !== null),
     [true, true, true, false]]);
-const tooBig = [rect(0, 0, 600, 300), rect(400, 0, 600, 300)];
-const tooBigMinimums = new Map([[1, {width: 500, height: 100}]]);
-results.push(['minimizes a window that cannot get small enough while dragging',
-    tileWindows(tooBig, bounds, 0, tooBigMinimums, dragging), [rect(0, 0, 600, 300), null]]);
-
-// Otherwise, a window that would shrink by more than a quarter, or be minimized, goes under
-// another where there's room, so none has to shrink.
-results.push(['puts a window below instead of shrinking the others a lot',
-    tileWindows(threeRects, bounds),
-    [rect(0, 0, 500, 300), rect(100, 300, 400, 300), rect(600, 0, 400, 300)]]);
-results.push(['puts a window below instead of minimizing it', tileWindows(row, bounds),
-    [rect(0, 0, 300, 300), rect(300, 0, 300, 300), rect(600, 0, 300, 300), rect(600, 300, 300, 300)]]);
-results.push(['puts a window that cannot get small enough below',
-    tileWindows(tooBig, bounds, 0, tooBigMinimums), [rect(0, 0, 600, 300), rect(400, 300, 600, 300)]]);
-results.push(['puts a window under the one widened into it, where it shrinks least',
-    tileWindows([rect(0, 0, 1000, 600), rect(900, 0, 500, 600), rect(1400, 300, 520, 780)],
-        rect(0, 0, 1920, 1080)),
-    [rect(0, 0, 1000, 600), rect(500, 600, 500, 480), rect(1400, 300, 520, 780)]]);
-// The window moved last stays where it would be in order, while the others are rearranged.
-const crowded = [rect(250, 12, 662, 604), rect(100, 314, 509, 447), rect(112, 5, 234, 601),
-    rect(381, 188, 558, 569)];
-results.push(['keeps the window moved last where it would be in order',
-    tileWindows(crowded, bounds)[0], tileWindows(crowded, bounds, 0, new Map(), dragging)[0]]);
-// Windows that only shrink a little keep their order.
-results.push(['keeps the order when the others shrink only a little',
-    tileWindows([rect(0, 0, 400, 800), rect(350, 0, 300, 800), rect(650, 0, 350, 800)], bounds)
-        .map(r => r.x),
-    [0, 400, 683]]);
+results.push(['minimizes a window that cannot get small enough',
+    tileWindows([rect(0, 0, 600, 300), rect(400, 0, 600, 300)], bounds, 0,
+        new Map([[1, {width: 500, height: 100}]])), [rect(0, 0, 600, 300), null]]);
 
 const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width &&
     a.y < b.y + b.height && b.y < a.y + a.height;
