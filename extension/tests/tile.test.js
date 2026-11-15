@@ -74,6 +74,11 @@ results.push(['puts a window under the one widened into it, where it shrinks lea
     tileWindows([rect(0, 0, 1000, 600), rect(900, 0, 500, 600), rect(1400, 300, 520, 780)],
         rect(0, 0, 1920, 1080)),
     [rect(0, 0, 1000, 600), rect(500, 600, 500, 480), rect(1400, 300, 520, 780)]]);
+// The window moved last stays where it would be in order, while the others are rearranged.
+const crowded = [rect(250, 12, 662, 604), rect(100, 314, 509, 447), rect(112, 5, 234, 601),
+    rect(381, 188, 558, 569)];
+results.push(['keeps the window moved last where it would be in order',
+    tileWindows(crowded, bounds)[0], tileWindows(crowded, bounds, 0, new Map(), dragging)[0]]);
 // Windows that only shrink a little keep their order.
 results.push(['keeps the order when the others shrink only a little',
     tileWindows([rect(0, 0, 400, 800), rect(350, 0, 300, 800), rect(650, 0, 350, 800)], bounds)

@@ -254,6 +254,10 @@ function placeTree(node, area, plan, cells) {
 // How much of a window's size it can lose before other arrangements are tried.
 const MOST_SHRINKING = 0.25;
 
+function sameRect(a, b) {
+    return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
 // What part of its size a window placed in a cell loses, from 0 to 1.
 function lost(cell, rect, plan) {
     const width = Math.min(rect.width, cell.width - plan.gap);
@@ -279,7 +283,8 @@ function totalLost(cells, plan) {
  *
  * The area is split in two again and again, each time along the line that best separates the
  * windows, so they keep their order across the screen, unless that would shrink one by more than a
- * quarter or minimize it, when a window can go under or beside another instead. Each gets the room it needs, as close to
+ * quarter or minimize it, when a window can go under or beside another instead. The one the user
+ * moved last is never the one that goes elsewhere. Each gets the room it needs, as close to
  * where it was as the others let it be. The first window is the one the user moved or
  * resized last, which keeps its size and, where there's room, its place. When even the smallest
  * sizes don't fit, the windows the user touched longest ago are minimized, until the rest do.
@@ -329,30 +334,33 @@ export function tileWindows(rects, area, gap = 0, minimums = new Map(), {rearran
         return cells;
     };
 
-    // The windows keep their order across the screen. Only when that would minimize one, or
-    // shrink one by more than a quarter, are they arranged another way, the one they shrink least
-    // in, as a window can go under a neighbor where there's room.
+    // The windows keep their order across the screen, and the ones touched longest ago are
+    // minimized while even their smallest sizes don't fit.
+    const treeOf = shown => shown.length > 0
+        ? buildTree(shown.map(index => ({rect: rects[index], index}))) : null;
     let shown = rects.map((_, i) => i);
-    let cells = rects.map(() => null);
-    while (shown.length > 0) {
-        const items = shown.map(index => ({rect: rects[index], index}));
-        const usual = buildTree(items);
-        const usualFits = fits(usual);
-        if (usualFits || shown.length === 1) {
-            cells = place(usual);
-            if (!rearrange || !usualFits || mostLost(cells, plan) <= MOST_SHRINKING)
-                break;
-        }
-        const others = rearrange ? allTrees(items).filter(fits).map(place) : [];
-        if (others.length > 0) {
-            const options = usualFits ? [cells, ...others] : others;
-            cells = options.reduce((best, option) =>
-                totalLost(option, plan) < totalLost(best, plan) ? option : best);
-            break;
-        }
-        if (usualFits || shown.length === 1)
-            break;
+    while (shown.length > 1 && !fits(treeOf(shown)))
         shown = shown.slice(0, -1);
+    const tree = treeOf(shown);
+    let cells = tree ? place(tree) : rects.map(() => null);
+
+    // Only when that minimizes one, or shrinks one by more than a quarter, are the others arranged
+    // another way: the one that shows the most of them, and that they shrink least in, as a
+    // window can go under a neighbor where there's room. The window the user moved last stays
+    // just where it is in order.
+    const minimized = rects.length - shown.length;
+    if (rearrange && tree && (minimized > 0 || mostLost(cells, plan) > MOST_SHRINKING)) {
+        const keepsMoved = option => sameRect(option[0], cells[0]);
+        for (let count = rects.length; count >= shown.length; count--) {
+            const items = rects.slice(0, count).map((rect, index) => ({rect, index}));
+            const others = allTrees(items).filter(fits).map(place).filter(keepsMoved);
+            const options = count === shown.length ? [cells, ...others] : others;
+            if (options.length > 0) {
+                cells = options.reduce((best, option) =>
+                    totalLost(option, plan) < totalLost(best, plan) ? option : best);
+                break;
+            }
+        }
     }
 
     const half = gap / 2;
