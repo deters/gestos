@@ -183,7 +183,7 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
         EditorActionOption {
             category: 0,
             action_type: ActionType::Keyboard(Vec::new()),
-            name: "Custom Action".to_string(),
+            name: "Advanced Action".to_string(),
             tooltip: "Open apps, press shortcuts, type text and wait, in any order".to_string(),
         },
         // Window Management (1)
@@ -680,7 +680,7 @@ mod tests {
         let options = get_static_action_options();
         let action = ActionType::Keyboard(vec![gestos::key_steps::KeyStep::Wait(10)]);
         let option = options.iter().find(|opt| action_matches(&action, opt)).unwrap();
-        assert_eq!(option.name, "Custom Action");
+        assert_eq!(option.name, "Advanced Action");
     }
 
     #[test]

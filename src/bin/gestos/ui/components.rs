@@ -98,12 +98,11 @@ pub fn show_error_dialog<W: IsA<gtk::Window>>(parent: &W, message: &str) {
 }
 pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static str) {
     match action {
-        // The two actions that can do what the others can't stand out.
-        ActionType::Execute(_) => ("utilities-terminal-symbolic", "icon-swiss-red"),
-        ActionType::Keyboard(_) => ("input-keyboard-symbolic", "icon-swiss-red"),
-        // A custom shortcut is one of those too. A standard one is ready as it is.
+        ActionType::Execute(_) => ("utilities-terminal-symbolic", "icon-bg-blue"),
+        ActionType::Keyboard(_) => ("input-keyboard-symbolic", "icon-bg-blue"),
+        // A custom shortcut shows a keyboard. A standard one has an icon of its own.
         ActionType::Keypress(keys) if keys.is_empty() || standard_shortcut_name(keys).is_none() => {
-            ("input-keyboard-symbolic", "icon-swiss-red")
+            ("input-keyboard-symbolic", "icon-bg-blue")
         }
         ActionType::Keypress(_) => (
             "input-keyboard-symbolic",
@@ -277,10 +276,10 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
         }
         ActionType::Keyboard(steps) => {
             if steps.is_empty() {
-                "Custom Action".to_string()
+                "Advanced Action".to_string()
             } else {
                 format!(
-                    "Custom Action ({})",
+                    "Advanced Action ({})",
                     gestos::key_steps::describe_steps(steps)
                 )
             }
@@ -358,7 +357,7 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     main_hbox.append(&drag_handle);
 
     // A custom action or shortcut named by the user shows that name, even one with a standard
-    // shortcut's keys. Others are named after their action, as "Custom Action", followed by its
+    // shortcut's keys. Others are named after their action, as "Advanced Action", followed by its
     // keys or steps, as the standard shortcut they are, or as "Custom Keyboard Action" from before.
     let is_keyboard_action = matches!(
         gesture.actions.first(),
@@ -370,6 +369,7 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     };
     let named = is_keyboard_action
         && standard_name.as_deref() != Some(gesture.name.as_str())
+        && !gesture.name.starts_with("Advanced Action")
         && !gesture.name.starts_with("Custom Action")
         && !gesture.name.starts_with("Keyboard Shortcut")
         && !gesture.name.starts_with("Custom Keyboard Shortcut")
@@ -387,15 +387,26 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         None
     };
 
+    // A shortcut for only one app is that app's, and shows its icon, even beside its keys.
+    let only_app = match (gesture.actions.first(), gesture.apps.as_slice()) {
+        (Some(ActionType::Keypress(_)), [app]) => Some(app.as_str()),
+        _ => None,
+    };
+
     // 1. Icon Category Holder (only if not a keypress action)
-    if has_keypress.is_none() {
+    if has_keypress.is_none() || only_app.is_some() {
         let (icon_name, bg_class) = if let Some(ActionType::Keypress(_)) = gesture.actions.first() {
             // Named by the user, it's a custom shortcut, whatever its keys.
             if named {
-                ("input-keyboard-symbolic", "icon-swiss-red")
+                ("input-keyboard-symbolic", "icon-bg-blue")
             } else {
                 get_action_category_icon(&gesture.actions[0])
             }
+        } else if let Some(ActionType::Keyboard(steps)) = gesture.actions.first() {
+            // An advanced action shows the icon of its first step, as what it starts with.
+            let (icon_name, bg_class) = get_action_category_icon(&gesture.actions[0]);
+            let icon_name = steps.first().map_or(icon_name, crate::ui::keyboard_steps::step_icon);
+            (icon_name, bg_class)
         } else if !gesture.actions.is_empty() {
             get_action_category_icon(&gesture.actions[0])
         } else {
@@ -406,8 +417,9 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         icon_box.add_css_class("icon-holder");
         icon_box.add_css_class(bg_class);
         icon_box.set_valign(gtk::Align::Center);
-        // A gesture that only opens an app shows that app's icon.
-        let icon = match gesture.actions.first().and_then(crate::ui::app_picker::opened_app) {
+        // One that opens an app first shows that app's own icon.
+        let app = gesture.actions.first().and_then(crate::ui::app_picker::first_app).or(only_app);
+        let icon = match app {
             Some(app) => crate::ui::app_picker::app_icon(app, 32),
             None => {
                 let icon = gtk::Image::from_icon_name(icon_name);
@@ -506,22 +518,31 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     preview_canvas.set_draw_func(move |_, cr, width, height| {
         draw_gesture_path(cr, &pts_clone, width as f64, height as f64, true, true);
     });
-    preview_frame.set_child(Some(&preview_canvas));
+    // The keys to hold and the apps it's for show on the drawing, small, in its corner, as they're
+    // part of what triggers the gesture.
+    let preview = gtk::Overlay::new();
+    preview.set_child(Some(&preview_canvas));
+    let keys = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    keys.set_halign(gtk::Align::Start);
+    keys.set_valign(gtk::Align::Start);
+    keys.set_margin_start(4);
+    keys.set_margin_top(4);
     for label in gesture.modifiers.shown_labels(&gestos::keyboards::modifier_names()) {
         let keycap = gtk::Label::new(Some(label));
-        keycap.add_css_class("keycap");
-        keycap.set_valign(gtk::Align::Center);
-        main_hbox.append(&keycap);
+        keycap.add_css_class("keycap-small");
+        keys.append(&keycap);
     }
-    if !gesture.modifiers.is_empty() {
-        let plus = gtk::Label::new(Some("+"));
-        plus.add_css_class("dim-label");
-        main_hbox.append(&plus);
-    }
-    // A gesture for some apps shows theirs, as part of what triggers it.
     if !gesture.apps.is_empty() {
-        main_hbox.append(&crate::ui::app_picker::app_icons(&gesture.apps));
+        keys.append(&crate::ui::app_picker::app_icons(&gesture.apps));
     }
+    preview.add_overlay(&keys);
+    // The path is drawn below them, so they don't hide it.
+    if !gesture.apps.is_empty() {
+        preview_canvas.set_margin_top(20);
+    } else if !gesture.modifiers.is_empty() {
+        preview_canvas.set_margin_top(16);
+    }
+    preview_frame.set_child(Some(&preview));
     main_hbox.append(&preview_frame);
     row.set_child(Some(&main_hbox));
 

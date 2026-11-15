@@ -26,6 +26,11 @@ fn action_identity(action: &ActionType) -> Option<String> {
 }
 
 fn is_in_use(option: &EditorActionOption, gestures: &[Gesture]) -> bool {
+    // An app is offered as its own page, for more gestures in it, whether it's opened by one yet
+    // or not.
+    if crate::ui::app_picker::opened_app(&option.action_type).is_some() {
+        return false;
+    }
     let Some(identity) = action_identity(&option.action_type) else {
         return false;
     };
@@ -91,6 +96,7 @@ fn is_open_ended(option: &EditorActionOption) -> bool {
     match &option.action_type {
         ActionType::Execute(command) => command.is_empty(),
         ActionType::Keyboard(steps) => steps.is_empty(),
+        ActionType::Keypress(keys) => keys.is_empty(),
         _ => false,
     }
 }
@@ -156,12 +162,15 @@ pub fn find_suggestions(
             ActionType::Gnome(_) => 1,
             _ => 0,
         };
+        // Of those that make one's own, the simpler shortcut comes before an advanced action.
+        let is_advanced = matches!(&option.action_type, ActionType::Keyboard(steps) if steps.is_empty());
         (
             *rank == NOT_FOUND,
             is_shortcut,
             shared_rank,
             group,
             is_named_shortcut,
+            is_advanced,
             option.name.to_lowercase(),
         )
     });
@@ -223,8 +232,14 @@ pub fn arrange_suggestions(
 /// The category a gesture is in: the one its action is offered in.
 pub fn gesture_category(gesture: &Gesture, options: &[EditorActionOption]) -> Option<Category> {
     let action = gesture.actions.first()?;
+    // A gesture for an app is that app's, whatever it does, and is in its window among the apps.
+    if !gesture.apps.is_empty() {
+        return Some(Category::Apps);
+    }
     let category = match options.iter().find(|option| crate::actions::action_matches(action, option)) {
         Some(option) => category_of(option),
+        // A command of one's own, which isn't one of GNOME's custom shortcuts.
+        None if matches!(action, ActionType::Execute(_)) => Category::Advanced,
         None => category_of(&EditorActionOption {
             category: 0,
             action_type: action.clone(),
@@ -257,16 +272,19 @@ pub const FEWEST_TO_CATEGORIZE: usize = 20;
 /// list its shortcuts, and Gestos's for the apps and the shortcuts apps share.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Category {
+    // First, with the shortcuts apps share, as using apps is what gestures are most for.
+    Apps,
+    KeyboardShortcuts,
     Windows,
     Navigation,
     Screenshots,
     SoundAndMedia,
     Launchers,
-    Apps,
-    KeyboardShortcuts,
     System,
     Accessibility,
     Typing,
+    // Commands and actions of several steps, written out by hand.
+    Advanced,
     CustomShortcuts,
     Other,
 }
@@ -284,6 +302,7 @@ impl Category {
             Category::System => "System",
             Category::Accessibility => "Accessibility",
             Category::Typing => "Typing",
+            Category::Advanced => "Advanced",
             Category::CustomShortcuts => "Custom Shortcuts",
             Category::Other => "Other",
         }
@@ -301,6 +320,7 @@ impl Category {
             Category::System => "emblem-system-symbolic",
             Category::Accessibility => "preferences-desktop-accessibility-symbolic",
             Category::Typing => "preferences-desktop-locale-symbolic",
+            Category::Advanced => "utilities-terminal-symbolic",
             Category::CustomShortcuts => "utilities-terminal-symbolic",
             Category::Other => "view-more-symbolic",
         }
@@ -326,8 +346,7 @@ pub fn is_custom_shortcut(option: &EditorActionOption) -> bool {
 /// actions go where GNOME's for the same thing do.
 pub fn category_of(option: &EditorActionOption) -> Category {
     match &option.action_type {
-        // A custom action and a command to run go with the apps, as they're mostly about them.
-        _ if is_build_your_own(option) => Category::Apps,
+        _ if is_build_your_own(option) => Category::Advanced,
         ActionType::Click(_) => Category::Other,
         _ if crate::ui::app_picker::opened_app(&option.action_type).is_some() => Category::Apps,
         ActionType::Keypress(_) => Category::KeyboardShortcuts,
@@ -432,7 +451,7 @@ mod tests {
     }
 
     fn many_actions() -> Vec<EditorActionOption> {
-        let mut options = vec![option("Custom Action", ActionType::Keyboard(Vec::new()))];
+        let mut options = vec![option("Advanced Action", ActionType::Keyboard(Vec::new()))];
         options.extend((0..15).map(|i| gnome(&format!("Workspace {i}"), &format!("switch-to-workspace-{i}"))));
         options.extend((0..5).map(|i| gnome(&format!("Volume {i}"), "volume-up")));
         options
@@ -442,7 +461,7 @@ mod tests {
     fn many_actions_are_offered_in_categories() {
         let (apart, others) = arrange_suggestions(many_actions(), false, None, &BTreeMap::new());
         assert!(apart.is_empty());
-        assert_eq!(names_of(&others), ["Navigation 0", "Sound and Media 0", "Apps 0"]);
+        assert_eq!(names_of(&others), ["Navigation 0", "Sound and Media 0", "Advanced 0"]);
     }
 
     #[test]
@@ -472,21 +491,21 @@ mod tests {
     }
 
     #[test]
-    fn a_custom_action_and_a_command_come_apart_among_the_apps() {
+    fn an_advanced_action_and_a_command_come_apart_in_advanced() {
         let options = vec![
             option("Open Files", ActionType::Execute("nautilus".into())),
-            option("Custom Action", ActionType::Keyboard(Vec::new())),
+            option("Advanced Action", ActionType::Keyboard(Vec::new())),
             option("Run Command in Shell", ActionType::Execute(String::new())),
         ];
-        let (apart, _) = arrange_suggestions(options, false, Some(Category::Apps), &BTreeMap::new());
-        assert_eq!(names(&apart), ["Custom Action", "Run Command in Shell"]);
+        let (apart, _) = arrange_suggestions(options, false, Some(Category::Advanced), &BTreeMap::new());
+        assert_eq!(names(&apart), ["Advanced Action", "Run Command in Shell"]);
     }
 
     #[test]
     fn gestures_are_in_their_actions_categories_and_counted_there() {
         let options = vec![
             option("Close Window", ActionType::Kill),
-            option("Custom Action", ActionType::Keyboard(Vec::new())),
+            option("Advanced Action", ActionType::Keyboard(Vec::new())),
         ];
         let mut steps = gesture(ActionType::Keyboard(vec![
             gestos::key_steps::KeyStep::Type("hello".into()),
@@ -494,15 +513,18 @@ mod tests {
         steps.name = "Say hello".into();
         let gestures = [gesture(ActionType::Kill), gesture(ActionType::Kill), steps];
         assert_eq!(gesture_category(&gestures[0], &options), Some(Category::Windows));
-        assert_eq!(gesture_category(&gestures[2], &options), Some(Category::Apps));
+        assert_eq!(gesture_category(&gestures[2], &options), Some(Category::Advanced));
+        let mut command = gesture(ActionType::Execute("backup.sh".into()));
+        command.name = "Back up".into();
+        assert_eq!(gesture_category(&command, &options), Some(Category::Advanced));
         let counts = gestures_by_category(&gestures, &options);
         assert_eq!(counts.get(&Category::Windows), Some(&2));
-        assert_eq!(counts.get(&Category::Apps), Some(&1));
+        assert_eq!(counts.get(&Category::Advanced), Some(&1));
         // A category with gestures and nothing left to offer still shows, with its count.
         let (_, categories) = arrange_suggestions(many_actions(), false, None, &counts);
         assert_eq!(
             names_of(&categories),
-            ["Windows 2", "Navigation 0", "Sound and Media 0", "Apps 1"]
+            ["Windows 2", "Navigation 0", "Sound and Media 0", "Advanced 1"]
         );
     }
 
@@ -512,14 +534,29 @@ mod tests {
         few.truncate(10);
         let (apart, others) = arrange_suggestions(few, false, None, &BTreeMap::new());
         assert!(apart.is_empty());
-        assert_eq!(names_of(&others)[..2], ["Custom Action", "Workspace 0"]);
+        assert_eq!(names_of(&others)[..2], ["Advanced Action", "Workspace 0"]);
     }
 
     #[test]
-    fn actions_to_build_go_with_the_apps() {
+    fn a_gesture_for_an_app_is_among_the_apps() {
+        let options = [
+            option("Copy", ActionType::Keypress("Control+C".into())),
+            option("Close Window", ActionType::Kill),
+        ];
+        let mut copy = gesture(ActionType::Keypress("Control+C".into()));
+        assert_eq!(gesture_category(&copy, &options), Some(Category::KeyboardShortcuts));
+        copy.apps = vec!["org.gnome.Calculator".into()];
+        assert_eq!(gesture_category(&copy, &options), Some(Category::Apps));
+        let mut close = gesture(ActionType::Kill);
+        close.apps = vec!["org.mozilla.firefox".into()];
+        assert_eq!(gesture_category(&close, &options), Some(Category::Apps));
+    }
+
+    #[test]
+    fn actions_to_build_are_advanced() {
         let category = |action: ActionType| category_of(&option("", action));
-        assert_eq!(category(ActionType::Keyboard(Vec::new())), Category::Apps);
-        assert_eq!(category(ActionType::Execute(String::new())), Category::Apps);
+        assert_eq!(category(ActionType::Keyboard(Vec::new())), Category::Advanced);
+        assert_eq!(category(ActionType::Execute(String::new())), Category::Advanced);
         assert_eq!(category(ActionType::Click(None)), Category::Other);
         assert_eq!(category(ActionType::Keypress(String::new())), Category::KeyboardShortcuts);
         assert_eq!(category(ActionType::Execute("backup.sh".into())), Category::CustomShortcuts);
@@ -710,20 +747,21 @@ mod tests {
 
 
     #[test]
-    fn run_command_and_custom_action_are_always_offered_last() {
+    fn ones_to_make_your_own_are_always_offered_last() {
         let options = [
             option("Copy", ActionType::Keypress("Control+C".to_string())),
-            option("Custom Action", ActionType::Keyboard(Vec::new())),
+            option("Advanced Action", ActionType::Keyboard(Vec::new())),
+            option("Custom Keyboard Shortcut", ActionType::Keypress(String::new())),
             option("Run Command in Shell", ActionType::Execute(String::new())),
             option("Close Window", ActionType::Kill),
         ];
         assert_eq!(
             names(&find_suggestions(&options, &[], "close")),
-            ["Close Window", "Run Command in Shell", "Custom Action"]
+            ["Close Window", "Run Command in Shell", "Custom Keyboard Shortcut", "Advanced Action"]
         );
         assert_eq!(
-            names(&find_suggestions(&options, &[], "custom")),
-            ["Custom Action", "Run Command in Shell"]
+            names(&find_suggestions(&options, &[], "advanced")),
+            ["Advanced Action", "Run Command in Shell", "Custom Keyboard Shortcut"]
         );
     }
 
@@ -742,11 +780,11 @@ mod tests {
             names(&find_suggestions(&options, &[], "")),
             ["Close Window", "Volume up", "Open Text Editor", "Copy"]
         );
-        // Once a gesture opens it, it isn't offered again.
+        // Still offered once a gesture opens it, as its page is where more gestures for it go.
         let used = [gesture(open("org.gnome.TextEditor"))];
         assert_eq!(
             names(&find_suggestions(&options, &used, "")),
-            ["Close Window", "Volume up", "Copy"]
+            ["Close Window", "Volume up", "Open Text Editor", "Copy"]
         );
     }
 

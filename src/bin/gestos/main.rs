@@ -1,6 +1,7 @@
 mod state;
 mod suggestions;
 mod actions;
+mod app_shortcuts;
 mod daemon;
 mod debug_info;
 mod extension;

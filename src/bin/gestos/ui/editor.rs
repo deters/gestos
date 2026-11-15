@@ -11,7 +11,6 @@ use crate::state::{AppState, EditorActionOption};
 use crate::actions::{action_matches, action_needs_parameter};
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
 use crate::ui::keyboard_steps::append_steps_rows;
-use crate::ui::app_picker::append_apps_rows;
 use gestos::key_steps::{format_steps, parse_steps, KeyStep};
 use crate::ui::components::draw_gesture_path;
 use crate::daemon::reload_daemon;
@@ -41,7 +40,10 @@ fn has_own_name(option: &EditorActionOption) -> bool {
 /// Names from before the action was renamed count too.
 fn is_automatic_name(name: &str, action_name: &str) -> bool {
     let name = name.trim();
-    name.is_empty() || name.starts_with(action_name) || name.starts_with("Custom Keyboard Action")
+    name.is_empty()
+        || name.starts_with(action_name)
+        || name.starts_with("Custom Action")
+        || name.starts_with("Custom Keyboard Action")
 }
 
 /// A gesture name from what was searched for, with its first letter capitalized, unless the search
@@ -158,21 +160,22 @@ fn unique_gesture_name(name: &str, gestures: &[Gesture], own_id: Option<&str>) -
 struct ModifierKeys {
     recorded: Rc<Cell<Modifiers>>,
     held: Rc<Cell<Modifiers>>,
-    label: gtk::Label,
     keys: gtk::Box,
 }
 
 impl ModifierKeys {
     fn new(initial: Modifiers) -> Self {
-        let label = gtk::Label::new(None);
-        label.set_halign(gtk::Align::Start);
-        label.set_hexpand(true);
+        // In the drawing's corner, as they're part of the gesture drawn there. Without any, the
+        // corner is empty.
         let keys = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        keys.set_valign(gtk::Align::Center);
+        keys.set_halign(gtk::Align::Start);
+        keys.set_valign(gtk::Align::Start);
+        keys.set_margin_start(12);
+        keys.set_margin_top(12);
+        keys.set_can_target(false);
         let modifier_keys = ModifierKeys {
             recorded: Rc::new(Cell::new(initial)),
             held: Rc::new(Cell::new(Modifiers::default())),
-            label,
             keys,
         };
         modifier_keys.show();
@@ -191,7 +194,6 @@ impl ModifierKeys {
     fn show(&self) {
         let held = self.held.get();
         let shown = if held.is_empty() { self.recorded.get() } else { held };
-        self.label.set_text(if shown.is_empty() { "No Modifier Keys" } else { "Modifier Keys" });
         while let Some(child) = self.keys.first_child() {
             self.keys.remove(&child);
         }
@@ -319,7 +321,7 @@ fn show_action_parameter(
 }
 
 pub fn open_gesture_editor(state_rc: &Rc<RefCell<AppState>>, gesture: Gesture) {
-    open_editor(state_rc, Some(gesture), None, None);
+    open_editor(state_rc, Some(gesture), None, None, &[]);
 }
 
 /// Deletes a gesture right away, with a toast to bring it back. The focus moves to the gesture
@@ -381,10 +383,20 @@ fn restore_gesture(state_rc: &Rc<RefCell<AppState>>, removed: &Gesture, pos: usi
 /// editor never changes it. A custom keyboard shortcut is recorded first, as its keys are all
 /// there is to it, and the editor only opens once they're set.
 pub fn open_gesture_editor_for_action(state_rc: &Rc<RefCell<AppState>>, action: EditorActionOption) {
+    open_gesture_editor_in_apps(state_rc, action, &[]);
+}
+
+/// The same, for a new gesture already set to work only in some apps.
+pub fn open_gesture_editor_in_apps(
+    state_rc: &Rc<RefCell<AppState>>,
+    action: EditorActionOption,
+    apps: &[String],
+) {
     if !crate::suggestions::is_custom_shortcut(&action) {
-        open_editor(state_rc, None, Some(action), None);
+        open_editor(state_rc, None, Some(action), None, apps);
         return;
     }
+    let apps = apps.to_vec();
     let keys = gtk::Entry::new();
     let window = crate::ui::main_window::dialog_parent(&state_rc.borrow());
     let state_set = Rc::downgrade(state_rc);
@@ -392,10 +404,24 @@ pub fn open_gesture_editor_for_action(state_rc: &Rc<RefCell<AppState>>, action: 
     let on_set: Rc<dyn Fn()> = Rc::new(move || {
         let keys = keys_set.text().to_string();
         if let (Some(state_rc), false) = (state_set.upgrade(), keys.is_empty()) {
-            open_editor(&state_rc, None, Some(action.clone()), Some(&keys));
+            open_editor(&state_rc, None, Some(action.clone()), Some(&keys), &apps);
         }
     });
     open_shortcut_recorder(&window, "", &keys, on_set);
+}
+
+/// Opens the editor for a new gesture for one of an app's own shortcuts, in that app only, and
+/// named as the app names it.
+pub fn open_gesture_editor_for_app_shortcut(state_rc: &Rc<RefCell<AppState>>, app: &str, keys: &str) {
+    let custom_shortcut = state_rc
+        .borrow()
+        .action_options
+        .iter()
+        .find(|option| crate::suggestions::is_custom_shortcut(option))
+        .cloned();
+    if let Some(option) = custom_shortcut {
+        open_editor(state_rc, None, Some(option), Some(keys), &[app.to_string()]);
+    }
 }
 
 fn open_editor(
@@ -403,6 +429,7 @@ fn open_editor(
     target_gesture: Option<Gesture>,
     preset_action: Option<EditorActionOption>,
     preset_keys: Option<&str>,
+    preset_apps: &[String],
 ) {
     let state = state_rc.borrow();
     let dialog = gtk::Window::new();
@@ -505,19 +532,56 @@ fn open_editor(
     // Drawn with Gestos's own button, anywhere on screen, rather than in the drawing area.
     let drawn_on_screen = Rc::new(std::cell::Cell::new(false));
 
+    // Until there's a gesture, a mouse shows how one is drawn, with the button it's drawn with.
+    let draw_button = state_rc.borrow().config.button.unwrap_or(crate::ui::settings::DEFAULT_DRAW_BUTTON);
+    let demo_started = Rc::new(Cell::new(None::<i64>));
+    let demo_time = Rc::new(Cell::new(0.0));
     let pts_clone = Rc::clone(&recorded_points);
     let rec_clone = Rc::clone(&is_recording);
-    let on_screen_clone = Rc::clone(&drawn_on_screen);
-    canvas.set_draw_func(move |_, cr, width, height| {
+    let time_drawn = Rc::clone(&demo_time);
+    canvas.set_draw_func(move |canvas, cr, width, height| {
+        if *rec_clone.borrow() {
+            return;
+        }
         let pts = pts_clone.borrow();
-        let active = *rec_clone.borrow() && !on_screen_clone.get();
-        draw_gesture_path(cr, &pts, width as f64, height as f64, true, !active);
+        if pts.len() < 2 {
+            #[allow(deprecated)]
+            let fg = canvas.style_context().color();
+            let fg = (f64::from(fg.red()), f64::from(fg.green()), f64::from(fg.blue()));
+            crate::ui::gesture_demo::draw(cr, width as f64, height as f64, time_drawn.get(), draw_button, fg);
+        } else {
+            draw_gesture_path(cr, &pts, width as f64, height as f64, true, true);
+        }
+    });
+    // Under the mouse while it shows how, as gestures aren't drawn in the window but anywhere.
+    let draw_anywhere = gtk::Label::new(Some("Draw anywhere on the screen"));
+    draw_anywhere.add_css_class("dim-label");
+    draw_anywhere.set_valign(gtk::Align::End);
+    draw_anywhere.set_margin_bottom(16);
+    draw_anywhere.set_can_target(false);
+    let pts_tick = Rc::clone(&recorded_points);
+    let rec_tick = Rc::clone(&is_recording);
+    let draw_anywhere_tick = draw_anywhere.clone();
+    canvas.add_tick_callback(move |canvas, clock| {
+        let showing_how = pts_tick.borrow().len() < 2 && !*rec_tick.borrow();
+        draw_anywhere_tick.set_visible(showing_how);
+        if showing_how {
+            let now = clock.frame_time();
+            let started = demo_started.get().unwrap_or(now);
+            demo_started.set(Some(started));
+            demo_time.set((now - started) as f64 / 1_000_000.0);
+            canvas.queue_draw();
+        } else {
+            // It starts over when it shows again, after a click that drew nothing.
+            demo_started.set(None);
+        }
+        glib::ControlFlow::Continue
     });
 
-    // GestureDrag controller for recording drawing. Any button draws, as people try the one
-    // gestures are drawn with.
+    // Only the button gestures are drawn with draws here, for when gestures are off and the
+    // daemon doesn't record it from the screen.
     let drag = gtk::GestureDrag::new();
-    drag.set_button(0);
+    drag.set_button(draw_button as u32);
 
     let conflict_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     conflict_box.add_css_class("warning-box");
@@ -546,38 +610,24 @@ fn open_editor(
     );
     modifier_toggles.light_up_held_keys(&dialog);
 
-    // Shown over the drawing area while there's no gesture in it.
-    // Named after the button gestures are drawn with, which is the one to draw with here too.
-    let draw_button = state_rc.borrow().config.button.unwrap_or(crate::ui::settings::DEFAULT_DRAW_BUTTON);
-    let button_name = crate::ui::settings::DRAW_BUTTONS
-        .iter()
-        .find(|(_, button)| *button == draw_button)
-        .map_or("right", |(name, _)| name)
-        .to_lowercase();
-    let draw_hint = gtk::Label::new(Some(&format!(
-        "Draw your gesture with the {button_name} mouse button. Hold a modifier key while drawing \
-         to make it part of the trigger."
-    )));
-    draw_hint.set_wrap(true);
-    draw_hint.set_justify(gtk::Justification::Center);
-    draw_hint.set_max_width_chars(36);
-    draw_hint.set_margin_start(24);
-    draw_hint.set_margin_end(24);
-    draw_hint.add_css_class("dim-label");
-    draw_hint.set_can_target(false);
-    draw_hint.set_visible(recorded_points.borrow().len() < 2);
+    // All the drawing shows while a gesture is drawn, which is then shown once it's done.
+    let recording_label = gtk::Label::new(Some("Recording"));
+    recording_label.add_css_class("title-2");
+    recording_label.add_css_class("dim-label");
+    recording_label.set_can_target(false);
+    recording_label.set_visible(false);
 
     let canvas_clone = canvas.clone();
     let pts_drag = Rc::clone(&recorded_points);
     let rec_drag = Rc::clone(&is_recording);
     let conflict_box_begin = conflict_box.clone();
     let toggles_begin = modifier_toggles.clone();
-    let hint_begin = draw_hint.clone();
+    let recording_begin = recording_label.clone();
     let on_screen_begin = Rc::clone(&drawn_on_screen);
     drag.connect_drag_begin(move |gesture, start_x, start_y| {
         *rec_drag.borrow_mut() = true;
         on_screen_begin.set(false);
-        hint_begin.set_visible(false);
+        recording_begin.set_visible(true);
         // The keys held as it's drawn are the ones it needs, and none held is none.
         toggles_begin.set(held_modifiers(gesture.current_event_state()));
         let mut pts = pts_drag.borrow_mut();
@@ -624,7 +674,7 @@ fn open_editor(
 
     // The apps the gesture works in, which are part of its trigger, like its modifier keys.
     let gesture_apps = Rc::new(RefCell::new(
-        target_gesture.as_ref().map(|g| g.apps.clone()).unwrap_or_default(),
+        target_gesture.as_ref().map_or_else(|| preset_apps.to_vec(), |g| g.apps.clone()),
     ));
 
     // A shape close to another gesture's conflicts when both can fire at once: with the same
@@ -676,12 +726,11 @@ fn open_editor(
     let canvas_clone3 = canvas.clone();
     let rec_drag3 = Rc::clone(&is_recording);
     let check_drag_end = Rc::clone(&check_conflict);
-    let pts_hint = Rc::clone(&recorded_points);
-    let hint_end = draw_hint.clone();
+    let recording_end = recording_label.clone();
     let check_drawn = check.clone();
     let finish_drawing: Rc<dyn Fn()> = Rc::new(move || {
         *rec_drag3.borrow_mut() = false;
-        hint_end.set_visible(pts_hint.borrow().len() < 2);
+        recording_end.set_visible(false);
         canvas_clone3.queue_draw();
         println!("GUI: Gesture drawing finished.");
         check_drag_end();
@@ -689,6 +738,22 @@ fn open_editor(
     });
     let finish_drag = Rc::clone(&finish_drawing);
     drag.connect_drag_end(move |_, _, _| finish_drag());
+
+    // A click in the area clears what's drawn there, and the keys held with it, to draw again.
+    let clear = gtk::GestureClick::new();
+    clear.set_button(gtk::gdk::BUTTON_PRIMARY);
+    let pts_clear = Rc::clone(&recorded_points);
+    let toggles_clear = modifier_toggles.clone();
+    let conflict_clear = conflict_box.clone();
+    let check_cleared = check.clone();
+    let canvas_clear = canvas.clone();
+    clear.connect_released(move |_, _, _, _| {
+        pts_clear.borrow_mut().clear();
+        toggles_clear.set(Modifiers::default());
+        conflict_clear.set_visible(false);
+        canvas_clear.queue_draw();
+        check_cleared();
+    });
 
     // While Gestos runs, the button it draws with doesn't reach any window: the gesture is drawn
     // on screen. Its path then comes from the daemon as it's drawn, and isn't run meanwhile.
@@ -733,7 +798,7 @@ fn open_editor(
         let pts = Rc::clone(&recorded_points);
         let recording = Rc::clone(&is_recording);
         let on_screen = Rc::clone(&drawn_on_screen);
-        let hint = draw_hint.clone();
+        let shown_recording = recording_label.clone();
         let conflict = conflict_box.clone();
         let toggles = modifier_toggles.clone();
         let canvas_updated = canvas.clone();
@@ -747,7 +812,7 @@ fn open_editor(
             if !*recording.borrow() {
                 *recording.borrow_mut() = true;
                 on_screen.set(true);
-                hint.set_visible(false);
+                shown_recording.set_visible(true);
                 conflict.set_visible(false);
                 // As when drawing in the window, the keys held then are the ones it needs.
                 toggles.set(held.get());
@@ -781,25 +846,36 @@ fn open_editor(
         }
     });
 
-    let modifiers_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    modifiers_row.add_css_class("settings-row");
-    modifiers_row.append(&modifier_toggles.label);
-    modifiers_row.append(&modifier_toggles.keys);
-    // The keys to hold and the shape to draw are one gesture, so they share a list: the keys on
-    // top, the shape right below them.
+    // The keys to hold and the shape to draw are one gesture, so the keys show on the drawing.
     let gesture_list = gtk::ListBox::new();
     gesture_list.add_css_class("boxed-list");
     gesture_list.set_selection_mode(gtk::SelectionMode::None);
-    let modifiers_list_row = gtk::ListBoxRow::new();
-    modifiers_list_row.set_activatable(false);
-    modifiers_list_row.set_child(Some(&modifiers_row));
-    gesture_list.append(&modifiers_list_row);
     canvas.add_controller(drag);
+    canvas.add_controller(clear);
     let canvas_row = gtk::ListBoxRow::new();
     canvas_row.set_activatable(false);
     let canvas_overlay = gtk::Overlay::new();
     canvas_overlay.set_child(Some(&canvas));
-    canvas_overlay.add_overlay(&draw_hint);
+    canvas_overlay.add_overlay(&recording_label);
+    canvas_overlay.add_overlay(&draw_anywhere);
+    // In the drawing's corner, with the keys to hold: the app the gesture is for, which it was
+    // made in and stays in. A gesture for every app shows none.
+    let corner = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    corner.set_halign(gtk::Align::Start);
+    corner.set_valign(gtk::Align::Start);
+    corner.set_margin_start(12);
+    corner.set_margin_top(12);
+    for app in gesture_apps.borrow().iter() {
+        let icon = crate::ui::app_picker::app_icon(app, 24);
+        let name = crate::ui::app_picker::app_name(app);
+        icon.set_tooltip_text(Some(&name));
+        icon.update_property(&[gtk::accessible::Property::Label(&name)]);
+        corner.append(&icon);
+    }
+    modifier_toggles.keys.set_margin_start(0);
+    modifier_toggles.keys.set_margin_top(0);
+    corner.append(&modifier_toggles.keys);
+    canvas_overlay.add_overlay(&corner);
     canvas_row.set_child(Some(&canvas_overlay));
     gesture_list.append(&canvas_row);
     scroll_content.append(&gesture_list);
@@ -813,17 +889,6 @@ fn open_editor(
         }
     });
 
-    let apps_list = gtk::ListBox::new();
-    apps_list.add_css_class("boxed-list");
-    apps_list.set_selection_mode(gtk::SelectionMode::None);
-    append_apps_rows(
-        &apps_list,
-        &dialog,
-        Rc::clone(&gesture_apps),
-        Rc::clone(&check_conflict),
-        &state_rc.borrow().extension_status,
-    );
-    scroll_content.append(&apps_list);
 
     // For actions that need the GNOME extension, which isn't always there.
     let extension_label = gtk::Label::new(None);
@@ -942,6 +1007,7 @@ fn open_editor(
         let selected_action = Rc::clone(&selected_action);
         let is_name_customized = Rc::clone(&is_name_customized);
         let is_updating_programmatically = Rc::clone(&is_updating_programmatically);
+        let apps = Rc::clone(&gesture_apps);
 
         move || {
             if *is_name_customized.borrow() {
@@ -949,7 +1015,15 @@ fn open_editor(
             }
             if let Some(opt) = selected_action.borrow().as_ref() {
                 let detail = action_details_entry.text().to_string();
-                let default_name = get_default_gesture_name(opt, &detail);
+                // A shortcut for one app is named as that app names it, if it lists those keys.
+                let app_title = match apps.borrow().as_slice() {
+                    [app] if crate::suggestions::is_custom_shortcut(opt) && !detail.trim().is_empty() => {
+                        crate::app_shortcuts::title_for(app, detail.trim())
+                    }
+                    _ => None,
+                };
+                let default_name =
+                    app_title.unwrap_or_else(|| get_default_gesture_name(opt, &detail));
                 
                 *is_updating_programmatically.borrow_mut() = true;
                 name_entry.set_text(&default_name);
@@ -1113,10 +1187,19 @@ fn open_editor(
         };
         dialog.set_title(Some(&title));
         dialog_title.set_text(&title);
-        let note = crate::ui::main_window::extension_note(
-            &opt.action_type,
-            &state_rc.borrow().extension_status,
-        );
+        let status = state_rc.borrow().extension_status.clone();
+        // An app's gesture also needs the app in use to be known.
+        let note = crate::ui::main_window::extension_note(&opt.action_type, &status).or_else(|| {
+            let for_app = !gesture_apps.borrow().is_empty();
+            for_app
+                .then(|| {
+                    crate::ui::app_picker::apps_note(
+                        &status,
+                        gestos::active_app::can_tell_without_extension(),
+                    )
+                })
+                .flatten()
+        });
         extension_label.set_text(note.unwrap_or_default());
         extension_label.set_visible(note.is_some());
         // Most actions have nothing to fill in, which leaves this section empty. An app's own
@@ -1415,8 +1498,15 @@ fn open_editor(
         reload_daemon(state.dbus_conn.as_ref(), Some(&dialog_clone2));
         drop(state);
 
-        refresh_gesture_list(&state_clone, Some(&name));
         dialog_clone2.destroy();
+        // A gesture made from the main page is shown where it's kept, as the search that found
+        // its action may hide it. One made in a category's window shows there already.
+        let made_on_main_page = !is_edit && state_clone.borrow().open_category.is_none();
+        if made_on_main_page {
+            crate::ui::main_window::show_new_gesture(&state_clone, &name);
+        } else {
+            refresh_gesture_list(&state_clone, Some(&name));
+        }
     });
     dialog_header.pack_end(&save_btn);
 
@@ -1447,8 +1537,9 @@ mod tests {
 
     #[test]
     fn a_custom_actions_own_name_is_kept() {
-        let action = "Custom Action";
-        assert!(is_automatic_name("Custom Action", action));
+        let action = "Advanced Action";
+        assert!(is_automatic_name("Advanced Action", action));
+        assert!(is_automatic_name("Advanced Action (Control+T)", action));
         assert!(is_automatic_name("Custom Action (Control+T)", action));
         assert!(is_automatic_name("Custom Keyboard Action (Alt+F4)", action));
         assert!(is_automatic_name("  ", action));
@@ -1457,10 +1548,10 @@ mod tests {
 
     #[test]
     fn a_new_custom_action_is_named_after_the_search() {
-        let action = "Custom Action";
+        let action = "Advanced Action";
         assert_eq!(name_from_search("  new tab ", action).as_deref(), Some("New tab"));
-        assert_eq!(name_from_search("custom", action), None);
-        assert_eq!(name_from_search("custom act", action), None);
+        assert_eq!(name_from_search("advanced", action), None);
+        assert_eq!(name_from_search("advanced act", action), None);
         assert_eq!(name_from_search("", action), None);
     }
     use super::*;

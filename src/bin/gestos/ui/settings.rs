@@ -176,6 +176,33 @@ fn overview_click_row(state_rc: &Rc<RefCell<AppState>>) -> Option<adw::ActionRow
     Some(row)
 }
 
+/// Whether the main page lists every gesture, above the categories. It only changes what Gestos
+/// shows, so the daemon isn't told.
+fn all_gestures_row(state_rc: &Rc<RefCell<AppState>>) -> adw::ActionRow {
+    let title = "Show Gestures in the Main Page";
+    let description = "List every gesture above the categories";
+    let (row, row_box, subtitle) = settings_row(title, description);
+    let switch = settings_switch(title);
+    switch.set_active(state_rc.borrow().config.all_gestures);
+    let state_rc = Rc::clone(state_rc);
+    switch.connect_state_set(move |_, enabled| {
+        {
+            let mut state = state_rc.borrow_mut();
+            state.config.all_gestures = enabled;
+            if let Err(e) = state.config.save_to_file() {
+                state.config.all_gestures = !enabled;
+                subtitle.set_text(&format!("Could not change this setting: {e}"));
+                return glib::Propagation::Stop;
+            }
+        }
+        subtitle.set_text(description);
+        refresh_gesture_list(&state_rc, None);
+        glib::Propagation::Proceed
+    });
+    row_box.append(&switch);
+    row
+}
+
 /// On X11, Gestos draws gestures' paths itself, as its configuration says.
 fn x11_path_row(state_rc: &Rc<RefCell<AppState>>) -> adw::ActionRow {
     let title = "Show Gesture Path";
@@ -289,6 +316,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     } else if gestos::active_app::is_x11_session() {
         gestures_list.add(&x11_path_row(state_rc));
     }
+    gestures_list.add(&all_gestures_row(state_rc));
 
     if on_gnome {
         // --- Window Tiling ---

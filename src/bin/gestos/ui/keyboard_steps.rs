@@ -37,7 +37,9 @@ fn step_name(step: &KeyStep) -> &'static str {
     }
 }
 
-fn step_icon(step: &KeyStep) -> &'static str {
+/// The icon of a kind of step, on its rows, and on the gesture whose advanced action starts with
+/// it.
+pub fn step_icon(step: &KeyStep) -> &'static str {
     match step {
         KeyStep::Open(_) => OPEN_ICON,
         KeyStep::Press(_) => PRESS_ICON,

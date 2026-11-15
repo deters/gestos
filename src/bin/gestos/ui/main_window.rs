@@ -95,6 +95,9 @@ impl PageHeading {
 #[derive(Clone)]
 pub struct CategoryPage {
     window: gtk::Window,
+    /// The headings over the gestures and over the actions to make more, as in an app's window.
+    gestures_heading: gtk::Label,
+    create_heading: gtk::Label,
     gestures: gtk::ListBox,
     apart: gtk::ListBox,
     actions: gtk::ListBox,
@@ -102,17 +105,348 @@ pub struct CategoryPage {
     shown: Rc<RefCell<(Vec<String>, Vec<crate::state::EditorActionOption>, Vec<Suggestion>)>>,
 }
 
-/// The window the editor and other dialogs open over: a category's, while one is open.
+/// The window the editor and other dialogs open over: the topmost of an app's shortcuts and a
+/// category's, while one is open.
 pub fn dialog_parent(state: &AppState) -> gtk::Window {
-    match &state.category_page {
-        Some(page) => page.window.clone(),
-        None => state.window.clone().upcast(),
+    // Only one still shown, as one closed is let go of only once nothing else holds the state.
+    let shown = |window: &gtk::Window| window.is_visible().then(|| window.clone());
+    state
+        .app_page
+        .as_ref()
+        .and_then(|page| shown(&page.window))
+        .or_else(|| state.category_page.as_ref().and_then(|page| shown(&page.window)))
+        .unwrap_or_else(|| state.window.clone().upcast())
+}
+
+/// A keyboard shortcut of one's own for an app, named for it, as it's for that app alone, and so
+/// are the gestures named after it.
+fn shortcut_on_app(state: &AppState, app: &str) -> Option<crate::state::EditorActionOption> {
+    let option = state
+        .action_options
+        .iter()
+        .find(|option| crate::suggestions::is_custom_shortcut(option))?;
+    Some(crate::state::EditorActionOption {
+        name: format!("Custom Keyboard Shortcut on {}", crate::ui::app_picker::app_name(app)),
+        ..option.clone()
+    })
+}
+
+/// An app's own window: the gestures made for it, then opening it and its own shortcuts.
+#[derive(Clone)]
+pub struct AppPage {
+    window: gtk::Window,
+    app: String,
+    /// The gestures only for the app, and those for every app that open it, apart, each under
+    /// its heading, those for every app shown first.
+    only_here: (gtk::Label, gtk::ListBox),
+    everywhere: (gtk::Label, gtk::ListBox),
+    /// Opening it, which makes a gesture for every app, under its heading, offered until a gesture
+    /// does.
+    opens: (gtk::Label, gtk::ListBox),
+    /// The app's own shortcuts, by group: its heading, if any, its list, and each row with its
+    /// keys, offered until a gesture for the app presses them.
+    shortcut_groups: Rc<RefCell<Vec<(Option<gtk::Label>, gtk::ListBox, Vec<(gtk::ListBoxRow, String)>)>>>,
+    /// The gestures each list shows, by row, for when one is activated.
+    shown: Rc<RefCell<(Vec<String>, Vec<String>)>>,
+}
+
+/// How many gestures are made for an app.
+fn gestures_for_app(state: &AppState, app: &str) -> usize {
+    state.config.gestures.iter().filter(|g| !g.is_deleted && is_for_app(g, app)).count()
+}
+
+/// Whether a gesture is made for an app: only for it, or to open it first.
+fn is_for_app(gesture: &Gesture, app: &str) -> bool {
+    gesture.apps.iter().any(|id| id == app)
+        || gesture.actions.first().and_then(crate::ui::app_picker::first_app) == Some(app)
+}
+
+/// Shows the gestures made for the app open, if one is. The one named, such as the one just
+/// saved, gets the focus.
+fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) {
+    let state = state_rc.borrow();
+    let Some(page) = state.app_page.clone() else { return };
+    let (only_here, everywhere): (Vec<Gesture>, Vec<Gesture>) = state
+        .config
+        .gestures
+        .iter()
+        .filter(|g| !g.is_deleted && is_for_app(g, &page.app))
+        .cloned()
+        .partition(|g| !g.apps.is_empty());
+    let show = |(heading, list): &(gtk::Label, gtk::ListBox), gestures: &[Gesture]| {
+        while let Some(child) = list.first_child() {
+            list.remove(&child);
+        }
+        for gesture in gestures {
+            let row = create_gesture_row(gesture, state_rc);
+            list.append(&row);
+            if select_name == Some(gesture.name.as_str()) {
+                row.grab_focus();
+                scroll_to(&row);
+            }
+        }
+        heading.set_visible(!gestures.is_empty());
+        list.set_visible(!gestures.is_empty());
+    };
+    show(&page.only_here, &only_here);
+    show(&page.everywhere, &everywhere);
+    let opened = state.config.gestures.iter().any(|g| {
+        !g.is_deleted
+            && g.actions.first().and_then(crate::ui::app_picker::opened_app) == Some(page.app.as_str())
+    });
+    page.opens.0.set_visible(!opened);
+    page.opens.1.set_visible(!opened);
+    // A shortcut already pressed by a gesture for the app isn't offered again.
+    let used = |keys: &str| {
+        state.config.gestures.iter().any(|g| {
+            !g.is_deleted
+                && g.apps.iter().any(|app| *app == page.app)
+                && matches!(g.actions.first(),
+                    Some(gestos::config::ActionType::Keypress(pressed)) if crate::actions::same_keys(pressed, keys))
+        })
+    };
+    for (label, list, rows) in page.shortcut_groups.borrow().iter() {
+        let mut any = false;
+        for (row, keys) in rows {
+            let offered = !used(keys);
+            row.set_visible(offered);
+            any |= offered;
+        }
+        list.set_visible(any);
+        if let Some(label) = label {
+            label.set_visible(any);
+        }
     }
+    let ids = |gestures: Vec<Gesture>| gestures.into_iter().map(|g| g.id).collect();
+    *page.shown.borrow_mut() = (ids(only_here), ids(everywhere));
+}
+
+/// Opens an app's own window over its category's: opening the app first, then each of the
+/// shortcuts its Keyboard Shortcuts window lists, under their groups, if it has that window.
+fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorActionOption, app: &str) {
+    // One app's at a time, over its category's, never over another app's.
+    let previous = state_rc.borrow_mut().app_page.take();
+    if let Some(previous) = previous {
+        previous.window.destroy();
+    }
+    let shortcuts = crate::app_shortcuts::shortcuts_of(app);
+    let parent = dialog_parent(&state_rc.borrow());
+    let window = gtk::Window::new();
+    window.set_transient_for(Some(&parent));
+    window.set_modal(true);
+    window.set_destroy_with_parent(true);
+    let name = crate::ui::app_picker::app_name(app);
+    window.set_title(Some(&name));
+    window.set_default_size(parent.width(), parent.height());
+    let header = gtk::HeaderBar::new();
+    header.set_title_widget(Some(&gtk::Label::new(None)));
+    window.set_titlebar(Some(&header));
+
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let heading = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    heading.set_margin_top(12);
+    heading.set_margin_bottom(18);
+    heading.set_halign(gtk::Align::Center);
+    heading.append(&crate::ui::app_picker::app_icon(app, 64));
+    let title = gtk::Label::new(Some(&name));
+    title.add_css_class("title-1");
+    title.set_wrap(true);
+    title.set_justify(gtk::Justification::Center);
+    heading.append(&title);
+    content.append(&heading);
+    let list = || {
+        let list = gtk::ListBox::new();
+        list.add_css_class("boxed-list");
+        list.set_selection_mode(gtk::SelectionMode::None);
+        list.set_margin_bottom(24);
+        list
+    };
+
+    let heading = |text: &str| {
+        let label = gtk::Label::new(Some(text));
+        label.add_css_class("section-header");
+        label.set_xalign(0.0);
+        label
+    };
+    let page = AppPage {
+        window: window.clone(),
+        app: app.to_string(),
+        only_here: (heading(&format!("Gestures Inside {name}")), list()),
+        everywhere: (heading("Gestures"), list()),
+        opens: (heading("Create New Gesture"), list()),
+        shortcut_groups: Default::default(),
+        shown: Default::default(),
+    };
+    // Those for every app first, then those only for this one.
+    for (index, (heading, list)) in [(1, &page.everywhere), (0, &page.only_here)] {
+        let state_edit = Rc::downgrade(state_rc);
+        let shown = Rc::clone(&page.shown);
+        list.connect_row_activated(move |_, row| {
+            let Some(state_rc) = state_edit.upgrade() else { return };
+            let shown = shown.borrow();
+            let ids = if index == 0 { &shown.0 } else { &shown.1 };
+            let id = ids.get(row.index() as usize).cloned();
+            drop(shown);
+            let gesture = id
+                .and_then(|id| state_rc.borrow().config.gestures.iter().find(|g| g.id == id).cloned());
+            if let Some(gesture) = gesture {
+                open_gesture_editor(&state_rc, gesture);
+            }
+        });
+        content.append(heading);
+        content.append(list);
+    }
+
+    // What can be made for the app, after the gestures it already has, set well apart from them:
+    // opening it, a gesture for every app, then the gestures only for it.
+    let (create, opens) = page.opens.clone();
+    create.set_margin_top(24);
+    content.append(&create);
+    opens.append(&suggestion_row(&open, &state_rc.borrow().extension_status, ""));
+    let state_open = Rc::downgrade(state_rc);
+    opens.connect_row_activated(move |_, _| {
+        if let Some(state_rc) = state_open.upgrade() {
+            open_gesture_editor_for_action(&state_rc, open.clone());
+        }
+    });
+    content.append(&opens);
+    let inside = heading(&format!("Create a New Gesture Inside {name}"));
+    inside.set_margin_top(12);
+    content.append(&inside);
+
+    let mut sections: Vec<(&str, Vec<&crate::app_shortcuts::AppShortcut>)> = Vec::new();
+    for shortcut in shortcuts.iter() {
+        match sections.iter_mut().find(|(section, _)| *section == shortcut.section) {
+            Some((_, in_it)) => in_it.push(shortcut),
+            None => sections.push((&shortcut.section, vec![shortcut])),
+        }
+    }
+    // The app's own shortcuts, each group of them under its name. The names are the app's, so
+    // they're smaller and dimmer than Gestos's own headings.
+    for (section, in_it) in sections {
+        let label = (!section.is_empty()).then(|| {
+            let label = gtk::Label::new(Some(section));
+            label.add_css_class("caption-heading");
+            label.add_css_class("dim-label");
+            label.set_xalign(0.0);
+            label.set_margin_bottom(6);
+            label
+        });
+        if let Some(label) = &label {
+            content.append(label);
+        }
+        let rows = list();
+        let mut shown_rows = Vec::new();
+        for shortcut in &in_it {
+            let row = app_shortcut_row(shortcut);
+            rows.append(&row);
+            shown_rows.push((row, shortcut.keys.clone()));
+        }
+        page.shortcut_groups.borrow_mut().push((label, rows.clone(), shown_rows));
+        let keys: Vec<String> = in_it.iter().map(|shortcut| shortcut.keys.clone()).collect();
+        let state_add = Rc::downgrade(state_rc);
+        let app = app.to_string();
+        rows.connect_row_activated(move |_, row| {
+            if let (Some(state_rc), Some(keys)) = (state_add.upgrade(), keys.get(row.index() as usize)) {
+                crate::ui::editor::open_gesture_editor_for_app_shortcut(&state_rc, &app, keys);
+            }
+        });
+        content.append(&rows);
+    }
+
+    // Last, after the shortcuts the app lists, for one it doesn't.
+    if let Some(custom_shortcut) = shortcut_on_app(&state_rc.borrow(), app) {
+        let own = list();
+        let row = suggestion_row(&custom_shortcut, &state_rc.borrow().extension_status, "");
+        row.add_css_class("build-your-own");
+        own.append(&row);
+        let state_own = Rc::downgrade(state_rc);
+        let app_own = app.to_string();
+        own.connect_row_activated(move |_, _| {
+            if let Some(state_rc) = state_own.upgrade() {
+                crate::ui::editor::open_gesture_editor_in_apps(
+                    &state_rc,
+                    custom_shortcut.clone(),
+                    &[app_own.clone()],
+                );
+            }
+        });
+        content.append(&own);
+    }
+
+    let scrolled = gtk::ScrolledWindow::new();
+    scrolled.set_vexpand(true);
+    scrolled.set_hscrollbar_policy(gtk::PolicyType::Never);
+    scrolled.set_child(Some(&clamped(&content)));
+    window.set_child(Some(&scrolled));
+    crate::ui::components::close_with_keys(&window);
+    // Gone however it closes, its category's closing with it too.
+    let state_close = Rc::downgrade(state_rc);
+    window.connect_destroy(move |window| {
+        if let Some(state_rc) = state_close.upgrade() {
+            if let Ok(mut state) = state_rc.try_borrow_mut() {
+                if state.app_page.as_ref().is_some_and(|page| &page.window == window) {
+                    state.app_page = None;
+                }
+            }
+        }
+    });
+    state_rc.borrow_mut().app_page = Some(page);
+    refresh_app_page(state_rc, None);
+    window.present();
+}
+
+/// An app, which opens its own window, with how many gestures are made for it, if any.
+fn app_row(app: &str, count: usize) -> gtk::ListBoxRow {
+    let row = gtk::ListBoxRow::new();
+    let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row_box.set_margin_start(16);
+    row_box.set_margin_end(16);
+    row_box.set_margin_top(12);
+    row_box.set_margin_bottom(12);
+    row_box.append(&crate::ui::app_picker::app_icon(app, 16));
+    let name = gtk::Label::new(Some(&crate::ui::app_picker::app_name(app)));
+    name.set_xalign(0.0);
+    name.set_hexpand(true);
+    name.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    row_box.append(&name);
+    let count_label = gtk::Label::new(Some(&count.to_string()));
+    count_label.add_css_class("dim-label");
+    count_label.set_visible(count > 0);
+    row_box.append(&count_label);
+    row_box.append(&gtk::Image::from_icon_name("go-next-symbolic"));
+    row.set_child(Some(&row_box));
+    row
+}
+
+/// One of an app's shortcuts: its name, and its keys as shortcuts' names write them.
+fn app_shortcut_row(shortcut: &crate::app_shortcuts::AppShortcut) -> gtk::ListBoxRow {
+    let row = gtk::ListBoxRow::new();
+    let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row_box.set_margin_start(16);
+    row_box.set_margin_end(16);
+    row_box.set_margin_top(12);
+    row_box.set_margin_bottom(12);
+    let title = gtk::Label::new(Some(&shortcut.title));
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    title.set_wrap(true);
+    row_box.append(&title);
+    let keys = gtk::Label::new(Some(&shortcut.keys.replace("Control", "Ctrl")));
+    keys.add_css_class("dim-label");
+    row_box.append(&keys);
+    row_box.append(&gtk::Image::from_icon_name("go-next-symbolic"));
+    row.set_child(Some(&row_box));
+    row
 }
 
 /// Opens a category's page in a window of its own, or with None, closes it.
 pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category>) {
     let open = state_rc.borrow_mut().category_page.take();
+    let app_page = state_rc.borrow_mut().app_page.take();
+    if let Some(page) = app_page {
+        page.window.destroy();
+    }
     if let Some(page) = open {
         page.window.destroy();
     }
@@ -141,7 +475,16 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
         content.append(&list);
         list
     };
+    let section = |text: &str| {
+        let label = gtk::Label::new(Some(text));
+        label.add_css_class("section-header");
+        label.set_xalign(0.0);
+        content.append(&label);
+        label
+    };
+    let gestures_heading = section("Gestures");
     let gestures = list();
+    let create_heading = section("Create New Gesture");
     let apart = list();
     apart.set_margin_bottom(16);
     let actions = list();
@@ -151,7 +494,15 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
     scrolled.set_child(Some(&clamped(&content)));
     window.set_child(Some(&scrolled));
 
-    let page = CategoryPage { window: window.clone(), gestures, apart, actions, shown: Default::default() };
+    let page = CategoryPage {
+        window: window.clone(),
+        gestures_heading,
+        create_heading,
+        gestures,
+        apart,
+        actions,
+        shown: Default::default(),
+    };
     {
         let state_rc = Rc::downgrade(state_rc);
         let shown = Rc::clone(&page.shown);
@@ -172,7 +523,10 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
         page.apart.connect_row_activated(move |_, row| {
             let option = shown.borrow().1.get(row.index() as usize).cloned();
             if let (Some(state_rc), Some(option)) = (state_rc.upgrade(), option) {
-                open_gesture_editor_for_action(&state_rc, option);
+                match crate::ui::app_picker::opened_app(&option.action_type).map(str::to_string) {
+                    Some(app) => open_app_page(&state_rc, option, &app),
+                    None => open_gesture_editor_for_action(&state_rc, option),
+                }
             }
         });
     }
@@ -183,7 +537,14 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
             let suggestion = shown.borrow().2.get(row.index() as usize).cloned();
             let Some(state_rc) = state_rc.upgrade() else { return };
             match suggestion {
-                Some(Suggestion::Action(option)) => open_gesture_editor_for_action(&state_rc, option),
+                // An app opens its own window, with opening it and any shortcuts it lists.
+                Some(Suggestion::Action(option)) => {
+                    let app = crate::ui::app_picker::opened_app(&option.action_type).map(str::to_string);
+                    match app {
+                        Some(app) => open_app_page(&state_rc, option, &app),
+                        None => open_gesture_editor_for_action(&state_rc, option),
+                    }
+                }
                 Some(Suggestion::Category(category, _)) => open_category(&state_rc, Some(category)),
                 None => {}
             }
@@ -232,7 +593,11 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
             list.remove(&child);
         }
     }
-    let gestures = get_visible_gestures(&state, Some(category));
+    // The apps' gestures are each in its own app's window instead.
+    let gestures = match category {
+        Category::Apps => Vec::new(),
+        _ => get_visible_gestures(&state, Some(category)),
+    };
     for gesture in &gestures {
         let row = create_gesture_row(gesture, state_rc);
         page.gestures.append(&row);
@@ -245,21 +610,51 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
 
     let found = find_suggestions(&state.action_options, &state.config.gestures, "");
     let gestures_in = gestures_by_category(&state.config.gestures, &state.action_options);
-    let (apart, found) = arrange_suggestions(found, false, Some(category), &gestures_in);
+    let (mut apart, mut found) = arrange_suggestions(found, false, Some(category), &gestures_in);
+    // Every app, as each opens its own window, even one already opened by a gesture, by name.
+    // Those with gestures come first, apart from the rest.
+    if category == Category::Apps {
+        let mut apps: Vec<_> = state
+            .action_options
+            .iter()
+            .filter(|option| crate::ui::app_picker::opened_app(&option.action_type).is_some())
+            .cloned()
+            .collect();
+        apps.sort_by_cached_key(|option| option.name.to_lowercase());
+        let (with_gestures, without): (Vec<_>, Vec<_>) = apps.into_iter().partition(|option| {
+            crate::ui::app_picker::opened_app(&option.action_type)
+                .is_some_and(|app| gestures_for_app(&state, app) > 0)
+        });
+        apart = with_gestures;
+        found = without.into_iter().map(Suggestion::Action).collect();
+    }
     for option in &apart {
-        let row = suggestion_row(option, &state.extension_status, "");
-        row.add_css_class("build-your-own");
+        let row = match crate::ui::app_picker::opened_app(&option.action_type) {
+            Some(app) => app_row(app, gestures_for_app(&state, app)),
+            None => {
+                let row = suggestion_row(option, &state.extension_status, "");
+                row.add_css_class("build-your-own");
+                row
+            }
+        };
         page.apart.append(&row);
     }
     page.apart.set_visible(!apart.is_empty());
     for suggestion in &found {
         let row = match suggestion {
-            Suggestion::Action(option) => suggestion_row(option, &state.extension_status, ""),
+            Suggestion::Action(option) => match crate::ui::app_picker::opened_app(&option.action_type) {
+                Some(app) => app_row(app, gestures_for_app(&state, app)),
+                None => suggestion_row(option, &state.extension_status, ""),
+            },
             Suggestion::Category(category, count) => category_row(*category, *count),
         };
         page.actions.append(&row);
     }
     page.actions.set_visible(!found.is_empty());
+    // The Apps window lists apps, which aren't gestures or actions, so it needs neither heading.
+    let headed = category != Category::Apps;
+    page.gestures_heading.set_visible(headed && page.gestures.get_visible());
+    page.create_heading.set_visible(headed && !(apart.is_empty() && found.is_empty()));
     *page.shown.borrow_mut() = (gestures.into_iter().map(|g| g.id).collect(), apart, found);
 }
 
@@ -276,10 +671,10 @@ fn category_row(category: Category, count: usize) -> gtk::ListBoxRow {
     name.set_xalign(0.0);
     name.set_hexpand(true);
     row_box.append(&name);
-    let count = gtk::Label::new(Some(&count.to_string()));
-    count.add_css_class("dim-label");
-    count.set_visible(count.text() != "0");
-    row_box.append(&count);
+    let count_label = gtk::Label::new(Some(&count.to_string()));
+    count_label.add_css_class("dim-label");
+    count_label.set_visible(count > 0);
+    row_box.append(&count_label);
     row_box.append(&gtk::Image::from_icon_name("go-next-symbolic"));
     row.set_child(Some(&row_box));
     row
@@ -388,11 +783,16 @@ fn suggestion_row(
     let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
     text.set_hexpand(true);
     text.set_valign(gtk::Align::Center);
-    // A custom action created from a search is named after it, so it offers to create that.
+    // An advanced action or a keyboard shortcut created from a search is named after it, so they
+    // offer to create that.
     let title = match &option.action_type {
         gestos::config::ActionType::Keyboard(steps) if steps.is_empty() => {
             crate::ui::editor::name_from_search(query, &option.name)
-                .map(|name| format!("Create New Action: \u{201c}{name}\u{201d}"))
+                .map(|name| format!("Create Advanced Action: \u{201c}{name}\u{201d}"))
+        }
+        gestos::config::ActionType::Keypress(keys) if keys.is_empty() => {
+            crate::ui::editor::name_from_search(query, &option.name)
+                .map(|name| format!("Create Keyboard Shortcut: \u{201c}{name}\u{201d}"))
         }
         _ => None,
     };
@@ -475,7 +875,11 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
     state.apart_list.set_visible(!apart.is_empty());
     for suggestion in &found {
         let row = match suggestion {
-            Suggestion::Action(option) => suggestion_row(option, &state.extension_status, &query),
+            // An app is its page, which opening it is on.
+            Suggestion::Action(option) => match crate::ui::app_picker::opened_app(&option.action_type) {
+                Some(app) => app_row(app, gestures_for_app(&state, app)),
+                None => suggestion_row(option, &state.extension_status, &query),
+            },
             Suggestion::Category(category, count) => category_row(*category, *count),
         };
         state.suggestion_list.append(&row);
@@ -508,14 +912,75 @@ pub fn refresh_extension_status(state_rc: &Rc<RefCell<AppState>>) {
     }
 }
 
+/// Shows a gesture just made from the main page where it's kept: in its category's window, when
+/// the page shows categories, or in the page's own list. The search that found its action is
+/// cleared, as it would hide the gesture.
+pub fn show_new_gesture(state_rc: &Rc<RefCell<AppState>>, name: &str) {
+    let search = state_rc.borrow().search_entry.clone();
+    if !search.text().is_empty() {
+        // Shown once the search is cleared, which takes a moment.
+        state_rc.borrow_mut().show_after_search = Some(name.to_string());
+        search.set_text("");
+    }
+    let (category, app) = {
+        let state = state_rc.borrow();
+        let categorized = find_suggestions(&state.action_options, &state.config.gestures, "").len()
+            >= crate::suggestions::FEWEST_TO_CATEGORIZE;
+        let gesture = state.config.gestures.iter().find(|g| g.name == name).filter(|_| categorized);
+        let category = gesture.and_then(|g| gesture_category(g, &state.action_options));
+        // An app's gesture is in that app's window, with how to open it.
+        let app = gesture
+            .filter(|_| category == Some(Category::Apps))
+            .and_then(|g| match g.apps.as_slice() {
+                [app] => Some(app.clone()),
+                _ => g.actions.first().and_then(crate::ui::app_picker::first_app).map(str::to_string),
+            })
+            .and_then(|app| {
+                let open = state.action_options.iter().find(|option| {
+                    crate::ui::app_picker::opened_app(&option.action_type) == Some(app.as_str())
+                });
+                open.cloned().map(|open| (app, open))
+            });
+        (category, app)
+    };
+    if category.is_some() {
+        open_category(state_rc, category);
+    }
+    if let Some((app, open)) = app {
+        open_app_page(state_rc, open, &app);
+    }
+    refresh_gesture_list(state_rc, Some(name));
+}
+
 pub fn refresh_gesture_list(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) {
     let no_gestures_shown = show_gestures(state_rc, select_name);
     refresh_suggestions(state_rc, no_gestures_shown);
     refresh_category_page(state_rc, select_name);
+    refresh_app_page(state_rc, select_name);
 }
 
 /// Shows the gestures that match the search. The one named, such as the one just saved, gets the
 /// focus, so that the keyboard carries on from it.
+/// Gestures by the app they're for, those for every app first, then each app's by its name, or
+/// None when they're all for the same, which needs no grouping.
+fn by_app(gestures: &[Gesture]) -> Option<Vec<(Option<String>, Vec<Gesture>)>> {
+    let mut groups: Vec<(Option<String>, Vec<Gesture>)> = Vec::new();
+    for gesture in gestures {
+        let app = gesture.apps.first().cloned();
+        match groups.iter_mut().find(|(other, _)| *other == app) {
+            Some((_, in_it)) => in_it.push(gesture.clone()),
+            None => groups.push((app, vec![gesture.clone()])),
+        }
+    }
+    if groups.len() < 2 {
+        return None;
+    }
+    groups.sort_by_cached_key(|(app, _)| {
+        app.as_ref().map(|app| crate::ui::app_picker::app_name(app).to_lowercase())
+    });
+    Some(groups)
+}
+
 fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) -> bool {
     let state = state_rc.borrow();
 
@@ -523,14 +988,17 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
     while let Some(child) = state.main_list.first_child() {
         state.main_list.remove(&child);
     }
-    // On their categories' pages instead.
-    if shows_categories(&state) {
+    while let Some(child) = state.gesture_groups.first_child() {
+        state.gesture_groups.remove(&child);
+    }
+    let visible = get_visible_gestures(&state, None);
+    // On their categories' pages instead, unless Preferences ask for all of them above the
+    // categories too. With none, the categories are all there is.
+    if shows_categories(&state) && (!state.config.all_gestures || visible.is_empty()) {
         state.main_list.set_visible(false);
         state.empty_state_box.set_visible(false);
         return true;
     }
-
-    let visible = get_visible_gestures(&state, None);
     let mut focused = false;
 
     if visible.is_empty() {
@@ -539,6 +1007,43 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
         state.empty_state_box.set_description(searching.then_some("Try different words."));
         state.empty_state_box.set_visible(true);
         state.main_list.set_visible(false);
+    } else if let Some(groups) = by_app(&visible) {
+        // A gesture is for one app or for all of them, so they're shown by app.
+        state.empty_state_box.set_visible(false);
+        state.main_list.set_visible(false);
+        for (app, gestures) in groups {
+            let heading = gtk::Label::new(Some(&match &app {
+                Some(app) => crate::ui::app_picker::app_name(app),
+                None => "In All Apps".to_string(),
+            }));
+            heading.add_css_class("section-header");
+            heading.set_xalign(0.0);
+            state.gesture_groups.append(&heading);
+            let list = gtk::ListBox::new();
+            list.add_css_class("boxed-list");
+            list.set_selection_mode(gtk::SelectionMode::None);
+            list.set_margin_bottom(24);
+            for gesture in &gestures {
+                let row = create_gesture_row(gesture, state_rc);
+                list.append(&row);
+                if select_name == Some(gesture.name.as_str()) {
+                    focused = row.grab_focus();
+                    scroll_to(&row);
+                }
+            }
+            let ids: Vec<String> = gestures.iter().map(|g| g.id.clone()).collect();
+            let state_edit = Rc::downgrade(state_rc);
+            list.connect_row_activated(move |_, row| {
+                let Some(state_rc) = state_edit.upgrade() else { return };
+                let gesture = ids.get(row.index() as usize).and_then(|id| {
+                    state_rc.borrow().config.gestures.iter().find(|g| &g.id == id).cloned()
+                });
+                if let Some(gesture) = gesture {
+                    open_gesture_editor(&state_rc, gesture);
+                }
+            });
+            state.gesture_groups.append(&list);
+        }
     } else {
         state.empty_state_box.set_visible(false);
         state.main_list.set_visible(true);
@@ -741,6 +1246,8 @@ pub fn build_ui(app: &gtk::Application) {
     main_list.add_css_class("boxed-list");
     main_list.set_selection_mode(gtk::SelectionMode::None);
     list_container.append(&main_list);
+    let gesture_groups = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    list_container.append(&gesture_groups);
 
     let empty_state_box = adw::StatusPage::new();
     empty_state_box.set_icon_name(Some("edit-find-symbolic"));
@@ -757,7 +1264,7 @@ pub fn build_ui(app: &gtk::Application) {
     suggestion_no_match.set_margin_bottom(8);
     suggestion_box.append(&suggestion_no_match);
 
-    let suggestion_heading = gtk::Label::new(Some("Create a Gesture For"));
+    let suggestion_heading = gtk::Label::new(Some("Create New Gesture"));
     suggestion_heading.add_css_class("section-header");
     suggestion_heading.set_xalign(0.0);
     suggestion_box.append(&suggestion_heading);
@@ -779,8 +1286,15 @@ pub fn build_ui(app: &gtk::Application) {
     if let Err(e) = gestos::config::initialize_user_config_if_missing() {
         eprintln!("Warning: Failed to initialize configuration: {}", e);
     }
-    let config = Configuration::load_from_defaults();
+    let mut config = Configuration::load_from_defaults();
     let dbus_conn = zbus::blocking::Connection::session().ok();
+    // A gesture is for one app or for all of them, so one for several becomes one for each.
+    if config.split_gestures_for_several_apps(gestos::key_steps::app_name) {
+        match config.save_to_file() {
+            Ok(()) => crate::daemon::reload_daemon(dbus_conn.as_ref(), Some(&window)),
+            Err(e) => eprintln!("Could not save the gestures made one per app: {e}"),
+        }
+    }
 
     let gesture_status = GestureStatus::new("Gestures", dbus_conn.clone(), &toasts);
     let extension_status = crate::extension::status(dbus_conn.as_ref());
@@ -795,9 +1309,11 @@ pub fn build_ui(app: &gtk::Application) {
         toasts,
         config,
         main_list,
+        gesture_groups,
         search_entry,
         window,
         newly_added_gestures: Vec::new(),
+        show_after_search: None,
         dbus_conn,
         empty_state_box,
         action_options: Vec::new(),
@@ -812,6 +1328,7 @@ pub fn build_ui(app: &gtk::Application) {
         extension_banner: extension_banner.clone(),
         open_category: None,
         category_page: None,
+        app_page: None,
     }));
 
 
@@ -836,7 +1353,8 @@ pub fn build_ui(app: &gtk::Application) {
         .borrow()
         .search_entry
         .connect_search_changed(move |_| {
-            refresh_gesture_list(&state_clone, None);
+            let show = state_clone.borrow_mut().show_after_search.take();
+            refresh_gesture_list(&state_clone, show.as_deref());
         });
 
     let state_suggestion = Rc::clone(&state);
@@ -851,7 +1369,10 @@ pub fn build_ui(app: &gtk::Application) {
                 .cloned();
             match suggestion {
                 Some(Suggestion::Action(option)) => {
-                    open_gesture_editor_for_action(&state_suggestion, option)
+                    match crate::ui::app_picker::opened_app(&option.action_type).map(str::to_string) {
+                        Some(app) => open_app_page(&state_suggestion, option, &app),
+                        None => open_gesture_editor_for_action(&state_suggestion, option),
+                    }
                 }
                 Some(Suggestion::Category(category, _)) => {
                     open_category(&state_suggestion, Some(category))
@@ -914,7 +1435,6 @@ pub fn build_ui(app: &gtk::Application) {
          .context-title { font-size: 1.5em; font-weight: bold; }\n\
          .gesture-row { padding: 6px; }\n\
          .icon-holder { padding: 4px; }\n\
-         .icon-swiss-red { color: @red_3; }\n\
          .icon-purple { color: @purple_2; }\n\
          .action-label { font-size: 0.9em; opacity: 0.7; }\n\
          .settings-row { padding: 8px; }\n\
@@ -923,6 +1443,7 @@ pub fn build_ui(app: &gtk::Application) {
          .warning-box { padding: 8px; background-color: alpha(@warning_color, 0.15); border: 1px solid alpha(@warning_color, 0.3); border-radius: 6px; }\n\
          .warning-label { color: @warning_color; font-size: 0.95em; }\n\
          .extension-banner { padding: 6px 12px; min-height: 36px; background-color: alpha(@warning_color, 0.15); }\n\
+         .keycap-small { padding: 0 4px; background-color: alpha(currentColor, 0.08); border: 1px solid alpha(currentColor, 0.15); border-radius: 4px; font-weight: bold; font-size: 0.7em; }\n\
          .keycap { padding: 6px 12px; background-color: alpha(currentColor, 0.08); border: 1px solid alpha(currentColor, 0.15); border-radius: 6px; font-weight: bold; font-size: 1.1em; }\n\
          .drag-handle { opacity: 0.55; cursor: grab; margin-right: 4px; }\n\
          .drag-handle:hover { opacity: 1; }\n\

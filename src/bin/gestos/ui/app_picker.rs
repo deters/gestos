@@ -1,18 +1,13 @@
-//! The apps a gesture works in, as a list in its trigger: a title row with a button to add one from
-//! the installed apps, and one row for each app, with a button to remove it. With no apps, it works
-//! in all of them.
+//! Installed apps, as gestures name them: their names and icons, the dialog that picks one, and
+//! what keeps a gesture for one app from running.
 
 use gtk::prelude::*;
 use gtk::gio;
 use gtk4 as gtk;
 use crate::extension::ExtensionStatus;
-use std::cell::RefCell;
-use std::rc::Rc;
 
-// The size of app icons in the dialog that picks one, in the list of chosen ones, and in the list
-// of gestures.
+// The size of app icons in the dialog that picks one, and in the list of gestures.
 const ICON_SIZE: i32 = 32;
-const ROW_ICON_SIZE: i32 = 24;
 const LIST_ICON_SIZE: i32 = 16;
 
 /// An installed app, by the desktop file ID gestures use for it, like `org.mozilla.firefox`.
@@ -33,6 +28,17 @@ pub fn app_icon(id: &str, size: i32) -> gtk::Image {
     };
     image.set_pixel_size(size);
     image
+}
+
+/// The app an advanced action starts by opening, whose icon it shows, as the steps after go to it.
+pub fn first_app(action: &gestos::config::ActionType) -> Option<&str> {
+    match action {
+        gestos::config::ActionType::Keyboard(steps) => match steps.first() {
+            Some(gestos::key_steps::KeyStep::Open(app)) => Some(app),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// The app an action only opens, which shows with that app's icon.
@@ -65,125 +71,6 @@ pub fn apps_note(status: &ExtensionStatus, elsewhere: bool) -> Option<&'static s
             Some("Needs the \u{201c}Gestos\u{201d} GNOME extension to be updated")
         }
         _ => Some("Needs the \u{201c}Gestos\u{201d} GNOME extension, which tells the app in use"),
-    }
-}
-
-/// The rows for the apps a gesture works in, at the end of a list that can hold other rows too,
-/// such as the rest of its trigger.
-struct AppRows {
-    list: gtk::ListBox,
-    parent: gtk::Window,
-    apps: Rc<RefCell<Vec<String>>>,
-    changed: Rc<dyn Fn()>,
-    rows: RefCell<Vec<gtk::ListBoxRow>>,
-    /// Apps can only be added where they'd work, and ones added elsewhere can still be removed.
-    can_add: bool,
-    note: Option<&'static str>,
-}
-
-/// Adds the apps in `apps` to the end of `list`, under a title row with a button to add more.
-/// `changed` is called after the user adds or removes one. `status` is the GNOME extension's,
-/// which says which app is in use.
-pub fn append_apps_rows(
-    list: &gtk::ListBox,
-    parent: &gtk::Window,
-    apps: Rc<RefCell<Vec<String>>>,
-    changed: Rc<dyn Fn()>,
-    status: &ExtensionStatus,
-) {
-    let app_rows = Rc::new(AppRows {
-        list: list.clone(),
-        parent: parent.clone(),
-        apps,
-        changed,
-        rows: RefCell::new(Vec::new()),
-        can_add: *status != ExtensionStatus::Unavailable
-            || gestos::active_app::can_tell_without_extension(),
-        note: apps_note(status, gestos::active_app::can_tell_without_extension()),
-    });
-    app_rows.fill();
-}
-
-impl AppRows {
-    fn append(&self, child: &impl IsA<gtk::Widget>, activatable: bool) {
-        let row = gtk::ListBoxRow::new();
-        row.set_activatable(activatable);
-        row.set_child(Some(child));
-        self.list.append(&row);
-        self.rows.borrow_mut().push(row);
-    }
-
-    fn fill(self: &Rc<Self>) {
-        for row in self.rows.borrow_mut().drain(..) {
-            self.list.remove(&row);
-        }
-
-        let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        title_row.add_css_class("settings-row");
-        let title = gtk::Label::new(Some("Valid Apps"));
-        title.set_halign(gtk::Align::Start);
-        title.set_hexpand(true);
-        title_row.append(&title);
-        let scope = if self.apps.borrow().is_empty() {
-            "Valid in All Apps"
-        } else {
-            "Valid Only in the Following Apps"
-        };
-        let scope = gtk::Label::new(Some(scope));
-        scope.add_css_class("dim-label");
-        title_row.append(&scope);
-        // At the top of the list, as GNOME's lists can add items. It opens a dialog.
-        let add = gtk::Button::from_icon_name("list-add-symbolic");
-        add.set_tooltip_text(Some("Add App…"));
-        add.update_property(&[gtk::accessible::Property::Label("Add App…")]);
-        add.add_css_class("flat");
-        add.set_valign(gtk::Align::Center);
-        add.set_sensitive(self.can_add);
-        let adding = Rc::clone(self);
-        add.connect_clicked(move |_| {
-            let picked = Rc::clone(&adding);
-            let taken = adding.apps.borrow().clone();
-            open_app_picker(&adding.parent, &taken, move |id| {
-                picked.apps.borrow_mut().push(id);
-                picked.fill();
-                (picked.changed)();
-            });
-        });
-        title_row.append(&add);
-        self.append(&title_row, false);
-
-        if let Some(note) = self.note {
-            let label = gtk::Label::new(Some(note));
-            label.add_css_class("dim-label");
-            label.add_css_class("settings-row");
-            label.set_halign(gtk::Align::Start);
-            label.set_xalign(0.0);
-            label.set_wrap(true);
-            self.append(&label, false);
-        }
-
-        let apps = self.apps.borrow().clone();
-        for (i, id) in apps.iter().enumerate() {
-            let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-            row.add_css_class("settings-row");
-            row.append(&app_icon(id, ROW_ICON_SIZE));
-            let name = gtk::Label::new(Some(&app_name(id)));
-            name.set_halign(gtk::Align::Start);
-            name.set_hexpand(true);
-            row.append(&name);
-            let remove = gtk::Button::from_icon_name("user-trash-symbolic");
-            remove.set_tooltip_text(Some("Remove"));
-            remove.add_css_class("flat");
-            remove.set_valign(gtk::Align::Center);
-            let removed = Rc::clone(self);
-            remove.connect_clicked(move |_| {
-                removed.apps.borrow_mut().remove(i);
-                removed.fill();
-                (removed.changed)();
-            });
-            row.append(&remove);
-            self.append(&row, false);
-        }
     }
 }
 
@@ -308,5 +195,17 @@ mod tests {
         assert!(apps_note(&ExtensionStatus::Outdated(OldCopy::Replaced), false)
             .unwrap()
             .contains("updated"));
+    }
+
+    #[test]
+    fn an_advanced_action_shows_the_app_it_opens_first() {
+        use gestos::config::ActionType;
+        use gestos::key_steps::KeyStep;
+        let steps = |steps: Vec<KeyStep>| ActionType::Keyboard(steps);
+        let open = KeyStep::Open("org.gnome.Nautilus.desktop".into());
+        let press = KeyStep::Press("Control+L".into());
+        assert_eq!(first_app(&steps(vec![open.clone(), press.clone()])), Some("org.gnome.Nautilus.desktop"));
+        assert_eq!(first_app(&steps(vec![press, open])), None);
+        assert_eq!(first_app(&ActionType::Kill), None);
     }
 }

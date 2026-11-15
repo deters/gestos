@@ -15,9 +15,14 @@ pub struct AppState {
     pub toasts: adw::ToastOverlay,
     pub config: Configuration,
     pub main_list: gtk::ListBox,
+    /// The gestures by the app they're for, each under its heading, in place of the list when
+    /// they're for more than one.
+    pub gesture_groups: gtk::Box,
     pub search_entry: gtk::SearchEntry,
     pub window: gtk::ApplicationWindow,
     pub newly_added_gestures: Vec<String>,
+    /// The gesture to show once the search is cleared, as one just made from a search.
+    pub show_after_search: Option<String>,
     pub dbus_conn: Option<zbus::blocking::Connection>,
     pub empty_state_box: adw::StatusPage,
     pub action_options: Vec<EditorActionOption>,
@@ -36,4 +41,6 @@ pub struct AppState {
     /// The category of actions open, in a window of its own over the gestures.
     pub open_category: Option<crate::suggestions::Category>,
     pub category_page: Option<crate::ui::main_window::CategoryPage>,
+    /// An app's own shortcuts, in a window over its category's, while open.
+    pub app_page: Option<crate::ui::main_window::AppPage>,
 }
