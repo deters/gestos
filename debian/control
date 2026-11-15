@@ -9,6 +9,7 @@ Homepage: https://github.com/deters/gestos
 Package: gestos
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: wl-clipboard, xclip
 Replaces: mygestures (<< 5.0.0)
 Breaks: mygestures (<< 5.0.0)
 Provides: mygestures (= ${binary:Version})

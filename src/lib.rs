@@ -9,6 +9,7 @@ pub mod input_client;
 pub mod input_protocol;
 pub mod ipc;
 pub mod key_steps;
+pub mod kde_trail;
 pub mod keyboards;
 #[cfg(target_os = "linux")]
 pub mod keymap;
@@ -16,6 +17,7 @@ pub mod keymap;
 pub mod keys;
 pub mod lookup;
 pub mod modifiers;
+pub mod panel;
 pub mod protractor;
 #[cfg(target_os = "linux")]
 pub mod smooth;

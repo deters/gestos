@@ -58,6 +58,8 @@ pub fn report() -> String {
         "from the GNOME extension"
     } else if gestos::active_app::is_kde() {
         "from KWin"
+    } else if gestos::active_app::is_sway_or_hyprland() {
+        "from the compositor"
     } else if gestos::active_app::is_x11_session() {
         "from X11"
     } else {

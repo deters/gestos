@@ -233,12 +233,13 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
     let (sender, receiver) = std::sync::mpsc::sync_channel::<DaemonSignal>(1024);
     std::thread::spawn(move || {
         let trail = gestos::trail::spawn(|| SHOW_PATH.load(Ordering::Relaxed));
+        let panel = gestos::panel::spawn();
         let conn = zbus::blocking::Connection::session().ok();
         let path = "/io/github/deters/Gestos/Daemon";
         let iface = "io.github.deters.Gestos.Daemon";
         let dest = None::<zbus::names::BusName>;
         // KDE shows what ran, or that it failed, in its own on-screen display. On GNOME the
-        // extension shows it, from the signals.
+        // extension shows it, from the signals, and on other X11 desktops Gestos's own panel.
         let on_kde = gestos::config::get_environment_suffix() == Some("kde");
         for signal in receiver {
             if let Some(trail) = &trail {
@@ -247,6 +248,15 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
                     DaemonSignal::GestureEnded => drop(trail.send(TrailEvent::Ended)),
                     _ => {}
                 }
+            }
+            if let Some(panel) = &panel {
+                let message = |text: &str, failed| gestos::panel::Message { text: text.to_string(), failed };
+                let _ = match &signal {
+                    DaemonSignal::ActionExecuted(name, _, _) => panel.send(message(name, false)),
+                    DaemonSignal::ActionFailed(reason) => panel.send(message(reason, true)),
+                    DaemonSignal::GestureUnrecognized => panel.send(message(UNRECOGNIZED_MESSAGE, false)),
+                    _ => Ok(()),
+                };
             }
             let Some(conn) = &conn else { continue };
             if on_kde {
@@ -377,6 +387,8 @@ fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> (Option<
         gestos::wayland::focused_app_in_gnome_extension().ok()
     } else if wayland_ctx.is_kde {
         gestos::active_app::kde_active_app()
+    } else if wayland_ctx.is_sway || wayland_ctx.is_hypr {
+        wayland_ctx.compositor_active_app()
     } else if gestos::active_app::is_x11_session() {
         gestos::active_app::x11_active_app()
     } else {
@@ -385,7 +397,8 @@ fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> (Option<
     if asked.is_none() {
         println!(
             "Gestures limited to some apps can't run, as the app in use isn't known. That \
-             takes GNOME with the \u{201c}Gestos\u{201d} extension turned on, KDE, or X11."
+             takes GNOME with the \u{201c}Gestos\u{201d} extension turned on, KDE, Sway, \
+             Hyprland or X11."
         );
     }
     let unknown = asked.is_none();

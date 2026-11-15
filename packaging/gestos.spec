@@ -23,6 +23,9 @@ Requires:       gtk4
 Requires:       libadwaita
 Requires:       libevdev
 Requires:       systemd
+# What Look Up Selection reads the selected text with, on Wayland and on X11.
+Recommends:     wl-clipboard
+Recommends:     xclip
 
 %description
 Mouse gestures - "draw" commands using your mouse/touchscreen/touchpad.

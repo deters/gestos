@@ -974,6 +974,20 @@ impl WaylandContext {
         self.run_user_cmd("gsettings", &["set", schema, key, value]);
     }
 
+    /// The app of the focused window on Sway or Hyprland, as `active_app` tells it. `None` when this
+    /// is neither, or it couldn't be asked.
+    pub fn compositor_active_app(&self) -> Option<Option<String>> {
+        if self.is_sway {
+            let tree = self.run_user_cmd_output("swaymsg", &["-t", "get_tree", "-r"])?;
+            crate::active_app::sway_active_app(&tree)
+        } else if self.is_hypr {
+            let window = self.run_user_cmd_output("hyprctl", &["activewindow", "-j"])?;
+            crate::active_app::hyprland_active_app(&window)
+        } else {
+            None
+        }
+    }
+
     /// The text selected in any app, its primary selection: through the extension on GNOME, and
     /// with the tools for it elsewhere. None if nothing is, or it can't be read.
     fn selected_text(&self) -> Option<String> {

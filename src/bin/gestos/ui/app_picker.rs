@@ -64,7 +64,7 @@ pub fn apps_note(status: &ExtensionStatus, elsewhere: bool) -> Option<&'static s
         ExtensionStatus::Running => None,
         ExtensionStatus::Unavailable if elsewhere => None,
         ExtensionStatus::Unavailable => {
-            Some("Only works on GNOME, KDE and X11: here, a gesture limited to apps doesn't run")
+            Some("Only works on GNOME, KDE, Sway, Hyprland and X11: here, a gesture limited to apps doesn't run")
         }
         // Named as GNOME's Extensions app lists it, so it can be found there.
         ExtensionStatus::Outdated(_) => {

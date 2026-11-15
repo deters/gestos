@@ -203,8 +203,8 @@ fn all_gestures_row(state_rc: &Rc<RefCell<AppState>>) -> adw::ActionRow {
     row
 }
 
-/// On X11, Gestos draws gestures' paths itself, as its configuration says.
-fn x11_path_row(state_rc: &Rc<RefCell<AppState>>) -> adw::ActionRow {
+/// On X11 and KDE, Gestos draws gestures' paths itself, as its configuration says.
+fn daemon_path_row(state_rc: &Rc<RefCell<AppState>>) -> adw::ActionRow {
     let title = "Show Gesture Path";
     let description = "Draw each gesture on screen as you draw it";
     let (row, row_box, subtitle) = settings_row(title, description);
@@ -302,7 +302,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     if let Some(row) = &overview_row {
         gestures_list.add(row);
     }
-    // The extension draws it, so it's only on GNOME.
+    // On GNOME the extension draws it, with its own setting; on X11 and KDE, Gestos does.
     if on_gnome {
         let (path_row, path_box, _) =
             settings_row("Show Gesture Path", "Draw each gesture on screen as you draw it");
@@ -313,8 +313,8 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
         path_box.append(&path);
         gestures_list.add(&path_row);
         needs_extension.push(path_row);
-    } else if gestos::active_app::is_x11_session() {
-        gestures_list.add(&x11_path_row(state_rc));
+    } else if gestos::active_app::is_x11_session() || gestos::active_app::is_kde() {
+        gestures_list.add(&daemon_path_row(state_rc));
     }
     gestures_list.add(&all_gestures_row(state_rc));
 

@@ -26,9 +26,15 @@ gtk4 = { version = "0.9", features = ["v4_6"] }
 # Only what libadwaita 1.2 offers, the version Debian 12 has.
 adw = { version = "0.7", package = "libadwaita", features = ["v1_2"] }
 gio = "0.20"
-x11rb = { version = "0.13", features = ["shape"] }
+x11rb = { version = "0.13", features = ["shape", "randr"] }
+# What the panel saying what a gesture did is drawn with, where Gestos draws it itself.
+cairo-rs = "0.20"
+pangocairo = "0.20"
+# KDE's Wayland, where the gesture path is a layer over the screen.
+smithay-client-toolkit = { version = "0.21", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
+serde_json = "1"
 nix = { version = "0.27", features = ["mman", "signal", "fs", "user", "ioctl", "poll"] }
 libc = "0.2"
 regex = "1"

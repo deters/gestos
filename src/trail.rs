@@ -27,12 +27,17 @@ pub enum TrailEvent {
     Ended,
 }
 
-/// Starts drawing paths on their own thread, on X11 desktops other than GNOME, which draws them.
-/// `show` is asked as each gesture starts, so the setting can change while this runs.
+/// Starts drawing paths on their own thread, on X11 desktops other than GNOME, which draws them,
+/// and on KDE's Wayland. `show` is asked as each gesture starts, so the setting can change while
+/// this runs.
 pub fn spawn(show: impl Fn() -> bool + Send + 'static) -> Option<Sender<TrailEvent>> {
     let gnome = crate::config::get_environment_suffix() == Some("gnome");
-    if !crate::active_app::is_x11_session() || gnome {
+    if gnome {
         return None;
+    }
+    if !crate::active_app::is_x11_session() {
+        let kde_wayland = crate::active_app::is_kde() && std::env::var_os("WAYLAND_DISPLAY").is_some();
+        return kde_wayland.then(|| crate::kde_trail::spawn(show));
     }
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || run(&receiver, show));
@@ -105,8 +110,8 @@ fn wait_for_end(events: &Receiver<TrailEvent>) {
 }
 
 /// The points so far, and how far along the path the last one is.
-struct Path {
-    points: Vec<(i32, i32)>,
+pub(crate) struct Path {
+    pub(crate) points: Vec<(i32, i32)>,
     length: f64,
     radius: f64,
     gradient_length: f64,
@@ -123,7 +128,7 @@ pub struct Segment {
 }
 
 impl Path {
-    fn new(scale: f64) -> Self {
+    pub(crate) fn new(scale: f64) -> Self {
         Path {
             points: Vec::new(),
             length: 0.0,
@@ -132,7 +137,7 @@ impl Path {
         }
     }
 
-    fn segment_to(&mut self, point: (i32, i32)) -> Segment {
+    pub(crate) fn segment_to(&mut self, point: (i32, i32)) -> Segment {
         let from = *self.points.last().unwrap_or(&point);
         let start = self.length;
         self.length += f64::from(point.0 - from.0).hypot(f64::from(point.1 - from.1));
@@ -170,6 +175,16 @@ pub fn coverage(segment: &Segment, x: i32, y: i32) -> (f64, f64) {
     ((segment.radius + 0.5 - distance).clamp(0.0, 1.0), along)
 }
 
+/// A pixel of the segment, as premultiplied ARGB, `cover` of it covered `along` the way.
+pub(crate) fn premultiplied(segment: &Segment, cover: f64, along: f64) -> u32 {
+    let alpha = cover;
+    let channel = |i: usize| {
+        let value = segment.from_color[i] + (segment.to_color[i] - segment.from_color[i]) * along;
+        (value * alpha * 255.0).round() as u32
+    };
+    ((alpha * 255.0).round() as u32) << 24 | channel(0) << 16 | channel(1) << 8 | channel(2)
+}
+
 /// The pixels a segment touches, as a rectangle: x, y, width and height, inside the screen.
 pub fn bounds(segment: &Segment, width: i32, height: i32) -> Option<(i32, i32, i32, i32)> {
     let reach = segment.radius + 1.0;
@@ -205,7 +220,7 @@ pub fn scale_from_resources(resources: &str) -> f64 {
 }
 
 mod x11 {
-    use super::{bounds, coverage, rows, scale_from_resources, Segment};
+    use super::{bounds, coverage, premultiplied, rows, scale_from_resources, Segment};
     use std::time::{Duration, Instant};
     use x11rb::connection::Connection;
     use x11rb::protocol::shape::{ConnectionExt as _, SK, SO};
@@ -486,15 +501,6 @@ mod x11 {
             }
             let _ = conn.flush();
         }
-    }
-
-    fn premultiplied(segment: &Segment, cover: f64, along: f64) -> u32 {
-        let alpha = cover;
-        let channel = |i: usize| {
-            let value = segment.from_color[i] + (segment.to_color[i] - segment.from_color[i]) * along;
-            (value * alpha * 255.0).round() as u32
-        };
-        ((alpha * 255.0).round() as u32) << 24 | channel(0) << 16 | channel(1) << 8 | channel(2)
     }
 }
 

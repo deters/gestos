@@ -1,6 +1,6 @@
 //! Which app is in use, for gestures limited to some apps, on desktops without the GNOME
-//! extension. On X11 any program can ask the X server which window is active, and on KDE KWin
-//! runs a script that says. Apps are named by their desktop file ID, as on GNOME, so a gesture
+//! extension. On X11 any program can ask the X server which window is active, on KDE KWin runs a
+//! script that says, and Sway and Hyprland say when asked. Apps are named by their desktop file ID, as on GNOME, so a gesture
 //! works wherever the app can be told.
 
 use gio::prelude::*;
@@ -16,9 +16,14 @@ pub fn is_kde() -> bool {
     std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| desktop.to_uppercase().contains("KDE"))
 }
 
+/// Whether this is Sway or Hyprland, which say which window has focus.
+pub fn is_sway_or_hyprland() -> bool {
+    std::env::var_os("SWAYSOCK").is_some() || std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+}
+
 /// Whether the app in use can be told here without the GNOME extension.
 pub fn can_tell_without_extension() -> bool {
-    is_kde() || is_x11_session()
+    is_kde() || is_x11_session() || is_sway_or_hyprland()
 }
 
 /// The app of KWin's active window, by its desktop file ID. `None` means KWin couldn't be asked;
@@ -39,6 +44,59 @@ pub fn kde_active_app() -> Option<Option<String>> {
 pub fn x11_active_app() -> Option<Option<String>> {
     let window = x11::active_window().ok()?;
     Some(window.and_then(|window| desktop_id_for(&window, &installed_apps())))
+}
+
+/// The app of Sway's focused window, from its tree as `swaymsg -t get_tree` prints it. `None` means
+/// the tree couldn't be read; `Some(None)` that no window has focus, or its app isn't installed.
+pub fn sway_active_app(tree: &str) -> Option<Option<String>> {
+    Some(sway_window(tree)?.and_then(|window| desktop_id_for(&window, &installed_apps())))
+}
+
+fn sway_window(tree: &str) -> Option<Option<WindowIds>> {
+    let tree: serde_json::Value = serde_json::from_str(tree).ok()?;
+    Some(focused_sway_node(&tree).map(|node| {
+        let properties = &node["window_properties"];
+        window_ids(node["app_id"].as_str(), &[&properties["instance"], &properties["class"]])
+    }))
+}
+
+/// The window in Sway's tree that has focus, tiled or floating.
+fn focused_sway_node(node: &serde_json::Value) -> Option<&serde_json::Value> {
+    let window = node["type"] == "con" || node["type"] == "floating_con";
+    if window && node["focused"].as_bool() == Some(true) {
+        return Some(node);
+    }
+    ["nodes", "floating_nodes"]
+        .iter()
+        .filter_map(|children| node[children].as_array())
+        .flatten()
+        .find_map(focused_sway_node)
+}
+
+/// The app of Hyprland's active window, from `hyprctl activewindow -j`. `None` means it couldn't
+/// be read; `Some(None)` that no window is active, or its app isn't installed.
+pub fn hyprland_active_app(window: &str) -> Option<Option<String>> {
+    Some(hyprland_window(window)?.and_then(|window| desktop_id_for(&window, &installed_apps())))
+}
+
+fn hyprland_window(window: &str) -> Option<Option<WindowIds>> {
+    // With no window active, Hyprland prints `{}`, or "Invalid" in older versions.
+    let Ok(window) = serde_json::from_str::<serde_json::Value>(window) else {
+        return window.trim().eq_ignore_ascii_case("invalid").then_some(None);
+    };
+    let class = window["class"].as_str().filter(|class| !class.is_empty());
+    Some(class.map(|class| window_ids(Some(class), &[&window["initialClass"]])))
+}
+
+/// A Wayland window's app ID is its desktop file ID, as a GTK app's is, and its class as well.
+fn window_ids(app_id: Option<&str>, classes: &[&serde_json::Value]) -> WindowIds {
+    let app_id = app_id.filter(|id| !id.is_empty()).map(str::to_string);
+    let classes = app_id
+        .iter()
+        .cloned()
+        .chain(classes.iter().filter_map(|class| class.as_str()).map(str::to_string))
+        .collect();
+    WindowIds { gtk_app_id: app_id, classes }
 }
 
 /// What an X11 window says about the app it belongs to.
@@ -140,7 +198,7 @@ mod x11 {
     }
 }
 
-mod kwin {
+pub(crate) mod kwin {
     use std::sync::mpsc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -183,14 +241,30 @@ mod kwin {
         conn.object_server().at(REPORT_PATH, Report(Mutex::new(sender)))?;
 
         let name = format!("gestos-active-app-{}", std::process::id());
-        let dir = std::env::var_os("XDG_RUNTIME_DIR").ok_or("no runtime folder")?;
-        let path = std::path::Path::new(&dir).join(format!("{name}.js"));
-        std::fs::write(&path, script(&reply_to))?;
-        let answer = run_script(&conn, &path, &name)
+        let answer = load_script(&conn, &name, &script(&reply_to))
             .and_then(|_| Ok(answers.recv_timeout(ANSWER_TIMEOUT)?));
-        let _ = conn.call_method(Some(KWIN), SCRIPTING_PATH, Some(SCRIPTING), "unloadScript", &(&name,));
-        let _ = std::fs::remove_file(&path);
+        unload_script(&conn, &name);
         answer
+    }
+
+    /// Runs a script in KWin, by a name of its own, until it's unloaded.
+    pub(crate) fn load_script(conn: &zbus::blocking::Connection, name: &str, script: &str) -> Result<(), Error> {
+        let path = script_path(name)?;
+        std::fs::write(&path, script)?;
+        run_script(conn, &path, name)
+    }
+
+    /// Stops a script, and removes its file, which KWin may read only once it runs.
+    pub(crate) fn unload_script(conn: &zbus::blocking::Connection, name: &str) {
+        let _ = conn.call_method(Some(KWIN), SCRIPTING_PATH, Some(SCRIPTING), "unloadScript", &(name,));
+        if let Ok(path) = script_path(name) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    fn script_path(name: &str) -> Result<std::path::PathBuf, Error> {
+        let dir = std::env::var_os("XDG_RUNTIME_DIR").ok_or("no runtime folder")?;
+        Ok(std::path::Path::new(&dir).join(format!("{name}.js")))
     }
 
     fn run_script(
@@ -263,5 +337,40 @@ mod tests {
         assert_eq!(id(window(None, &["Navigator", "firefox"])).as_deref(), Some("org.mozilla.firefox"));
         assert_eq!(id(window(None, &["code", "Code"])).as_deref(), Some("code"));
         assert_eq!(id(window(None, &["xterm", "XTerm"])), None);
+    }
+
+    #[test]
+    fn sways_focused_window_is_found_tiled_or_floating() {
+        let tree = r#"{"type": "root", "focused": false, "nodes": [{"type": "output", "nodes": [
+            {"type": "workspace", "focused": false,
+             "nodes": [{"type": "con", "focused": false, "app_id": "foot"}],
+             "floating_nodes": [{"type": "floating_con", "focused": true, "app_id": null,
+                                 "window_properties": {"class": "Google-chrome", "instance": "google-chrome"}}]}]}]}"#;
+        assert_eq!(sway_window(tree), Some(Some(window(None, &["google-chrome", "Google-chrome"]))));
+        let wayland = tree.replace(r#""focused": true"#, r#""focused": false"#).replacen(
+            r#""focused": false, "app_id": "foot""#,
+            r#""focused": true, "app_id": "foot""#,
+            1,
+        );
+        assert_eq!(sway_window(&wayland), Some(Some(window(Some("foot"), &["foot"]))));
+    }
+
+    #[test]
+    fn a_focused_sway_workspace_is_no_window() {
+        let tree = r#"{"type": "root", "nodes": [{"type": "output", "nodes": [{"type": "workspace", "focused": true, "nodes": []}]}]}"#;
+        assert_eq!(sway_window(tree), Some(None));
+        assert_eq!(sway_window("not json"), None);
+    }
+
+    #[test]
+    fn hyprlands_active_window_is_told_by_its_class() {
+        let window_json = r#"{"class": "org.gnome.Nautilus", "initialClass": "org.gnome.Nautilus", "title": "Home"}"#;
+        assert_eq!(
+            hyprland_window(window_json),
+            Some(Some(window(Some("org.gnome.Nautilus"), &["org.gnome.Nautilus", "org.gnome.Nautilus"])))
+        );
+        assert_eq!(hyprland_window("{}"), Some(None));
+        assert_eq!(hyprland_window("Invalid\n"), Some(None));
+        assert_eq!(hyprland_window("HYPRLAND_INSTANCE_SIGNATURE not set"), None);
     }
 }
