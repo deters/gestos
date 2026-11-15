@@ -65,60 +65,6 @@ pub fn resample_path(points: &[Point2D], n: usize) -> Vec<Point2D> {
     resampled
 }
 
-pub fn vectorize_path(points: &mut [Point2D]) {
-    if points.is_empty() {
-        return;
-    }
-    let count = points.len() as f64;
-    let mut sum_x = 0.0;
-    let mut sum_y = 0.0;
-    for p in points.iter() {
-        sum_x += p.x;
-        sum_y += p.y;
-    }
-    let centroid_x = sum_x / count;
-    let centroid_y = sum_y / count;
-    for p in points.iter_mut() {
-        p.x -= centroid_x;
-        p.y -= centroid_y;
-    }
-
-    let mut sum_squares = 0.0;
-    for p in points.iter() {
-        sum_squares += p.x * p.x + p.y * p.y;
-    }
-    let mut magnitude = sum_squares.sqrt();
-    if magnitude < 1e-6 {
-        magnitude = 1e-6;
-    }
-    for p in points.iter_mut() {
-        p.x /= magnitude;
-        p.y /= magnitude;
-    }
-}
-
-pub fn compute_protractor_similarity(u: &[Point2D], w: &[Point2D], max_angle_rad: f64) -> f64 {
-    let n = u.len();
-    assert_eq!(n, w.len());
-    let mut a = 0.0;
-    let mut b = 0.0;
-    for i in 0..n {
-        a += u[i].x * w[i].x + u[i].y * w[i].y;
-        b += u[i].x * w[i].y - u[i].y * w[i].x;
-    }
-    let theta = b.atan2(a);
-    if theta.abs() <= max_angle_rad {
-        (a * a + b * b).sqrt()
-    } else {
-        let phi = if theta > 0.0 {
-            max_angle_rad
-        } else {
-            -max_angle_rad
-        };
-        a * phi.cos() + b * phi.sin()
-    }
-}
-
 fn perpendicular_distance(p: Point2D, line_start: Point2D, line_end: Point2D) -> f64 {
     let dx = line_end.x - line_start.x;
     let dy = line_end.y - line_start.y;
@@ -282,9 +228,104 @@ fn corners_differ(a: &[f64], b: &[f64]) -> bool {
     sharp_where_round(a, b) || sharp_where_round(b, a)
 }
 
+/// The direction the stroke flows in at each of its points, as a unit vector, once made the size
+/// of a square, so a wide V and a narrow one flow alike. Wiggles under 4% of its size are smoothed
+/// first, so a short diagonal's steps of whole pixels flow as one line.
+fn directions(points: &[Point2D], n: usize) -> Vec<(f64, f64)> {
+    let (mut min, mut max) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for p in points {
+        min = (min.0.min(p.x), min.1.min(p.y));
+        max = (max.0.max(p.x), max.1.max(p.y));
+    }
+    let size = (max.0 - min.0).hypot(max.1 - min.1);
+    let mut resampled = resample_path(&simplify_points(points, size * 0.04), n);
+    scale_to_square(&mut resampled, 250.0);
+    resampled
+        .windows(2)
+        .filter_map(|pair| {
+            let (dx, dy) = (pair[1].x - pair[0].x, pair[1].y - pair[0].y);
+            let length = dx.hypot(dy);
+            (length > 1e-9).then(|| (dx / length, dy / length))
+        })
+        .collect()
+}
+
+/// How far, as a share of the stroke, one part can be from where it is in the other, as the sides
+/// of a shape are drawn longer or shorter by hand.
+const DIRECTION_SLACK: f64 = 0.25;
+
+/// How alike two strokes flow, from 0 to 1: how close their directions are along their lengths,
+/// letting each side be drawn a little longer or shorter than in the other.
+fn flow_similarity(a: &[(f64, f64)], b: &[(f64, f64)]) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let (n, m) = (a.len(), b.len());
+    let band = ((n.max(m) as f64 * DIRECTION_SLACK) as usize).max(1);
+    // How far apart two directions are: 0 alike, 0.5 at a right angle, 1 opposite.
+    let cost = |i: usize, j: usize| (1.0 - (a[i].0 * b[j].0 + a[i].1 * b[j].1)) / 2.0;
+    // The least total cost to line up the first i and j directions, and how many pairs it took.
+    let mut best = vec![vec![(f64::INFINITY, 0usize); m + 1]; n + 1];
+    best[0][0] = (0.0, 0);
+    for i in 1..=n {
+        let centre = i * m / n;
+        for j in centre.saturating_sub(band).max(1)..=(centre + band).min(m) {
+            let previous = [best[i - 1][j - 1], best[i - 1][j], best[i][j - 1]]
+                .into_iter()
+                .min_by(|x, y| x.0.total_cmp(&y.0))
+                .unwrap();
+            if previous.0.is_finite() {
+                best[i][j] = (previous.0 + cost(i - 1, j - 1), previous.1 + 1);
+            }
+        }
+    }
+    let (total, pairs) = best[n][m];
+    if pairs == 0 { 0.0 } else { 1.0 - total / pairs as f64 }
+}
+
+/// How alike two strokes must flow to be taken for each other: their directions about 30° apart
+/// on average.
+const THRESHOLD_SCORE: f64 = 0.93;
 /// Scores this close together are too near to tell apart with any confidence.
 const SIMILAR_SCORE_MARGIN: f64 = 0.03;
+/// How much a template loses when its corners don't match the drawing's, which settles a choice
+/// between two that flow alike, as a V and a U, but doesn't stop one from matching alone.
+const CORNER_PENALTY: f64 = 0.06;
 const MAX_CANDIDATES: usize = 3;
+
+struct Scored<'a> {
+    name: &'a String,
+    score: f64,
+    corners_differ: bool,
+}
+
+fn score_templates<'a>(
+    captured_points: &[Point2D],
+    templates: &'a [(String, Vec<Point2D>)],
+) -> Vec<Scored<'a>> {
+    if captured_points.len() < 2 {
+        return Vec::new();
+    }
+    let n = 64;
+    let input_flow = directions(captured_points, n);
+    let input_turns = turn_profile(captured_points, n);
+    let mut scored: Vec<Scored> = templates
+        .iter()
+        .filter(|(_, template_points)| template_points.len() >= 2)
+        .map(|(name, template_points)| Scored {
+            name,
+            score: flow_similarity(&input_flow, &directions(template_points, n)),
+            corners_differ: corners_differ(&input_turns, &turn_profile(template_points, n)),
+        })
+        .filter(|scored| scored.score >= THRESHOLD_SCORE)
+        .collect();
+    let ranked = |s: &Scored| s.score - if s.corners_differ { CORNER_PENALTY } else { 0.0 };
+    scored.sort_by(|a, b| ranked(b).total_cmp(&ranked(a)));
+    if let Some(best) = scored.first().map(ranked) {
+        scored.retain(|s| best - ranked(s) <= SIMILAR_SCORE_MARGIN);
+    }
+    scored
+}
 
 /// The templates matching a drawn path, best first: only the best one, plus any others close
 /// enough that the drawing could equally have meant them.
@@ -292,41 +333,10 @@ pub fn match_gesture_candidates(
     captured_points: &[Point2D],
     templates: &[(String, Vec<Point2D>)],
 ) -> Vec<String> {
-    if captured_points.len() < 2 {
-        return Vec::new();
-    }
-    let n = 64;
-    let threshold_score = 0.90;
-    let max_angle = 15.0 * (std::f64::consts::PI / 180.0);
-
-    let mut input_vector = resample_path(captured_points, n);
-    let input_turns = turn_profile(captured_points, n);
-    scale_to_square(&mut input_vector, 250.0);
-    vectorize_path(&mut input_vector);
-
-    let mut scored: Vec<(f64, &String)> = templates
-        .iter()
-        .filter(|(_, template_points)| template_points.len() >= 2)
-        .filter_map(|(name, template_points)| {
-            if corners_differ(&input_turns, &turn_profile(template_points, n)) {
-                return None;
-            }
-            let mut temp_vector = resample_path(template_points, n);
-            scale_to_square(&mut temp_vector, 250.0);
-            vectorize_path(&mut temp_vector);
-            let score = compute_protractor_similarity(&input_vector, &temp_vector, max_angle);
-            Some((score, name))
-        })
-        .filter(|(score, _)| *score >= threshold_score)
-        .collect();
-    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
-
-    let best = scored.first().map(|(score, _)| *score).unwrap_or_default();
-    scored
+    score_templates(captured_points, templates)
         .into_iter()
-        .take_while(|(score, _)| best - *score <= SIMILAR_SCORE_MARGIN)
         .take(MAX_CANDIDATES)
-        .map(|(_, name)| name.clone())
+        .map(|s| s.name.clone())
         .collect()
 }
 
@@ -337,6 +347,18 @@ pub fn match_gesture(
     match_gesture_candidates(captured_points, templates)
         .into_iter()
         .next()
+}
+
+/// The template a drawn path would be confused with if it were saved too: one that flows alike and
+/// whose corners don't tell them apart.
+pub fn confused_with(
+    captured_points: &[Point2D],
+    templates: &[(String, Vec<Point2D>)],
+) -> Option<String> {
+    score_templates(captured_points, templates)
+        .into_iter()
+        .find(|s| !s.corners_differ)
+        .map(|s| s.name.clone())
 }
 
 #[cfg(test)]
@@ -470,11 +492,39 @@ mod tests {
     fn a_v_and_a_u_are_told_apart() {
         assert_eq!(match_gesture_candidates(&path(&v()), &templates_v_and_u()), ["V"]);
         assert_eq!(match_gesture_candidates(&path(&u()), &templates_v_and_u()), ["U"]);
-        // Each alone isn't taken for the other, as the editor's warning checks.
+    }
+
+    #[test]
+    fn a_u_alone_is_matched_by_a_v_but_not_confused_with_it() {
+        // They flow alike, so with only one saved, either drawing is it. Saving the other too
+        // is fine, as their corners tell them apart.
         let only_v = vec![("V".to_string(), path(&v()))];
-        assert_eq!(match_gesture(&path(&u()), &only_v), None);
+        assert_eq!(match_gesture(&path(&u()), &only_v).as_deref(), Some("V"));
+        assert_eq!(confused_with(&path(&u()), &only_v), None);
         let only_u = vec![("U".to_string(), path(&u()))];
-        assert_eq!(match_gesture(&path(&v()), &only_u), None);
+        assert_eq!(match_gesture(&path(&v()), &only_u).as_deref(), Some("U"));
+        assert_eq!(confused_with(&path(&v()), &only_u), None);
+    }
+
+    #[test]
+    fn a_drawing_like_a_saved_one_is_confused_with_it() {
+        let drawn = path(&[(0.0, 0.0), (0.0, 60.0), (60.0, 60.0)]);
+        assert_eq!(confused_with(&drawn, &templates()).as_deref(), Some("corner"));
+    }
+
+    #[test]
+    fn sides_drawn_longer_or_shorter_still_match() {
+        // Down a lot, then a little to the right, against a template with even sides.
+        assert_eq!(matched(&[(0.0, 0.0), (0.0, 100.0), (55.0, 100.0)]).as_deref(), Some("corner"));
+        assert_eq!(matched(&[(0.0, 0.0), (0.0, 55.0), (100.0, 55.0)]).as_deref(), Some("corner"));
+    }
+
+    #[test]
+    fn a_corner_drawn_round_matches_a_sharp_one() {
+        let mut rounded = vec![(0.0, 0.0)];
+        rounded.extend(arc((40.0, 60.0), 40.0, 180.0, 90.0, 12));
+        rounded.push((100.0, 100.0));
+        assert_eq!(matched(&rounded).as_deref(), Some("corner"));
     }
 
     #[test]
@@ -487,7 +537,7 @@ mod tests {
     }
 
     #[test]
-    fn a_u_with_tight_bends_is_not_a_v() {
+    fn a_u_with_tight_bends_is_told_from_a_v() {
         // Both drawn by hand in the editor. The U turns at two bends instead of one round
         // bottom, and more tightly than the curve of a circle.
         let u = path(&[
@@ -502,8 +552,10 @@ mod tests {
             (311.0, 169.0), (334.0, 136.0), (352.0, 105.0), (364.0, 82.0), (372.0, 68.0),
             (376.0, 58.0),
         ]);
-        assert_eq!(match_gesture(&u, &[("V".to_string(), v.clone())]), None);
-        assert_eq!(match_gesture(&v, &[("U".to_string(), u)]), None);
+        let both = vec![("V".to_string(), v.clone()), ("U".to_string(), u.clone())];
+        assert_eq!(match_gesture_candidates(&u, &both), ["U"]);
+        assert_eq!(match_gesture_candidates(&v, &both), ["V"]);
+        assert_eq!(confused_with(&u, &[("V".to_string(), v)]), None);
     }
 
     #[test]

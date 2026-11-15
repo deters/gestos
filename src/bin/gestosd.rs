@@ -216,6 +216,8 @@ enum DaemonSignal {
     ActionExecuted(String, String, String),
     /// The action that just ran couldn't, and why, in a few words.
     ActionFailed(String),
+    /// The gesture drawn is none of the user's.
+    GestureUnrecognized,
 }
 
 /// Whether gesture paths are drawn, where Gestos draws them itself, as the configuration says.
@@ -251,6 +253,9 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
                 match &signal {
                     DaemonSignal::ActionExecuted(name, _, icon) => show_kde_osd(conn, icon, name),
                     DaemonSignal::ActionFailed(reason) => show_kde_osd(conn, "dialog-warning", reason),
+                    DaemonSignal::GestureUnrecognized => {
+                        show_kde_osd(conn, "dialog-question", UNRECOGNIZED_MESSAGE)
+                    }
                     _ => {}
                 }
             }
@@ -270,11 +275,18 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
                 DaemonSignal::ActionFailed(reason) => {
                     conn.emit_signal(dest.clone(), path, iface, "ActionFailed", &(reason,))
                 }
+                DaemonSignal::GestureUnrecognized => {
+                    conn.emit_signal(dest.clone(), path, iface, "GestureUnrecognized", &())
+                }
             };
         }
     });
     sender
 }
+
+/// What's shown when a gesture drawn is none of the user's.
+#[cfg(target_os = "linux")]
+const UNRECOGNIZED_MESSAGE: &str = "Gesture not recognized";
 
 /// Shows text with an icon in KDE's on-screen display, as its volume and brightness keys do.
 #[cfg(target_os = "linux")]
@@ -456,7 +468,10 @@ fn dispatch_gesture(
     if let Some(app) = &app {
         println!("App in use: {app}");
     }
-    if app_unknown && wayland_ctx.is_gnome && matches_app_gesture(points, config, modifiers) {
+    // A gesture for an app that can't be told is one of the user's, and that's what's said.
+    let needs_extension =
+        app_unknown && wayland_ctx.is_gnome && matches_app_gesture(points, config, modifiers);
+    if needs_extension {
         gestos::wayland::tell_gesture_needs_extension();
     }
     let templates = gesture_templates(config, modifiers, app.as_deref());
@@ -467,7 +482,12 @@ fn dispatch_gesture(
     let candidates = prefer_app_gestures(candidates);
 
     match candidates.len() {
-        0 => println!("Gesture failed: did not match any known template."),
+        0 => {
+            println!("Gesture failed: did not match any known template.");
+            if !needs_extension {
+                let _ = signals.try_send(DaemonSignal::GestureUnrecognized);
+            }
+        }
         1 => run_gesture(&candidates[0], input, signals, wayland_ctx),
         _ => {
             let signals = signals.clone();

@@ -1013,8 +1013,8 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
         state.main_list.set_visible(false);
         for (app, gestures) in groups {
             let heading = gtk::Label::new(Some(&match &app {
-                Some(app) => crate::ui::app_picker::app_name(app),
-                None => "In All Apps".to_string(),
+                Some(app) => format!("Gestures inside {}", crate::ui::app_picker::app_name(app)),
+                None => "Gestures".to_string(),
             }));
             heading.add_css_class("section-header");
             heading.set_xalign(0.0);

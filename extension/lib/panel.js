@@ -1,6 +1,6 @@
-// A small dark panel at the bottom of the screen the pointer is on, saying what a gesture did, or
-// that it couldn't and why. It fades away by itself, and takes no clicks, as the panels apps show
-// pressed keys in do.
+// A small dark panel at the bottom of the screen the pointer is on, saying what a gesture did, that
+// it couldn't and why, or that it wasn't one of the user's. It fades away by itself, and takes no
+// clicks, as the panels apps show pressed keys in do.
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
@@ -40,6 +40,9 @@ export class ActionPanel {
             ActionFailed: params => {
                 const [reason] = params.deepUnpack();
                 this._show('dialog-warning-symbolic', reason, true);
+            },
+            GestureUnrecognized: () => {
+                this._show('dialog-question-symbolic', 'Gesture not recognized', false);
             },
         };
         this._signalIds = Object.entries(handlers).map(([signal, handler]) =>

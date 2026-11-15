@@ -1,6 +1,6 @@
 use gtk::prelude::*;
 use gtk::glib;
-use gestos::protractor::match_gesture;
+use gestos::protractor::confused_with;
 use gtk4 as gtk;
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};
@@ -711,7 +711,7 @@ fn open_editor(
                 .map(|g| (g.name.clone(), g.points.clone()))
                 .collect();
 
-            if let Some(matched_name) = match_gesture(&pts[..], &templates) {
+            if let Some(matched_name) = confused_with(&pts[..], &templates) {
                 conflict_label.set_text(&format!(
                     "Very similar to \u{201c}{}\u{201d}",
                     matched_name

@@ -11,7 +11,8 @@ enum OverlayEvent {
     Started(f64, f64),
     Updated(f64, f64),
     Ended,
-    ActionExecuted(String, String, String),
+    /// A message, as its icon and its two lines of markup, the second of which can be empty.
+    Message(String, String, String),
 }
 
 #[zbus::proxy(
@@ -31,6 +32,9 @@ trait Daemon {
 
     #[zbus(signal)]
     fn action_executed(&self, gesture_name: String, action_desc: String, icon_name: String) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    fn gesture_unrecognized(&self) -> zbus::Result<()>;
 }
 
 struct TrailData {
@@ -221,15 +225,16 @@ pub fn build_overlay_ui(app: &gtk::Application) {
 
                     *fade_timeout_clone.borrow_mut() = Some(source_id);
                 }
-                OverlayEvent::ActionExecuted(gesture_name, action_desc, icon_name) => {
+                OverlayEvent::Message(icon_name, title, subtitle) => {
                     if is_osd_enabled() {
                         if let Some(source_id) = osd_timeout_clone.borrow_mut().take() {
                             source_id.remove();
                         }
 
                         osd_icon_clone.set_icon_name(Some(&icon_name));
-                        osd_title_clone.set_markup(&format!("Gesture: <b>{}</b>", gesture_name));
-                        osd_subtitle_clone.set_markup(&format!("<i>{}</i>", action_desc));
+                        osd_title_clone.set_markup(&title);
+                        osd_subtitle_clone.set_markup(&subtitle);
+                        osd_subtitle_clone.set_visible(!subtitle.is_empty());
 
                         osd_box_clone.set_opacity(1.0);
                         osd_box_clone.set_visible(true);
@@ -354,12 +359,30 @@ pub fn build_overlay_ui(app: &gtk::Application) {
         glib::MainContext::default().spawn_local(async move {
             while let Some(signal) = action_executed_stream.next().await {
                 if let Ok(args) = signal.args() {
-                    let _ = tx_action.unbounded_send(OverlayEvent::ActionExecuted(
-                        args.gesture_name.clone(),
-                        args.action_desc.clone(),
+                    let _ = tx_action.unbounded_send(OverlayEvent::Message(
                         args.icon_name.clone(),
+                        format!("Gesture: <b>{}</b>", args.gesture_name),
+                        format!("<i>{}</i>", args.action_desc),
                     ));
                 }
+            }
+        });
+
+        let mut unrecognized_stream = match proxy.receive_gesture_unrecognized().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to receive GestureUnrecognized: {}", e);
+                return;
+            }
+        };
+        let tx_unrecognized = tx.clone();
+        glib::MainContext::default().spawn_local(async move {
+            while unrecognized_stream.next().await.is_some() {
+                let _ = tx_unrecognized.unbounded_send(OverlayEvent::Message(
+                    "dialog-question-symbolic".to_string(),
+                    "Gesture not recognized".to_string(),
+                    String::new(),
+                ));
             }
         });
     });
