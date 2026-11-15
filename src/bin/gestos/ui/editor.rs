@@ -272,12 +272,17 @@ impl ModifierKeys {
     }
 }
 
+/// The modifiers in a state GTK gives. On X11, Alt can come as Meta, and Super as Hyper, or only as
+/// X's own Mod4, which GTK passes on without naming it.
 fn held_modifiers(state: gtk::gdk::ModifierType) -> Modifiers {
+    use gtk::gdk::ModifierType;
+    const X11_MOD4: u32 = 1 << 6;
     Modifiers {
-        ctrl: state.contains(gtk::gdk::ModifierType::CONTROL_MASK),
-        alt: state.contains(gtk::gdk::ModifierType::ALT_MASK),
-        shift: state.contains(gtk::gdk::ModifierType::SHIFT_MASK),
-        super_key: state.contains(gtk::gdk::ModifierType::SUPER_MASK),
+        ctrl: state.contains(ModifierType::CONTROL_MASK),
+        alt: state.intersects(ModifierType::ALT_MASK | ModifierType::META_MASK),
+        shift: state.contains(ModifierType::SHIFT_MASK),
+        super_key: state.intersects(ModifierType::SUPER_MASK | ModifierType::HYPER_MASK)
+            || state.bits() & X11_MOD4 != 0,
     }
 }
 
@@ -784,14 +789,19 @@ fn open_editor(
         subscriptions.push(subscribe("GestureStarted", Box::new(move |parameters| {
             let Some((x, y)) = parameters.get::<(f64, f64)>() else { return };
             *path.borrow_mut() = vec![Point2D { x, y }];
-            held.set(
+            // On X11, GTK only follows the keys for the window with focus, which this one may not
+            // be, so the X server is asked.
+            let on_x11 = gestos::active_app::is_x11_session()
+                .then(gestos::modifiers::Modifiers::held_on_x11)
+                .flatten();
+            held.set(on_x11.unwrap_or_else(|| {
                 canvas_started
                     .display()
                     .default_seat()
                     .and_then(|seat| seat.keyboard())
                     .map(|keyboard| held_modifiers(keyboard.modifier_state()))
-                    .unwrap_or_default(),
-            );
+                    .unwrap_or_default()
+            }));
         })));
         let path = Rc::clone(&new_path);
         let held = Rc::clone(&held_at_start);
@@ -1534,6 +1544,22 @@ fn open_editor(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn alt_and_super_are_found_however_x11_reports_them() {
+        use gtk::gdk::ModifierType;
+        use gestos::modifiers::Modifiers;
+        let all = Modifiers { ctrl: true, alt: true, shift: true, super_key: true };
+        let named = ModifierType::CONTROL_MASK | ModifierType::ALT_MASK | ModifierType::SHIFT_MASK
+            | ModifierType::SUPER_MASK;
+        assert_eq!(super::held_modifiers(named), all);
+        let as_meta_and_hyper = ModifierType::CONTROL_MASK | ModifierType::META_MASK
+            | ModifierType::SHIFT_MASK | ModifierType::HYPER_MASK;
+        assert_eq!(super::held_modifiers(as_meta_and_hyper), all);
+        // Super as X11's Mod4, with Num Lock on, as GTK passed it on in a test.
+        let mod4 = ModifierType::from_bits_retain(80);
+        assert_eq!(super::held_modifiers(mod4), Modifiers { super_key: true, ..Default::default() });
+    }
 
     #[test]
     fn a_custom_actions_own_name_is_kept() {

@@ -29,6 +29,28 @@ impl Modifiers {
         modifiers
     }
 
+    /// From the X server's mask of the keys down: Shift, Control, Mod1 for Alt and Mod4 for Super,
+    /// as nearly every keyboard is set up.
+    pub fn from_x11_mask(mask: u16) -> Self {
+        Modifiers {
+            shift: mask & 1 != 0,
+            ctrl: mask & (1 << 2) != 0,
+            alt: mask & (1 << 3) != 0,
+            super_key: mask & (1 << 6) != 0,
+        }
+    }
+
+    /// The modifier keys held now, anywhere on the screen, on X11. GTK only follows them for the
+    /// window with focus. None when the X server can't be asked.
+    pub fn held_on_x11() -> Option<Self> {
+        use x11rb::connection::Connection;
+        use x11rb::protocol::xproto::ConnectionExt;
+        let (conn, screen) = x11rb::connect(None).ok()?;
+        let root = conn.setup().roots[screen].root;
+        let pointer = conn.query_pointer(root).ok()?.reply().ok()?;
+        Some(Self::from_x11_mask(u16::from(pointer.mask)))
+    }
+
     /// From the evdev codes of the keys that are down.
     pub fn from_key_codes(codes: impl IntoIterator<Item = u16>) -> Self {
         let mut modifiers = Modifiers::default();
@@ -257,5 +279,24 @@ mod tests {
         let held = HeldKeys::decode("ctrl+super");
         assert_eq!(held.codes(), [29, 125]);
         assert_eq!(held.on_standard_layout(), Modifiers::parse("ctrl+super"));
+    }
+
+    #[test]
+    fn modifiers_are_read_from_the_x_servers_mask() {
+        // Shift, Lock (Caps Lock), Control, Mod1, Mod2 (Num Lock), Mod4, and the first button.
+        assert_eq!(Modifiers::from_x11_mask(0), Modifiers::default());
+        let all = Modifiers::from_x11_mask(1 | 2 | 4 | 8 | 16 | 64 | 256);
+        assert_eq!(all, Modifiers { ctrl: true, alt: true, shift: true, super_key: true });
+        // Caps Lock and Num Lock are no modifier a gesture needs.
+        assert!(Modifiers::from_x11_mask(2 | 16).is_empty());
+    }
+
+    /// Run with an X server whose keys are held, as `DISPLAY=:1 HELD=ctrl+shift cargo test --
+    /// --ignored held_on_x11`.
+    #[test]
+    #[ignore = "needs an X server with keys held"]
+    fn held_on_x11_says_the_keys_held() {
+        let expected = Modifiers::parse(&std::env::var("HELD").unwrap_or_default());
+        assert_eq!(Modifiers::held_on_x11(), Some(expected));
     }
 }
