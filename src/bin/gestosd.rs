@@ -642,6 +642,35 @@ enum SessionEnd {
     Lost(String),
 }
 
+/// How often a gesture's moves are passed on: a mouse can say where it is a thousand times a
+/// second, and every one would be a message on the bus, while a screen shows 60 to 120 frames.
+const UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(8);
+
+/// Passes on a gesture's moves at most once each interval, the latest one held back until then.
+#[derive(Default)]
+struct UpdateThrottle {
+    sent: Option<std::time::Instant>,
+    held: Option<(f64, f64)>,
+}
+
+impl UpdateThrottle {
+    /// The moves to pass on as the pointer moves to `x`, `y`: none, or the latest one.
+    fn moved(&mut self, x: f64, y: f64, now: std::time::Instant) -> Option<(f64, f64)> {
+        if self.sent.is_some_and(|sent| now.duration_since(sent) < UPDATE_INTERVAL) {
+            self.held = Some((x, y));
+            return None;
+        }
+        self.sent = Some(now);
+        self.held = None;
+        Some((x, y))
+    }
+
+    /// The move held back, if one is, to pass on as the gesture ends.
+    fn last(&mut self) -> Option<(f64, f64)> {
+        self.held.take()
+    }
+}
+
 /// Handles one connection to the input service. Sets `opened` once the device is in use.
 #[cfg(target_os = "linux")]
 #[allow(clippy::too_many_arguments)]
@@ -677,6 +706,7 @@ fn run_session(
 
     let mut lines = LineBuffer::default();
     let mut points = Vec::new();
+    let mut updates = UpdateThrottle::default();
     loop {
         if RELOAD_REQUESTED.swap(false, Ordering::Relaxed) {
             println!("gestosd: Reloading configuration dynamically...");
@@ -743,12 +773,19 @@ fn run_session(
                 }
                 Some(Event::Started(x, y)) => {
                     points.clear();
+                    updates = UpdateThrottle::default();
                     let _ = signals.try_send(DaemonSignal::GestureStarted(x, y));
                 }
                 Some(Event::Updated(x, y)) => {
-                    let _ = signals.try_send(DaemonSignal::GestureUpdated(x, y));
+                    if let Some((x, y)) = updates.moved(x, y, std::time::Instant::now()) {
+                        let _ = signals.try_send(DaemonSignal::GestureUpdated(x, y));
+                    }
                 }
                 Some(Event::Ended) => {
+                    // Where it ended, so what's drawn from the signals ends there too.
+                    if let Some((x, y)) = updates.last() {
+                        let _ = signals.try_send(DaemonSignal::GestureUpdated(x, y));
+                    }
                     let _ = signals.try_send(DaemonSignal::GestureEnded);
                 }
                 Some(Event::Point(x, y)) => points.push(gestos::protractor::Point2D { x, y }),
@@ -1293,6 +1330,21 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moves_are_passed_on_at_most_once_an_interval_and_the_last_one_at_the_end() {
+        let start = std::time::Instant::now();
+        let at = |ms| start + std::time::Duration::from_millis(ms);
+        let mut updates = UpdateThrottle::default();
+        assert_eq!(updates.moved(1.0, 1.0, at(0)), Some((1.0, 1.0)));
+        assert_eq!(updates.moved(2.0, 2.0, at(1)), None);
+        assert_eq!(updates.moved(3.0, 3.0, at(4)), None);
+        assert_eq!(updates.moved(4.0, 4.0, at(9)), Some((4.0, 4.0)));
+        assert_eq!(updates.last(), None);
+        assert_eq!(updates.moved(5.0, 5.0, at(10)), None);
+        assert_eq!(updates.last(), Some((5.0, 5.0)));
+        assert_eq!(updates.last(), None);
+    }
 
     fn exited(code: i32) -> ExitStatus {
         ExitStatus::from_raw(code << 8)
