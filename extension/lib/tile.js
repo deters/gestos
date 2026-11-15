@@ -227,15 +227,130 @@ function placeTree(node, area, plan, cells) {
     placeTree(node.after, after, plan, cells);
 }
 
+// Whether two cells cover some of the same room, not only touch.
+function overlap(a, b) {
+    return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+// Where a window goes along an axis, sliding from `from` towards `end`: past what it's on top of,
+// at its size if the room there holds it, or as small as it may get if that's what holds it. It
+// doesn't go past a window in its way. Null when it can't get small enough.
+function slide(from, size, least, blockers, end) {
+    let start = from;
+    for (const blocker of [...blockers].sort((a, b) => a.start - b.start)) {
+        if (blocker.start < start + Math.min(size, least) && blocker.end > start)
+            start = Math.max(start, blocker.end);
+    }
+    const next = Math.min(end, ...blockers.filter(b => b.start >= start).map(b => b.start));
+    const room = next - start;
+    if (room >= size)
+        return {start, size};
+    return room >= least ? {start, size: room} : null;
+}
+
+// Pushes a window out of the way of one already placed: along the axis it overlaps it less on, so
+// the way the other one was moved or resized, away from it, past every window placed in its way.
+function pushOut(cell, pusher, placed, least, area) {
+    const overlaps = AXES.map(({start, size}) =>
+        Math.min(cell[start] + cell[size], pusher[start] + pusher[size]) -
+        Math.max(cell[start], pusher[start]));
+    const axis = overlaps[0] <= overlaps[1] ? AXES[0] : AXES[1];
+    const across = axis === AXES[0] ? AXES[1] : AXES[0];
+    const {start, size} = axis;
+    const center = c => c[start] + c[size] / 2;
+    const forward = center(cell) >= center(pusher);
+    // Going back is going forward along the axis turned around.
+    const along = v => forward ? v : -v;
+    const blockers = placed
+        .filter(other => other[across.start] < cell[across.start] + cell[across.size] &&
+            cell[across.start] < other[across.start] + other[across.size])
+        .map(other => {
+            const [a, b] = [along(other[start]), along(other[start] + other[size])];
+            return {start: Math.min(a, b), end: Math.max(a, b)};
+        });
+    const pusherEnd = forward ? pusher[start] + pusher[size] : -pusher[start];
+    const ownStart = forward ? cell[start] : -(cell[start] + cell[size]);
+    const areaEnd = forward ? area[start] + area[size] : -area[start];
+    const spot = slide(Math.max(ownStart, pusherEnd), cell[size], least[size], blockers, areaEnd);
+    if (!spot)
+        return null;
+    return {
+        ...cell,
+        [start]: forward ? spot.start : -(spot.start + spot.size),
+        [size]: spot.size,
+    };
+}
+
+// Fits windows together by pushing them out of each other's way, starting from the one the user
+// moved last: each one it covers slides away from it, in the way it was moved or resized, until it
+// has room, and pushes the ones it covers then in turn. One that reaches the edge of the area, or
+// a window in its way, gets smaller. Windows nothing pushes stay where they are. Null when one
+// can't get small enough, for the windows to be fitted together another way.
+function pushWindows(plan) {
+    const {area, gap, rects} = plan;
+    const cells = rects.map(rect => keepInside({
+        x: rect.x - gap / 2,
+        y: rect.y - gap / 2,
+        width: Math.min(rect.width + gap, area.width),
+        height: Math.min(rect.height + gap, area.height),
+    }, area));
+    const least = plan.least.map(size => ({width: size.width + gap, height: size.height + gap}));
+    const placed = new Set();
+    for (let first = 0; first < cells.length; first++) {
+        if (placed.has(first))
+            continue;
+        placed.add(first);
+        const pushers = [first];
+        while (pushers.length > 0) {
+            const pusher = pushers.shift();
+            for (let i = 0; i < cells.length; i++) {
+                if (placed.has(i) || !overlap(cells[i], cells[pusher]))
+                    continue;
+                const moved = pushOut(cells[i], cells[pusher],
+                    [...placed].map(j => cells[j]), least[i], area);
+                if (!moved)
+                    return null;
+                cells[i] = moved;
+                placed.add(i);
+                pushers.push(i);
+            }
+        }
+    }
+    return cells;
+}
+
+// Fits windows together by splitting the area between them, when pushing them doesn't fit them.
+function sliceWindows(plan) {
+    const {rects} = plan;
+    let shown = rects.map((_, i) => i);
+    let tree = null;
+    while (shown.length > 0) {
+        tree = buildTree(shown.map(index => ({rect: rects[index], index})));
+        if (shown.length === 1 ||
+            AXES.every(axis => needed(tree, axis, plan.least, plan) <= plan.area[axis.size]))
+            break;
+        shown = shown.slice(0, -1);
+    }
+    const cells = rects.map(() => null);
+    if (tree)
+        placeTree(tree, plan.area, plan, cells);
+    return cells;
+}
+
 /**
  * Fits windows together so they don't overlap, moving them first and shrinking them only when they
  * don't fit otherwise. No window gets bigger than it is.
  *
- * The area is split in two again and again, each time along the line that best separates the
- * windows, so they keep their order across the screen. Each gets the room it needs, as close to
- * where it was as the others let it be. The first window is the one the user moved or
- * resized last, which keeps its size and, where there's room, its place. When even the smallest
- * sizes don't fit, the windows the user touched longest ago are minimized, until the rest do.
+ * The first window is the one the user moved or resized last, which keeps its size and place. The
+ * windows it covers are pushed out of its way, in the way it was moved or resized, and push the
+ * ones they cover in turn, getting smaller only at the edge of the area or against a window in
+ * their way. Windows nothing pushes stay where they are.
+ *
+ * When that doesn't fit them, the area is split in two again and again instead, each time along
+ * the line that best separates the windows, so they keep their order across the screen. Each gets
+ * the room it needs, as close to where it was as the others let it be, and the first one keeps its
+ * place where there's room. When even the smallest sizes don't fit, the windows the user touched
+ * longest ago are minimized, until the rest do.
  *
  * @param {Array<{x: number, y: number, width: number, height: number}>} rects - the windows at the
  *   size and place they'd have on their own, the one the user touched last first
@@ -272,19 +387,7 @@ export function tileWindows(rects, area, gap = 0, minimums = new Map()) {
         return least;
     });
 
-    let shown = rects.map((_, i) => i);
-    let tree = null;
-    while (shown.length > 0) {
-        tree = buildTree(shown.map(index => ({rect: rects[index], index})));
-        if (shown.length === 1 ||
-            AXES.every(axis => needed(tree, axis, plan.least, plan) <= plan.area[axis.size]))
-            break;
-        shown = shown.slice(0, -1);
-    }
-
-    const cells = rects.map(() => null);
-    if (tree)
-        placeTree(tree, plan.area, plan, cells);
+    const cells = pushWindows(plan) ?? sliceWindows(plan);
     const half = gap / 2;
     // Rounded edge by edge, so that neighbors stay exactly the gap apart, odd ones too.
     return cells.map(c => {

@@ -36,13 +36,22 @@ results.push(['moves the window moved last only when there is no room for the ot
 results.push(['moves the window moved last as little as there is no room',
     tileWindows([rect(200, 100, 400, 300), rect(100, 100, 400, 300)], bounds),
     [rect(400, 100, 400, 300), rect(0, 100, 400, 300)]]);
-results.push(['moves both windows before shrinking either, with a gap',
+// The window moved last stays where it was put, and the one it pushes to the edge gets smaller.
+results.push(['shrinks a window pushed to the edge, with a gap',
     tileWindows([rect(200, 100, 400, 300), rect(400, 100, 400, 300)], bounds, 10),
-    [rect(180, 100, 400, 300), rect(590, 100, 400, 300)]]);
+    [rect(200, 100, 400, 300), rect(610, 100, 380, 300)]]);
 
 results.push(['moves a window below when it overlaps more across',
     tileWindows([rect(0, 0, 600, 300), rect(400, 200, 600, 500)], bounds),
     [rect(0, 0, 600, 300), rect(400, 300, 600, 500)]]);
+// Windows are pushed out of the way of the one moved last, in the way it grew, and only the ones
+// in the way move.
+results.push(['pushes only the window in the way, not the one below it',
+    tileWindows([rect(0, 0, 600, 400), rect(500, 0, 300, 400), rect(500, 450, 300, 300)], bounds),
+    [rect(0, 0, 600, 400), rect(600, 0, 300, 400), rect(500, 450, 300, 300)]]);
+results.push(['pushes a window into the next one, which moves on',
+    tileWindows([rect(0, 0, 500, 800), rect(400, 0, 250, 800), rect(700, 0, 250, 800)], bounds),
+    [rect(0, 0, 500, 800), rect(500, 0, 250, 800), rect(750, 0, 250, 800)]]);
 const three = tileWindows([rect(0, 0, 500, 300), rect(300, 0, 400, 300), rect(600, 0, 400, 300)],
     bounds);
 results.push(['shrinks the others in proportion', three.map(r => r.width), [500, 250, 250]]);
