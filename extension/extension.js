@@ -524,6 +524,8 @@ class WindowActions {
         const original = this._originals.get(window);
         original.size = copyRect(rect);
         this._remember(original);
+        const frame = window.get_frame_rect();
+        original.asked = {rect: copyRect(rect), from: {width: frame.width, height: frame.height}};
         window.move_resize_frame(true, rect.x, rect.y, rect.width, rect.height);
     }
 
@@ -834,7 +836,7 @@ class WindowActions {
     // A tiled workspace keeps the order the user touched its windows in, the last one first.
     _startTiling(workspace) {
         const tiling = {workspace, windows: new Map(), plans: [], waits: [], timeoutId: 0,
-            checkId: 0, joining: new Map(), order: [], dragId: 0, parked: new Map(),
+            checkId: 0, earlyCheckId: 0, joining: new Map(), order: [], dragId: 0, parked: new Map(),
             aside: new Map()};
         // Windows moved here from a workspace that isn't tiled join. New windows join once they're
         // on screen, as the Shell places them before that, which would undo their tile.
@@ -899,13 +901,17 @@ class WindowActions {
             GLib.source_remove(tiling.checkId);
             tiling.checkId = 0;
         }
+        if (tiling.earlyCheckId) {
+            global.compositor.get_laters().remove(tiling.earlyCheckId);
+            tiling.earlyCheckId = 0;
+        }
     }
 
     // A tiled window is watched, so that one that leaves its tile is found: apps can resize their
     // windows themselves, or turn out bigger than they said they could get.
     _joinTiling(tiling, window, state) {
         state.watchIds = ['position-changed', 'size-changed'].map(signal =>
-            window.connect(signal, () => this._onTileChanged(tiling, window)));
+            window.connect(signal, () => this._onTileChanged(tiling, window, signal)));
         tiling.windows.set(window, state);
     }
 
@@ -923,13 +929,37 @@ class WindowActions {
         tiling.order = tiling.order.filter(w => w !== window);
     }
 
-    _onTileChanged(tiling, window) {
-        if (this._originals.get(window)?.closing)
+    _onTileChanged(tiling, window, signal) {
+        const original = this._originals.get(window);
+        if (original?.closing)
             return;
-        if (this._grabbed !== window)
-            this._scheduleTileCheck(tiling);
-        else
+        if (this._grabbed === window) {
             this._scheduleDragLayout(tiling);
+            return;
+        }
+        // A size its app took other than the one it was asked for, and other than the one it had,
+        // is its answer, so it's checked before the next frame, instead of the windows moving
+        // again a while later. One that took it, or hasn't answered yet, waits for the check.
+        const asked = original?.asked;
+        if (signal === 'size-changed' && asked) {
+            const frame = window.get_frame_rect();
+            if (hasSize(frame, asked.rect))
+                original.asked = null;
+            else if (!hasSize(frame, asked.from))
+                this._scheduleEarlyCheck(tiling, window);
+        }
+        this._scheduleTileCheck(tiling);
+    }
+
+    _scheduleEarlyCheck(tiling, window) {
+        this._originals.get(window).asked = null;
+        if (tiling.earlyCheckId)
+            return;
+        tiling.earlyCheckId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            tiling.earlyCheckId = 0;
+            this._checkTiles(tiling, true);
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _scheduleTileCheck(tiling) {
@@ -1332,7 +1362,8 @@ class WindowActions {
     // get that small, which the others make room for. One that was moved without changing size
     // stays where it was moved to. One that changed size goes back a few times, and after that
     // keeps what its app wants, as its original size.
-    _checkTiles(tiling) {
+    // Early, only the windows whose apps have answered the size they were asked for are checked.
+    _checkTiles(tiling, early = false) {
         // Windows the Shell moves to the monitors there are now are placed once it's done.
         if (this._monitorsSettleId)
             return;
@@ -1343,8 +1374,9 @@ class WindowActions {
                 const state = tiling.windows.get(window);
                 const original = this._originals.get(window);
                 if (!state?.tile || !original || original.closing || this._grabbed === window ||
-                    isSnapped(window))
+                    isSnapped(window) || (early && original.asked))
                     return;
+                original.asked = null;
                 const frame = window.get_frame_rect();
                 const tile = state.tile;
                 const area = window.get_work_area_current_monitor();
