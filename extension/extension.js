@@ -1038,8 +1038,10 @@ class WindowActions {
             const rects = group.map(window => window === dragged
                 ? copyRect(window.get_frame_rect())
                 : tiling.parked.get(window)?.rect ?? this._originals.get(window).rect);
+            // While one is dragged, the others keep their order, and are only rearranged once
+            // it's let go, so none jumps away under the pointer.
             return {windows: group, rects: tileWindows(rects, area, gap,
-                this._minimumsOf(tiling, group, workArea))};
+                this._minimumsOf(tiling, group, workArea), {rearrange: !dragged})};
         });
         for (const plan of tiling.plans) {
             plan.windows.forEach((window, i) => {

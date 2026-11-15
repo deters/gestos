@@ -129,30 +129,54 @@ function smallestTile(axis, plan) {
     return Math.floor(plan.area[axis.size] / axis.most) - plan.gap;
 }
 
+// The split of the windows in two along an axis that best separates them, if there are two to
+// split: the one where the two groups overlap least, or are furthest apart.
+function bestSplit(items, axis) {
+    const center = r => r[axis.start] + r[axis.size] / 2;
+    const sorted = [...items].sort((a, b) => center(a.rect) - center(b.rect));
+    let best = null;
+    for (let k = 1; k < sorted.length; k++) {
+        const before = sorted.slice(0, k);
+        const after = sorted.slice(k);
+        const overlap = Math.max(...before.map(i => i.rect[axis.start] + i.rect[axis.size])) -
+            Math.min(...after.map(i => i.rect[axis.start]));
+        if (!best || overlap < best.overlap)
+            best = {axis, before, after, overlap};
+    }
+    return best;
+}
+
 // Splits the windows in two along the line that best separates them, and recurses into each side.
 // Windows stay on the side their center is on, so they keep their order across the screen.
 function buildTree(items) {
     if (items.length === 1)
         return {index: items[0].index};
+    const splits = AXES.map(axis => bestSplit(items, axis));
+    const {axis, before, after} = splits.reduce((best, split) =>
+        split.overlap < best.overlap ? split : best);
+    return {axis, before: buildTree(before), after: buildTree(after)};
+}
 
-    let best = null;
+// The most ways of arranging windows that are tried when they don't fit as they are.
+const MAX_ARRANGEMENTS = 64;
+
+// Every way of splitting the windows where each split is the best one along either axis, so a
+// window can go under or beside a neighbor instead of where it is now, up to a limit.
+function allTrees(items) {
+    if (items.length === 1)
+        return [{index: items[0].index}];
+    const trees = [];
     for (const axis of AXES) {
-        const center = r => r[axis.start] + r[axis.size] / 2;
-        const sorted = [...items].sort((a, b) => center(a.rect) - center(b.rect));
-        for (let k = 1; k < sorted.length; k++) {
-            const before = sorted.slice(0, k);
-            const after = sorted.slice(k);
-            // How far the two groups overlap along this axis, or how far apart they are if
-            // negative: the lower, the cleaner the split.
-            const overlap = Math.max(...before.map(i => i.rect[axis.start] + i.rect[axis.size])) -
-                Math.min(...after.map(i => i.rect[axis.start]));
-            if (!best || overlap < best.overlap)
-                best = {axis, before, after, overlap};
+        const {before, after} = bestSplit(items, axis);
+        for (const first of allTrees(before)) {
+            for (const second of allTrees(after)) {
+                trees.push({axis, before: first, after: second});
+                if (trees.length >= MAX_ARRANGEMENTS)
+                    return trees;
+            }
         }
     }
-
-    const {axis, before, after} = best;
-    return {axis, before: buildTree(before), after: buildTree(after)};
+    return trees;
 }
 
 function leaves(node) {
@@ -227,12 +251,35 @@ function placeTree(node, area, plan, cells) {
     placeTree(node.after, after, plan, cells);
 }
 
+// How much of a window's size it can lose before other arrangements are tried.
+const MOST_SHRINKING = 0.25;
+
+// What part of its size a window placed in a cell loses, from 0 to 1.
+function lost(cell, rect, plan) {
+    const width = Math.min(rect.width, cell.width - plan.gap);
+    const height = Math.min(rect.height, cell.height - plan.gap);
+    return 1 - width * height / (rect.width * rect.height);
+}
+
+function mostLost(cells, plan) {
+    return Math.max(0, ...cells.map((cell, i) => cell ? lost(cell, plan.rects[i], plan) : 0));
+}
+
+// How much the windows lose in all, in pixels.
+function totalLost(cells, plan) {
+    return cells.reduce((sum, cell, i) => {
+        const rect = plan.rects[i];
+        return cell ? sum + lost(cell, rect, plan) * rect.width * rect.height : sum;
+    }, 0);
+}
+
 /**
  * Fits windows together so they don't overlap, moving them first and shrinking them only when they
  * don't fit otherwise. No window gets bigger than it is.
  *
  * The area is split in two again and again, each time along the line that best separates the
- * windows, so they keep their order across the screen. Each gets the room it needs, as close to
+ * windows, so they keep their order across the screen, unless that would shrink one by more than a
+ * quarter or minimize it, when a window can go under or beside another instead. Each gets the room it needs, as close to
  * where it was as the others let it be. The first window is the one the user moved or
  * resized last, which keeps its size and, where there's room, its place. When even the smallest
  * sizes don't fit, the windows the user touched longest ago are minimized, until the rest do.
@@ -243,10 +290,13 @@ function placeTree(node, area, plan, cells) {
  * @param {number} [gap] - the pixels to leave between windows and around the area
  * @param {Map<number, {width: number, height: number}>} [minimums] - the smallest size of windows,
  *   by their index
+ * @param {object} [options]
+ * @param {boolean} [options.rearrange] - whether windows can be arranged in another order when
+ *   that saves one from being minimized or shrunk a lot, which is left for when the user lets go
  * @returns {Array<{x: number, y: number, width: number, height: number}|null>} where each window
  *   goes, in the same order, or null for the ones to minimize
  */
-export function tileWindows(rects, area, gap = 0, minimums = new Map()) {
+export function tileWindows(rects, area, gap = 0, minimums = new Map(), {rearrange = true} = {}) {
     // Half the gap inside the area, and half around every window, adds up to the full gap both
     // between windows and at the edges.
     const plan = {
@@ -272,19 +322,39 @@ export function tileWindows(rects, area, gap = 0, minimums = new Map()) {
         return least;
     });
 
+    const fits = tree => AXES.every(axis => needed(tree, axis, plan.least, plan) <= plan.area[axis.size]);
+    const place = tree => {
+        const cells = rects.map(() => null);
+        placeTree(tree, plan.area, plan, cells);
+        return cells;
+    };
+
+    // The windows keep their order across the screen. Only when that would minimize one, or
+    // shrink one by more than a quarter, are they arranged another way, the one they shrink least
+    // in, as a window can go under a neighbor where there's room.
     let shown = rects.map((_, i) => i);
-    let tree = null;
+    let cells = rects.map(() => null);
     while (shown.length > 0) {
-        tree = buildTree(shown.map(index => ({rect: rects[index], index})));
-        if (shown.length === 1 ||
-            AXES.every(axis => needed(tree, axis, plan.least, plan) <= plan.area[axis.size]))
+        const items = shown.map(index => ({rect: rects[index], index}));
+        const usual = buildTree(items);
+        const usualFits = fits(usual);
+        if (usualFits || shown.length === 1) {
+            cells = place(usual);
+            if (!rearrange || !usualFits || mostLost(cells, plan) <= MOST_SHRINKING)
+                break;
+        }
+        const others = rearrange ? allTrees(items).filter(fits).map(place) : [];
+        if (others.length > 0) {
+            const options = usualFits ? [cells, ...others] : others;
+            cells = options.reduce((best, option) =>
+                totalLost(option, plan) < totalLost(best, plan) ? option : best);
+            break;
+        }
+        if (usualFits || shown.length === 1)
             break;
         shown = shown.slice(0, -1);
     }
 
-    const cells = rects.map(() => null);
-    if (tree)
-        placeTree(tree, plan.area, plan, cells);
     const half = gap / 2;
     // Rounded edge by edge, so that neighbors stay exactly the gap apart, odd ones too.
     return cells.map(c => {
