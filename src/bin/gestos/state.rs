@@ -21,13 +21,13 @@ pub struct AppState {
     pub dbus_conn: Option<zbus::blocking::Connection>,
     pub empty_state_box: adw::StatusPage,
     pub action_options: Vec<EditorActionOption>,
-    /// What the list of actions shows, by row: with categories, each one's gestures after it.
-    pub visible_suggestions: Vec<crate::ui::main_window::ShownRow>,
+    pub visible_suggestions: Vec<crate::suggestions::Suggestion>,
     /// What a category offers apart, before its own: the one to make its own of.
     pub apart_list: gtk::ListBox,
     pub visible_apart: Vec<EditorActionOption>,
     pub suggestion_box: gtk::Box,
     pub suggestion_no_match: gtk::Label,
+    pub suggestion_heading: gtk::Label,
     pub suggestion_list: gtk::ListBox,
     /// Whether the GNOME extension can run the actions that need it.
     pub extension_status: ExtensionStatus,

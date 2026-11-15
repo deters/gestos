@@ -530,7 +530,8 @@ fn open_editor(
     conflict_box.append(&conflict_icon);
 
     let conflict_label = gtk::Label::new(None);
-    conflict_label.set_halign(gtk::Align::Start);
+    conflict_label.set_xalign(0.0);
+    conflict_label.set_hexpand(true);
     conflict_label.add_css_class("warning-label");
     conflict_label.set_wrap(true);
     // Wrapped to the box's width, rather than asking for room for all of it on one line.
@@ -662,7 +663,7 @@ fn open_editor(
 
             if let Some(matched_name) = match_gesture(&pts[..], &templates) {
                 conflict_label.set_text(&format!(
-                    "Warning: This path is very similar to the existing gesture '{}'.",
+                    "Very similar to \u{201c}{}\u{201d}",
                     matched_name
                 ));
                 conflict_box.set_visible(true);
@@ -803,6 +804,14 @@ fn open_editor(
     gesture_list.append(&canvas_row);
     scroll_content.append(&gesture_list);
     scroll_content.append(&conflict_box);
+    // The window fits what's in it again as the warning comes and goes, rather than the warning
+    // taking room from the rest, which would then scroll out of sight.
+    let dialog_fit = dialog.downgrade();
+    conflict_box.connect_visible_notify(move |_| {
+        if let Some(dialog) = dialog_fit.upgrade() {
+            dialog.set_default_size(dialog.width(), -1);
+        }
+    });
 
     let apps_list = gtk::ListBox::new();
     apps_list.add_css_class("boxed-list");
@@ -1406,10 +1415,8 @@ fn open_editor(
         reload_daemon(state.dbus_conn.as_ref(), Some(&dialog_clone2));
         drop(state);
 
-        // Back on the main page, at the gesture saved, as a category's window has no gestures.
-        dialog_clone2.destroy();
-        crate::ui::main_window::open_category(&state_clone, None);
         refresh_gesture_list(&state_clone, Some(&name));
+        dialog_clone2.destroy();
     });
     dialog_header.pack_end(&save_btn);
 

@@ -187,7 +187,8 @@ pub enum Suggestion {
 /// How the actions found are offered: as they are, or in their categories when there are many and
 /// nothing is searched for or picked out. A category says how many gestures there are in it, by
 /// the categories of the gestures' actions, and shows when it has gestures or actions to offer. In
-/// a category, the one to make its own of, like a custom keyboard shortcut, is offered apart.
+/// a category, the ones to make one's own of, like a custom keyboard shortcut, a custom action or a
+/// command to run, are offered apart, before the rest.
 pub fn arrange_suggestions(
     found: Vec<EditorActionOption>,
     searching: bool,
@@ -198,7 +199,7 @@ pub fn arrange_suggestions(
         let (apart, in_it): (Vec<_>, Vec<_>) = found
             .into_iter()
             .filter(|option| category_of(option) == category)
-            .partition(is_custom_shortcut);
+            .partition(|option| is_custom_shortcut(option) || is_build_your_own(option));
         return (apart, in_it.into_iter().map(Suggestion::Action).collect());
     }
     if searching {
@@ -256,7 +257,6 @@ pub const FEWEST_TO_CATEGORIZE: usize = 20;
 /// list its shortcuts, and Gestos's for the apps and the shortcuts apps share.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Category {
-    CustomActions,
     Windows,
     Navigation,
     Screenshots,
@@ -274,7 +274,6 @@ pub enum Category {
 impl Category {
     pub fn name(self) -> &'static str {
         match self {
-            Category::CustomActions => "Custom Actions",
             Category::Windows => "Windows",
             Category::Navigation => "Navigation",
             Category::Screenshots => "Screenshots",
@@ -292,7 +291,6 @@ impl Category {
 
     pub fn icon_name(self) -> &'static str {
         match self {
-            Category::CustomActions => "document-edit-symbolic",
             Category::Windows => "focus-windows-symbolic",
             Category::Navigation => "preferences-desktop-multitasking-symbolic",
             Category::Screenshots => "camera-photo-symbolic",
@@ -315,7 +313,6 @@ fn is_build_your_own(option: &EditorActionOption) -> bool {
     match &option.action_type {
         ActionType::Keyboard(steps) => steps.is_empty(),
         ActionType::Execute(command) => command.is_empty(),
-        ActionType::Click(_) => true,
         _ => false,
     }
 }
@@ -329,7 +326,9 @@ pub fn is_custom_shortcut(option: &EditorActionOption) -> bool {
 /// actions go where GNOME's for the same thing do.
 pub fn category_of(option: &EditorActionOption) -> Category {
     match &option.action_type {
-        _ if is_build_your_own(option) => Category::CustomActions,
+        // A custom action and a command to run go with the apps, as they're mostly about them.
+        _ if is_build_your_own(option) => Category::Apps,
+        ActionType::Click(_) => Category::Other,
         _ if crate::ui::app_picker::opened_app(&option.action_type).is_some() => Category::Apps,
         ActionType::Keypress(_) => Category::KeyboardShortcuts,
         // GNOME's own custom shortcuts, which run commands.
@@ -443,7 +442,7 @@ mod tests {
     fn many_actions_are_offered_in_categories() {
         let (apart, others) = arrange_suggestions(many_actions(), false, None, &BTreeMap::new());
         assert!(apart.is_empty());
-        assert_eq!(names_of(&others), ["Custom Actions 0", "Navigation 0", "Sound and Media 0"]);
+        assert_eq!(names_of(&others), ["Navigation 0", "Sound and Media 0", "Apps 0"]);
     }
 
     #[test]
@@ -473,6 +472,17 @@ mod tests {
     }
 
     #[test]
+    fn a_custom_action_and_a_command_come_apart_among_the_apps() {
+        let options = vec![
+            option("Open Files", ActionType::Execute("nautilus".into())),
+            option("Custom Action", ActionType::Keyboard(Vec::new())),
+            option("Run Command in Shell", ActionType::Execute(String::new())),
+        ];
+        let (apart, _) = arrange_suggestions(options, false, Some(Category::Apps), &BTreeMap::new());
+        assert_eq!(names(&apart), ["Custom Action", "Run Command in Shell"]);
+    }
+
+    #[test]
     fn gestures_are_in_their_actions_categories_and_counted_there() {
         let options = vec![
             option("Close Window", ActionType::Kill),
@@ -484,15 +494,15 @@ mod tests {
         steps.name = "Say hello".into();
         let gestures = [gesture(ActionType::Kill), gesture(ActionType::Kill), steps];
         assert_eq!(gesture_category(&gestures[0], &options), Some(Category::Windows));
-        assert_eq!(gesture_category(&gestures[2], &options), Some(Category::CustomActions));
+        assert_eq!(gesture_category(&gestures[2], &options), Some(Category::Apps));
         let counts = gestures_by_category(&gestures, &options);
         assert_eq!(counts.get(&Category::Windows), Some(&2));
-        assert_eq!(counts.get(&Category::CustomActions), Some(&1));
+        assert_eq!(counts.get(&Category::Apps), Some(&1));
         // A category with gestures and nothing left to offer still shows, with its count.
         let (_, categories) = arrange_suggestions(many_actions(), false, None, &counts);
         assert_eq!(
             names_of(&categories),
-            ["Custom Actions 1", "Windows 2", "Navigation 0", "Sound and Media 0"]
+            ["Windows 2", "Navigation 0", "Sound and Media 0", "Apps 1"]
         );
     }
 
@@ -506,11 +516,11 @@ mod tests {
     }
 
     #[test]
-    fn actions_to_build_are_custom_actions() {
+    fn actions_to_build_go_with_the_apps() {
         let category = |action: ActionType| category_of(&option("", action));
-        assert_eq!(category(ActionType::Keyboard(Vec::new())), Category::CustomActions);
-        assert_eq!(category(ActionType::Execute(String::new())), Category::CustomActions);
-        assert_eq!(category(ActionType::Click(None)), Category::CustomActions);
+        assert_eq!(category(ActionType::Keyboard(Vec::new())), Category::Apps);
+        assert_eq!(category(ActionType::Execute(String::new())), Category::Apps);
+        assert_eq!(category(ActionType::Click(None)), Category::Other);
         assert_eq!(category(ActionType::Keypress(String::new())), Category::KeyboardShortcuts);
         assert_eq!(category(ActionType::Execute("backup.sh".into())), Category::CustomShortcuts);
     }
