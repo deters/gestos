@@ -177,7 +177,9 @@ fn middle_click_paste_row() -> Option<adw::ActionRow> {
     gio::SettingsSchemaSource::default()?.lookup(SCHEMA, true).filter(|schema| schema.has_key(KEY))?;
     let settings = gio::Settings::new(SCHEMA);
     let title = "Middle Click Paste";
-    let (row, row_box, _) = settings_row(title, "Paste the selected text with a middle click");
+    let description = "Paste the selected text with a middle click. \
+        Gestures can paste it either way with the Middle Click Paste action";
+    let (row, row_box, _) = settings_row(title, description);
     let switch = settings_switch(title);
     settings.bind(KEY, &switch, "active").build();
     // The binding needs the settings for as long as the switch is there.
