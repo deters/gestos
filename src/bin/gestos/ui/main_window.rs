@@ -354,22 +354,40 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorAct
         content.append(&rows);
     }
 
-    // Last, after the shortcuts the app lists, for one it doesn't.
-    if let Some(custom_shortcut) = shortcut_on_app(&state_rc.borrow(), app) {
+    // Last, after the shortcuts the app lists, for one it doesn't, and for an advanced action.
+    let advanced = state_rc
+        .borrow()
+        .action_options
+        .iter()
+        .find(|option| {
+            matches!(&option.action_type, gestos::config::ActionType::Keyboard(steps) if steps.is_empty())
+        })
+        .cloned();
+    // Each as it's shown, named for the app it's made in, and as the editor gets it.
+    let custom_shortcut = shortcut_on_app(&state_rc.borrow(), app).map(|option| (option.clone(), option));
+    let advanced = advanced.map(|option| {
+        let shown = crate::state::EditorActionOption {
+            name: format!("{} on {name}", option.name),
+            ..option.clone()
+        };
+        (shown, option)
+    });
+    let (shown, own_options): (Vec<_>, Vec<_>) = [custom_shortcut, advanced].into_iter().flatten().unzip();
+    if !own_options.is_empty() {
         let own = list();
-        let row = suggestion_row(&custom_shortcut, &state_rc.borrow().extension_status, "");
-        row.add_css_class("build-your-own");
-        own.append(&row);
+        for option in &shown {
+            let row = suggestion_row(option, &state_rc.borrow().extension_status, "");
+            row.add_css_class("build-your-own");
+            own.append(&row);
+        }
         let state_own = Rc::downgrade(state_rc);
         let app_own = app.to_string();
-        own.connect_row_activated(move |_, _| {
-            if let Some(state_rc) = state_own.upgrade() {
-                crate::ui::editor::open_gesture_editor_in_apps(
-                    &state_rc,
-                    custom_shortcut.clone(),
-                    &[app_own.clone()],
-                );
-            }
+        own.connect_row_activated(move |_, row| {
+            let (Some(state_rc), Some(option)) = (state_own.upgrade(), own_options.get(row.index() as usize))
+            else {
+                return;
+            };
+            crate::ui::editor::open_gesture_editor_in_apps(&state_rc, option.clone(), &[app_own.clone()]);
         });
         content.append(&own);
     }
