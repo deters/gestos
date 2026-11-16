@@ -339,7 +339,7 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
         }
         ActionType::Abort => "Abort Gesture".to_string(),
         ActionType::Lookup => "Look Up Selection".to_string(),
-        ActionType::PasteSelection => "Paste Selection".to_string(),
+        ActionType::MiddleClickPaste => "Middle Click Paste".to_string(),
     }
 }
 pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -> gtk::ListBoxRow {

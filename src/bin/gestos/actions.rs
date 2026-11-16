@@ -397,8 +397,8 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
         },
         EditorActionOption {
             category: 7,
-            action_type: ActionType::PasteSelection,
-            name: "Paste Selection".to_string(),
+            action_type: ActionType::MiddleClickPaste,
+            name: "Middle Click Paste".to_string(),
             tooltip: "Paste the text selected where the pointer is, as a middle click does".to_string(),
         },
         // Other/Internal (7)

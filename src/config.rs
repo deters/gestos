@@ -53,7 +53,7 @@ pub enum ActionType {
     /// or searches the web for it.
     Lookup,
     /// Pastes the text selected where the pointer is, as a middle click does.
-    PasteSelection,
+    MiddleClickPaste,
 }
 
 impl ActionType {
@@ -119,7 +119,8 @@ impl ActionType {
             }
             "disabled" | "abort" => Some(ActionType::Abort),
             "lookup" => Some(ActionType::Lookup),
-            "paste-selection" => Some(ActionType::PasteSelection),
+            // It was called Paste Selection.
+            "middle-click-paste" | "paste-selection" => Some(ActionType::MiddleClickPaste),
             _ => None,
         }
     }
@@ -183,7 +184,7 @@ impl ActionType {
             ActionType::Gnome(key) => gnome_icon_name(key),
             ActionType::Kde(_, _) => "preferences-system-symbolic",
             ActionType::Lookup => "edit-find-symbolic",
-            ActionType::PasteSelection => "edit-paste-symbolic",
+            ActionType::MiddleClickPaste => "edit-paste-symbolic",
             ActionType::Iconify => "window-minimize-symbolic",
             ActionType::Kill => "window-close-symbolic",
             ActionType::Maximize | ActionType::ToggleMaximized => "window-maximize-symbolic",
@@ -261,7 +262,7 @@ impl ActionType {
             ActionType::Kde(comp, method) => format!("KDE: {} {}", comp, method),
             ActionType::Abort => "Abort".to_string(),
             ActionType::Lookup => "Look Up Selection".to_string(),
-            ActionType::PasteSelection => "Paste Selection".to_string(),
+            ActionType::MiddleClickPaste => "Middle Click Paste".to_string(),
         }
     }
 }
@@ -367,7 +368,7 @@ impl std::fmt::Display for ActionType {
             ActionType::Kde(comp, short) => write!(f, "kde {} {}", comp, short),
             ActionType::Abort => write!(f, "abort"),
             ActionType::Lookup => write!(f, "lookup"),
-            ActionType::PasteSelection => write!(f, "paste-selection"),
+            ActionType::MiddleClickPaste => write!(f, "middle-click-paste"),
         }
     }
 }
@@ -1687,8 +1688,8 @@ mod tests {
     }
 
     #[test]
-    fn paste_selection_is_read_as_it_is_written() {
-        let action = ActionType::PasteSelection;
+    fn middle_click_paste_is_read_as_it_is_written() {
+        let action = ActionType::MiddleClickPaste;
         assert_eq!(ActionType::from_string(&action.to_string()), Some(action));
     }
 

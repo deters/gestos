@@ -170,7 +170,7 @@ fn middle_button_windows_row(state_rc: &Rc<RefCell<AppState>>) -> (adw::ActionRo
 }
 
 /// GNOME's own setting for pasting the selected text with a middle click, as GNOME Tweaks has it.
-/// Paste Selection pastes it either way.
+/// The Middle Click Paste action pastes it either way.
 fn middle_click_paste_row() -> Option<adw::ActionRow> {
     const SCHEMA: &str = "org.gnome.desktop.interface";
     const KEY: &str = "gtk-enable-primary-paste";

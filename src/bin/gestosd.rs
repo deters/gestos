@@ -392,7 +392,7 @@ fn spawn_gesture_actions(
         for action in &actions {
             if let ActionType::Click(btn) = action {
                 input.click(btn.unwrap_or(1));
-            } else if let ActionType::PasteSelection = action {
+            } else if let ActionType::MiddleClickPaste = action {
                 paste_selection(&input);
             } else if let ActionType::Keyboard(steps) = action {
                 let is_gnome = wayland_ctx.is_gnome;
