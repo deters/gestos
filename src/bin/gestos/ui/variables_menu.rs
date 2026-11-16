@@ -53,20 +53,64 @@ pub fn variables_button(entry: &gtk::Entry) -> gtk::MenuButton {
     button
 }
 
+/// How a variable is written where it goes, so that it stays quoted: as it is, unless it goes
+/// inside quotes already open before it, where its own quotes would end them instead.
+pub fn quoted_for(written: &str, before: &str) -> String {
+    let bare = written.trim_matches('"');
+    let (mut double, mut single, mut escaped) = (false, false, false);
+    for c in before.chars() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' if !single => escaped = true,
+            '"' if !single => double = !double,
+            '\'' if !double => single = !single,
+            _ => {}
+        }
+    }
+    if double {
+        bare.to_string()
+    } else if single {
+        // Single quotes keep it from being read at all, so they're closed around it.
+        format!("'{written}'")
+    } else {
+        written.to_string()
+    }
+}
+
 /// Puts text where the cursor is, apart from the words around it.
 fn insert_at_cursor(entry: &gtk::Entry, written: &str) {
     let mut position = entry.position();
     let text = entry.text();
+    let before_cursor: String = text.chars().take(position as usize).collect();
+    let placed = quoted_for(written, &before_cursor);
+    // Inside quotes, it's part of their text, which may need no spaces.
+    let quoted = placed != written;
+    let written = placed;
     let before = text.chars().nth((position as usize).wrapping_sub(1));
     let after = text.chars().nth(position as usize);
     let mut inserted = String::new();
-    if before.is_some_and(|c| !c.is_whitespace()) {
+    if !quoted && before.is_some_and(|c| !c.is_whitespace()) {
         inserted.push(' ');
     }
-    inserted.push_str(written);
-    if after.is_some_and(|c| !c.is_whitespace()) {
+    inserted.push_str(&written);
+    if !quoted && after.is_some_and(|c| !c.is_whitespace()) {
         inserted.push(' ');
     }
     entry.insert_text(&inserted, &mut position);
     entry.set_position(position);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quoted_for;
+
+    #[test]
+    fn a_variable_stays_quoted_wherever_it_goes() {
+        let clipboard = "\"$GESTOS_CLIPBOARD\"";
+        assert_eq!(quoted_for(clipboard, "notify-send "), clipboard);
+        assert_eq!(quoted_for(clipboard, "notify-send \"Copied: "), "$GESTOS_CLIPBOARD");
+        assert_eq!(quoted_for(clipboard, "echo 'Copied: "), "'\"$GESTOS_CLIPBOARD\"'");
+        assert_eq!(quoted_for(clipboard, "echo \"it's\" "), clipboard);
+        assert_eq!(quoted_for(clipboard, "echo \\\" "), clipboard);
+    }
 }

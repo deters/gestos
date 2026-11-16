@@ -435,7 +435,8 @@ fn spawn_gesture_actions(
                 input.run_steps(
                     steps,
                     &|app| gestos::wayland::open_app_for_steps(app, is_gnome),
-                    &|command| wayland_ctx.run_shell_cmd(command, &context),
+                    &|command, after_copy| wayland_ctx.run_shell_cmd(command, &context, after_copy),
+                    &|| wayland_ctx.clear_copied(),
                 );
             } else {
                 wayland_ctx.execute_action(action, &context, &|keys_str| input.keypress_string(keys_str));

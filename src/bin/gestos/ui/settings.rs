@@ -464,6 +464,25 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     export_box.append(&export_btn);
     config_list.add(&export_row);
 
+    // A file from someone else can run anything as this user, so what it runs is shown first.
+    fn import_message(commands: &[String]) -> String {
+        const SHOWN: usize = 10;
+        const LONGEST: usize = 200;
+        let mut message = "Are you sure you want to import this configuration? This will overwrite your existing gestures.".to_string();
+        if commands.is_empty() {
+            return message;
+        }
+        message.push_str("\n\nIts gestures run these commands:\n");
+        for command in commands.iter().take(SHOWN) {
+            let shown: String = command.chars().take(LONGEST).collect();
+            let more = if shown.len() < command.len() { "…" } else { "" };
+            message.push_str(&format!("\n{shown}{more}"));
+        }
+        if commands.len() > SHOWN {
+            message.push_str(&format!("\nand {} more", commands.len() - SHOWN));
+        }
+        message
+    }
     let (import_row, import_box, _) =
         settings_row("Import Configuration", "Load gestures from a YAML file");
     let import_btn = gtk::Button::with_mnemonic("_Import…");
@@ -501,10 +520,11 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
                         if let Some(mut new_config) = Configuration::load_from_file(&path) {
                             let parent_confirm = parent_err_clone.clone();
                             let state_rc_confirm = Rc::clone(&state_rc_inner);
+                            let message = import_message(&new_config.commands());
                             show_confirm_dialog(
                                 &parent_err_clone,
                                 "Confirm Import",
-                                "Are you sure you want to import this configuration? This will overwrite your existing gestures.",
+                                &message,
                                 "Import",
                                 false,
                                 move || {

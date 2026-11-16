@@ -129,6 +129,43 @@ pub fn describe_steps(steps: &[KeyStep]) -> String {
         .join(", ")
 }
 
+/// Whether keys copy what's selected, as apps and terminals have them.
+pub fn is_copy_shortcut(keys: &str) -> bool {
+    let mut parts: Vec<String> = keys
+        .split('+')
+        .map(|part| match part.trim().to_lowercase().as_str() {
+            "ctrl" | "control_l" | "control_r" => "control".to_string(),
+            "shift_l" | "shift_r" => "shift".to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    parts.sort();
+    matches!(
+        parts.iter().map(String::as_str).collect::<Vec<_>>().as_slice(),
+        ["c", "control"] | ["c", "control", "shift"] | ["control", "x"] | ["control", "insert"]
+    )
+}
+
+/// The steps that copy what a command after them uses: the last shortcut before such a command,
+/// if it copies. What was copied before is cleared first, so that the command can tell when the
+/// copy is there, and never gets what was copied earlier when nothing is selected.
+pub fn copies_for_commands(steps: &[KeyStep]) -> Vec<usize> {
+    let mut copies = Vec::new();
+    for (i, step) in steps.iter().enumerate() {
+        let KeyStep::Run(command) = step else { continue };
+        if !crate::command_variables::uses_copied(command) {
+            continue;
+        }
+        let last_press = steps[..i].iter().rposition(|step| matches!(step, KeyStep::Press(_)));
+        if let Some(j) = last_press {
+            if matches!(&steps[j], KeyStep::Press(keys) if is_copy_shortcut(keys)) && !copies.contains(&j) {
+                copies.push(j);
+            }
+        }
+    }
+    copies
+}
+
 /// The installed apps a person would look for, as their names and desktop file IDs, sorted by
 /// name.
 pub fn installed_apps() -> Vec<(String, String)> {
@@ -245,6 +282,33 @@ mod tests {
         assert_eq!(text, "open org.mozilla.firefox; press Control+T");
         assert_eq!(parse_steps(&text), steps);
         assert_eq!(parse_steps("open "), []);
+    }
+
+    #[test]
+    fn copy_shortcuts_are_known_however_written() {
+        assert!(is_copy_shortcut("Control+C"));
+        assert!(is_copy_shortcut("ctrl+shift+c"));
+        assert!(is_copy_shortcut("Control+X"));
+        assert!(is_copy_shortcut("Control_L+Insert"));
+        assert!(!is_copy_shortcut("Control+V"));
+        assert!(!is_copy_shortcut("C"));
+    }
+
+    #[test]
+    fn a_copy_is_waited_for_only_by_a_command_that_uses_it() {
+        let press = |keys: &str| KeyStep::Press(keys.to_string());
+        let run = |command: &str| KeyStep::Run(command.to_string());
+        let steps = [
+            press("Control+C"),
+            KeyStep::Wait(100),
+            run(r#"upload.sh "$@""#),
+            press("Control+C"),
+            run("notify-send done"),
+            press("Control+C"),
+            press("Return"),
+            run(r#"echo "$GESTOS_CLIPBOARD""#),
+        ];
+        assert_eq!(copies_for_commands(&steps), [0]);
     }
 
     #[test]

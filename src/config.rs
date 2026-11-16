@@ -895,6 +895,32 @@ pub fn remove_write_access_for_others(path: &Path) -> std::io::Result<()> {
 }
 
 impl Configuration {
+    /// The commands its gestures run, as Run Command or an advanced action's steps, each once.
+    pub fn commands(&self) -> Vec<String> {
+        let mut commands: Vec<String> = Vec::new();
+        for gesture in self.gestures.iter().filter(|g| !g.is_deleted) {
+            for action in &gesture.actions {
+                let run: Vec<&String> = match action {
+                    ActionType::Execute(command) => vec![command],
+                    ActionType::Keyboard(steps) => steps
+                        .iter()
+                        .filter_map(|step| match step {
+                            crate::key_steps::KeyStep::Run(command) => Some(command),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                for command in run {
+                    if !command.trim().is_empty() && !commands.contains(command) {
+                        commands.push(command.clone());
+                    }
+                }
+            }
+        }
+        commands
+    }
+
     /// Loads a config whose gestures are going to run, which needs it to be safe from other users.
     pub fn load_trusted<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let path = path.as_ref();
@@ -1424,6 +1450,35 @@ mod tests {
             modifiers: Modifiers::default(),
             apps: Vec::new(),
         }
+    }
+
+    #[test]
+    fn the_commands_gestures_run_are_listed_once() {
+        use crate::key_steps::KeyStep;
+        let mut deleted = gesture("Old", vec![ActionType::Execute("rm -rf ~/old".into())]);
+        deleted.is_deleted = true;
+        let config = Configuration {
+            gestures: vec![
+                gesture("Backup", vec![ActionType::Execute("backup.sh".into())]),
+                gesture(
+                    "Upload",
+                    vec![ActionType::Keyboard(vec![
+                        KeyStep::Press("Control+C".into()),
+                        KeyStep::Run("upload.sh \"$@\"".into()),
+                        KeyStep::Run("backup.sh".into()),
+                    ])],
+                ),
+                gesture("Close", vec![ActionType::Kill]),
+                deleted,
+            ],
+            user_config_path: PathBuf::new(),
+            button: None,
+            overview_click: false,
+            middle_button_windows: false,
+            show_path: true,
+            all_gestures: false,
+        };
+        assert_eq!(config.commands(), ["backup.sh", "upload.sh \"$@\""]);
     }
 
     #[test]

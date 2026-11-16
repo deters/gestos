@@ -68,6 +68,13 @@ fn focused_app_from(conn: &zbus::blocking::Connection, shell: &str) -> Option<St
 
 // How long an app gets to come to the front before the steps after it are left out, and how often
 // that's checked.
+// How long a command waits for a copy made for it to be there, before it's taken as nothing.
+const COPY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+const COPY_POLL: std::time::Duration = std::time::Duration::from_millis(30);
+// How long reading what's copied takes at most, in seconds, as `timeout` has it, and what
+// `timeout` says when it's over.
+const CLIPBOARD_READ_TIMEOUT: &str = "1";
+const TIMED_OUT: i32 = 124;
 const OPEN_APP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const OPEN_APP_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 // Where nothing can say which app has focus, how long an app gets to open.
@@ -220,6 +227,19 @@ fn ask_copied(conn: &zbus::blocking::Connection, shell: &str) -> zbus::Result<Co
     )?;
     let (clipboard, selection, uri_list): (String, String, String) = reply.body().deserialize()?;
     Ok(Copied { clipboard, selection, uri_list })
+}
+
+/// Why the extension didn't answer: it's from before what was asked, until the user logs in
+/// again, or it isn't on.
+fn extension_failure(conn: &zbus::blocking::Connection) -> String {
+    let outdated = crate::gnome_extension::info_from(conn, GNOME_SHELL_NAME).is_ok_and(|info| {
+        crate::gnome_extension::is_running(&info) && !crate::gnome_extension::is_current(&info)
+    });
+    if outdated {
+        "Log in again to finish updating the \u{201c}Gestos\u{201d} GNOME extension".to_string()
+    } else {
+        "The \u{201c}Gestos\u{201d} GNOME extension didn't answer".to_string()
+    }
 }
 
 /// Says that the action being run failed, and why, in a few words.
@@ -576,7 +596,7 @@ impl WaylandContext {
                 let cmd_clone = cmd.clone();
                 let context = context.clone();
                 std::thread::spawn(move || {
-                    self_clone.run_shell_cmd(&cmd_clone, &context);
+                    self_clone.run_shell_cmd(&cmd_clone, &context, false);
                 });
             }
             ActionType::Keypress(keys) => {
@@ -1062,24 +1082,35 @@ impl WaylandContext {
 
     /// Runs a command as the user would type it in a shell, and says whether it worked. The one
     /// place a shell belongs: Run Command and an advanced action's commands take whatever the user
-    /// would type in one.
-    pub fn run_shell_cmd(&self, cmd: &str, context: &CommandContext) -> bool {
-        // It would run with nothing in place of what it's meant to get.
-        if crate::command_variables::uses_copied(cmd) {
-            if let Some(package) = crate::command_variables::missing_clipboard_reader() {
-                action_failed(format!("{package} isn't installed, which commands need to get what's copied"));
-                return false;
-            }
-        }
-        let copied = self.copied();
-        let files = crate::command_variables::file_paths(&crate::command_variables::uris(&copied.uri_list));
+    /// would type in one. One that uses what's copied doesn't run without it, as it would run
+    /// with nothing in its place. `after_copy` says it comes right after a copy made for it, which
+    /// it waits for.
+    pub fn run_shell_cmd(&self, cmd: &str, context: &CommandContext, after_copy: bool) -> bool {
+        use crate::command_variables::{file_paths, too_big, uris, uses_copied, variables};
         let mut command = Command::new("sh");
-        // The copied files are its arguments, after the name the shell gives itself.
-        command.arg("-c").arg(cmd).arg("gestos").args(&files);
-        for (name, value) in crate::command_variables::variables(context, &copied) {
-            if crate::command_variables::too_big(name, &value) {
-                log::warn!("{name} is too big to give to a command");
-                continue;
+        // Any copied files are its arguments, after the name the shell gives itself.
+        command.arg("-c").arg(cmd).arg("gestos");
+        let copied = if uses_copied(cmd) {
+            match self.copied_for_command(after_copy) {
+                Ok(copied) => Some(copied),
+                Err(why) => {
+                    action_failed(why);
+                    return false;
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(copied) = &copied {
+            command.args(file_paths(&uris(&copied.uri_list)));
+        }
+        for (name, value) in variables(context, copied.as_ref()) {
+            if too_big(name, &value) {
+                action_failed(format!(
+                    "What's copied is too big to give to {}",
+                    crate::config::short_command(cmd)
+                ));
+                return false;
             }
             command.env(name, value);
         }
@@ -1097,31 +1128,36 @@ impl WaylandContext {
         failure.is_none()
     }
 
-    /// What's copied and selected, for a command, which can't read it itself on GNOME. Without a
-    /// way to read it, it's empty.
-    fn copied(&self) -> Copied {
+    /// What's copied, for a command that uses it, or why it can't be had. Right after a copy, it's
+    /// what that copy put there, once it's there: what was copied before was cleared.
+    fn copied_for_command(&self, after_copy: bool) -> Result<Copied, String> {
+        if let Some(package) = crate::command_variables::missing_clipboard_reader() {
+            return Err(format!("{package} isn't installed, which commands need to get what's copied"));
+        }
+        let deadline = std::time::Instant::now() + COPY_TIMEOUT;
+        loop {
+            let copied = self.copied()?;
+            if !after_copy || !copied.clipboard.is_empty() || !copied.uri_list.is_empty() {
+                return Ok(copied);
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("Nothing was copied".to_string());
+            }
+            std::thread::sleep(COPY_POLL);
+        }
+    }
+
+    /// What's copied and selected, which a command can't read itself on GNOME.
+    fn copied(&self) -> Result<Copied, String> {
         if self.is_gnome {
-            let conn = zbus::blocking::Connection::session();
-            return match conn.as_ref().map(|conn| ask_copied(conn, GNOME_SHELL_NAME)) {
-                Ok(Ok(copied)) => copied,
-                // An extension from before it said this, until the user logs in again.
-                Ok(Err(_)) => Copied {
-                    selection: conn
-                        .and_then(|conn| ask_selected_text(&conn, GNOME_SHELL_NAME))
-                        .unwrap_or_default(),
-                    ..Default::default()
-                },
-                Err(e) => {
-                    log::warn!("Couldn't ask the extension what's copied: {e}");
-                    Copied::default()
-                }
-            };
+            let conn = zbus::blocking::Connection::session().map_err(|e| e.to_string())?;
+            return ask_copied(&conn, GNOME_SHELL_NAME).map_err(|e| {
+                log::warn!("Couldn't ask the extension what's copied: {e}");
+                extension_failure(&conn)
+            });
         }
         // Text only, as a command can't be given an image as a variable.
         let is_x11 = crate::active_app::is_x11_session();
-        if !is_installed(crate::command_variables::clipboard_reader(is_x11).0) {
-            return Copied::default();
-        }
         let (clipboard, selection, uri_list): (&[&str], &[&str], &[&str]) =
             if is_x11 {
                 (
@@ -1136,13 +1172,56 @@ impl WaylandContext {
                     &["wl-paste", "--no-newline", "--type", "text/uri-list"],
                 )
             };
-        let read = |command: &[&str]| -> String {
-            match self.build_user_command(command[0], &command[1..]).stderr(Stdio::null()).output() {
-                Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).into_owned(),
-                _ => String::new(),
+        // Nothing to read is an empty answer. One that never comes, as from a desktop that
+        // doesn't let it read, is a failure, rather than the command waiting forever.
+        let read = |command: &[&str]| -> Result<String, String> {
+            let output = self
+                .build_user_command("timeout", &[&[CLIPBOARD_READ_TIMEOUT], command].concat())
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output();
+            match output {
+                Ok(output) if output.status.code() == Some(TIMED_OUT) => {
+                    Err(format!("{} didn't answer", command[0]))
+                }
+                Ok(output) if output.status.success() => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
+                _ => Ok(String::new()),
             }
         };
-        Copied { clipboard: read(clipboard), selection: read(selection), uri_list: read(uri_list) }
+        Ok(Copied { clipboard: read(clipboard)?, selection: read(selection)?, uri_list: read(uri_list)? })
+    }
+
+    /// Clears what's copied, before a copy made for a command, which can then tell when the copy
+    /// is there. Says whether it could, as otherwise the command could get what was copied before.
+    pub fn clear_copied(&self) -> bool {
+        let cleared = if self.is_gnome {
+            zbus::blocking::Connection::session().map_err(|e| e.to_string()).and_then(|conn| {
+                call_extension(&conn, GNOME_SHELL_NAME, "ClearClipboard").map_err(|e| {
+                    log::warn!("Couldn't ask the extension to clear what's copied: {e}");
+                    extension_failure(&conn)
+                })
+            })
+        } else {
+            let is_x11 = crate::active_app::is_x11_session();
+            let (program, package) = if is_x11 { ("xclip", "xclip") } else { ("wl-copy", "wl-clipboard") };
+            let args: &[&str] = if is_x11 {
+                &[CLIPBOARD_READ_TIMEOUT, "xclip", "-selection", "clipboard", "-i", "/dev/null"]
+            } else {
+                &[CLIPBOARD_READ_TIMEOUT, "wl-copy", "--clear"]
+            };
+            if !is_installed(program) {
+                Err(format!("{package} isn't installed, which commands need to get what's copied"))
+            } else {
+                match self.build_user_command("timeout", args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status() {
+                    Ok(status) if status.success() => Ok(()),
+                    _ => Err(format!("{program} couldn't clear what's copied")),
+                }
+            }
+        };
+        if let Err(why) = &cleared {
+            action_failed(why.clone());
+        }
+        cleared.is_ok()
     }
 
     // Runs a program in the user session's DBUS environment

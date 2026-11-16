@@ -148,15 +148,27 @@ impl InputClient {
     /// Runs a custom action's steps in order. `open_app` opens an app or brings it to the front,
     /// which only the desktop can do, and says whether it then has focus. If it doesn't, the steps
     /// after it would go to some other window, so they're left out. `run` runs a command and says
-    /// whether it worked, as the steps after one that failed may count on what it does.
+    /// whether it worked, as the steps after one that failed may count on what it does. It's also
+    /// told whether a copy was just made for it, which it then waits for. `clear_copied` clears
+    /// what was copied before such a copy, and says whether it could.
     pub fn run_steps(
         &self,
         steps: &[KeyStep],
         open_app: &dyn Fn(&str) -> bool,
-        run: &dyn Fn(&str) -> bool,
+        run: &dyn Fn(&str, bool) -> bool,
+        clear_copied: &dyn Fn() -> bool,
     ) {
-        for step in steps {
+        let copies = crate::key_steps::copies_for_commands(steps);
+        let mut just_copied = false;
+        for (i, step) in steps.iter().enumerate() {
             match step {
+                KeyStep::Press(keys) if copies.contains(&i) => {
+                    if !clear_copied() {
+                        return;
+                    }
+                    self.keypress_string(keys);
+                    just_copied = true;
+                }
                 KeyStep::Press(keys) => self.keypress_string(keys),
                 KeyStep::Type(text) => self.type_text(text),
                 KeyStep::Wait(millis) => {
@@ -168,7 +180,7 @@ impl InputClient {
                     }
                 }
                 KeyStep::Run(command) => {
-                    if !run(command) {
+                    if !run(command, std::mem::take(&mut just_copied)) {
                         return;
                     }
                 }
@@ -249,7 +261,8 @@ mod tests {
                 KeyStep::Press("F1".to_string()),
             ],
             &|_| true,
-            &|_| true,
+            &|_, _| true,
+            &|| true,
         );
         assert!(started.elapsed() >= Duration::from_millis(30));
         let requests = received(&mut service, 6);
@@ -277,7 +290,8 @@ mod tests {
                 opened.borrow_mut().push(app.to_string());
                 false
             },
-            &|_| true,
+            &|_, _| true,
+            &|| true,
         );
         assert_eq!(*opened.borrow(), ["org.example.Missing"]);
         client.send(&Request::QueryHeld);
@@ -291,12 +305,58 @@ mod tests {
         client.run_steps(
             &[KeyStep::Run("false".to_string()), KeyStep::Press("F1".to_string())],
             &|_| true,
-            &|command| {
+            &|command, _| {
                 ran.borrow_mut().push(command.to_string());
                 false
             },
+            &|| true,
         );
         assert_eq!(*ran.borrow(), ["false"]);
+        client.send(&Request::QueryHeld);
+        assert_eq!(received(&mut service, 1), [Request::QueryHeld]);
+    }
+
+    #[test]
+    fn a_command_waits_for_the_copy_made_for_it() {
+        let (client, mut service) = client();
+        let cleared = std::cell::Cell::new(0);
+        let ran = std::cell::RefCell::new(Vec::new());
+        client.run_steps(
+            &[
+                KeyStep::Press("Control+C".to_string()),
+                KeyStep::Run(r#"upload.sh "$@""#.to_string()),
+                KeyStep::Run(r#"echo "$GESTOS_CLIPBOARD""#.to_string()),
+            ],
+            &|_| true,
+            &|_, after_copy| {
+                ran.borrow_mut().push(after_copy);
+                true
+            },
+            &|| {
+                cleared.set(cleared.get() + 1);
+                true
+            },
+        );
+        assert_eq!(cleared.get(), 1);
+        assert_eq!(*ran.borrow(), [true, false]);
+        // The copy shortcut was pressed.
+        assert!(matches!(received(&mut service, 1)[0], Request::Key { pressed: true, .. }));
+    }
+
+    #[test]
+    fn nothing_is_copied_when_what_was_copied_cant_be_cleared() {
+        let (client, mut service) = client();
+        let ran = std::cell::Cell::new(false);
+        client.run_steps(
+            &[KeyStep::Press("Control+C".to_string()), KeyStep::Run(r#"upload.sh "$@""#.to_string())],
+            &|_| true,
+            &|_, _| {
+                ran.set(true);
+                true
+            },
+            &|| false,
+        );
+        assert!(!ran.get());
         client.send(&Request::QueryHeld);
         assert_eq!(received(&mut service, 1), [Request::QueryHeld]);
     }

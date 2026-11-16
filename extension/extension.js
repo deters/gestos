@@ -38,6 +38,7 @@ const INTERFACE_XML = `
     <method name="SelectedText">
       <arg type="s" direction="out" name="text"/>
     </method>
+    <method name="ClearClipboard"/>
     <method name="Copied">
       <arg type="s" direction="out" name="clipboard"/>
       <arg type="s" direction="out" name="selection"/>
@@ -78,6 +79,54 @@ const MONITORS_SETTLE_MS = 500;
 const TILE_SLACK = 40;
 
 // Apps without a desktop file get a made-up app for each window, so those go by their own id.
+/**
+ * Answers a method only when Gestos's daemon asks, as Wayland keeps what's copied and selected
+ * from apps that aren't in use, and this would otherwise give it to any program that asks.
+ *
+ * @param {Gio.DBusMethodInvocation} invocation - refused for any other program
+ * @param {function(): void} answer - what answers it
+ */
+function answerGestosOnly(invocation, answer) {
+    const refuse = () => invocation.return_dbus_error('org.freedesktop.DBus.Error.AccessDenied',
+        'Only Gestos can ask this');
+    invocation.get_connection().call('org.freedesktop.DBus', '/org/freedesktop/DBus',
+        'org.freedesktop.DBus', 'GetConnectionUnixProcessID',
+        new GLib.Variant('(s)', [invocation.get_sender()]), new GLib.VariantType('(u)'),
+        Gio.DBusCallFlags.NONE, -1, null, (connection, result) => {
+            try {
+                const [pid] = connection.call_finish(result).deepUnpack();
+                // A program updated while it runs is named as deleted.
+                const program = GLib.file_read_link(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, '');
+                if (GLib.path_get_basename(program) !== 'gestosd') {
+                    refuse();
+                    return;
+                }
+            } catch {
+                refuse();
+                return;
+            }
+            answer();
+        });
+}
+
+/**
+ * Answers with what's copied and selected.
+ *
+ * @param {Gio.DBusMethodInvocation} invocation - answered with the clipboard's text, the selected
+ *   text, and the files copied, as a list of URIs
+ */
+function answerCopied(invocation) {
+    const clipboard = St.Clipboard.get_default();
+    const text = type => new Promise(resolve =>
+        clipboard.get_text(type, (_clipboard, value) => resolve(value ?? '')));
+    const uriList = new Promise(resolve =>
+        clipboard.get_content(St.ClipboardType.CLIPBOARD, 'text/uri-list', (_clipboard, bytes) =>
+            resolve(bytes?.get_size() ? new TextDecoder().decode(bytes.toArray()) : '')));
+    Promise.all([text(St.ClipboardType.CLIPBOARD), text(St.ClipboardType.PRIMARY), uriList])
+        .then(values => invocation.return_value(new GLib.Variant('(sss)', values)))
+        .catch(e => invocation.return_error_literal(Gio.DBusError, Gio.DBusError.FAILED, `${e}`));
+}
+
 function appIdOf(window) {
     const app = Shell.WindowTracker.get_default().get_window_app(window);
     return app && !app.is_window_backed() ? app.get_id() : window.get_wm_class();
@@ -1852,8 +1901,23 @@ class WindowActions {
      * @param {Gio.DBusMethodInvocation} invocation - answered with the text, empty with none
      */
     SelectedTextAsync(_params, invocation) {
-        St.Clipboard.get_default().get_text(St.ClipboardType.PRIMARY, (_clipboard, text) =>
-            invocation.return_value(new GLib.Variant('(s)', [text ?? ''])));
+        answerGestosOnly(invocation, () =>
+            St.Clipboard.get_default().get_text(St.ClipboardType.PRIMARY, (_clipboard, text) =>
+                invocation.return_value(new GLib.Variant('(s)', [text ?? '']))));
+    }
+
+    /**
+     * Clears what's copied, before a gesture copies something for a command, which can then
+     * tell when the copy is there.
+     *
+     * @param {Array} _params - none
+     * @param {Gio.DBusMethodInvocation} invocation - answered once it's cleared
+     */
+    ClearClipboardAsync(_params, invocation) {
+        answerGestosOnly(invocation, () => {
+            St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, '');
+            invocation.return_value(null);
+        });
     }
 
     /**
@@ -1864,15 +1928,7 @@ class WindowActions {
      * @param {Gio.DBusMethodInvocation} invocation - answered with each, empty if there's none
      */
     CopiedAsync(_params, invocation) {
-        const clipboard = St.Clipboard.get_default();
-        const text = type => new Promise(resolve =>
-            clipboard.get_text(type, (_clipboard, value) => resolve(value ?? '')));
-        const uriList = new Promise(resolve =>
-            clipboard.get_content(St.ClipboardType.CLIPBOARD, 'text/uri-list', (_clipboard, bytes) =>
-                resolve(bytes?.get_size() ? new TextDecoder().decode(bytes.toArray()) : '')));
-        Promise.all([text(St.ClipboardType.CLIPBOARD), text(St.ClipboardType.PRIMARY), uriList])
-            .then(values => invocation.return_value(new GLib.Variant('(sss)', values)))
-            .catch(e => invocation.return_error_literal(Gio.DBusError, Gio.DBusError.FAILED, `${e}`));
+        answerGestosOnly(invocation, () => answerCopied(invocation));
     }
 
     /**

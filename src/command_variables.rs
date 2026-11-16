@@ -2,7 +2,8 @@
 //! copied in a file manager, the app in use and the gesture's name. Each is an environment
 //! variable, never put into the command's text, so that nothing copied can change what it runs.
 //! Copied files are also its arguments, `"$@"`, and the variables a file manager gives its own
-//! scripts, so that scripts written for one work too.
+//! scripts, so that scripts written for one work too. Only a command that uses what's copied
+//! gets it, so that the apps others open don't keep a copy of a password for as long as they run.
 
 use std::path::PathBuf;
 
@@ -62,19 +63,23 @@ pub fn file_paths(uris: &[String]) -> Vec<PathBuf> {
     uris.iter().filter_map(|uri| gio::File::for_uri(uri).path()).collect()
 }
 
-/// The variables a command is given, by name. Those for a file manager's scripts are only there
-/// when files are copied, as scripts look for them to tell whether they were run from one.
-pub fn variables(context: &CommandContext, copied: &Copied) -> Vec<(&'static str, String)> {
-    let uris = uris(&copied.uri_list);
-    let paths: Vec<String> =
-        file_paths(&uris).iter().map(|path| path.to_string_lossy().into_owned()).collect();
+/// The variables a command is given, by name, with what's copied if it uses it. Those for a file
+/// manager's scripts are only there when files are copied, as scripts look for them to tell
+/// whether they were run from one.
+pub fn variables(context: &CommandContext, copied: Option<&Copied>) -> Vec<(&'static str, String)> {
     let mut variables = vec![
-        ("GESTOS_CLIPBOARD", copied.clipboard.clone()),
-        ("GESTOS_SELECTION", copied.selection.clone()),
-        ("GESTOS_FILES", paths.join("\n")),
         ("GESTOS_APP", context.app.clone().unwrap_or_default()),
         ("GESTOS_GESTURE", context.gesture.clone()),
     ];
+    let Some(copied) = copied else { return variables };
+    let uris = uris(&copied.uri_list);
+    let paths: Vec<String> =
+        file_paths(&uris).iter().map(|path| path.to_string_lossy().into_owned()).collect();
+    variables.extend([
+        ("GESTOS_CLIPBOARD", copied.clipboard.clone()),
+        ("GESTOS_SELECTION", copied.selection.clone()),
+        ("GESTOS_FILES", paths.join("\n")),
+    ]);
     if !uris.is_empty() {
         // As the file managers write them: each followed by a line break.
         let lines = |items: &[String]| items.iter().map(|item| format!("{item}\n")).collect::<String>();
@@ -112,10 +117,14 @@ pub fn missing_clipboard_reader() -> Option<&'static str> {
 /// Whether a command uses what's copied, as far as its own text tells. A script it runs may too.
 pub fn uses_copied(command: &str) -> bool {
     let named = ["GESTOS_CLIPBOARD", "GESTOS_SELECTION", "GESTOS_FILES", "SCRIPT_SELECTED_", "$@", "$*", "$#"];
-    let numbered = command
-        .as_bytes()
-        .windows(2)
-        .any(|pair| pair[0] == b'$' && (b'1'..=b'9').contains(&pair[1]) || pair == b"${");
+    // `$1` to `$9`, and the same in braces, but not `${HOME}`.
+    let arguments = |after: &[u8]| after.first().is_some_and(|c| b"123456789@*#".contains(c));
+    let bytes = command.as_bytes();
+    let numbered = (0..bytes.len()).any(|i| match &bytes[i..] {
+        [b'$', b'{', rest @ ..] => arguments(rest),
+        [b'$', rest @ ..] => rest.first().is_some_and(|c| b"123456789".contains(c)),
+        _ => false,
+    });
     named.iter().any(|name| command.contains(name)) || numbered
 }
 
@@ -148,7 +157,7 @@ mod tests {
             selection: "picked\0text".into(),
             uri_list: "file:///tmp/a\nfile:///tmp/b\n".into(),
         };
-        let variables = variables(&context, &copied);
+        let variables = variables(&context, Some(&copied));
         assert_eq!(value(&variables, "GESTOS_SELECTION"), Some("pickedtext"));
         assert_eq!(value(&variables, "GESTOS_FILES"), Some("/tmp/a\n/tmp/b"));
         assert_eq!(value(&variables, "GESTOS_APP"), Some("org.gnome.Nautilus"));
@@ -160,11 +169,18 @@ mod tests {
     #[test]
     fn a_file_managers_variables_are_only_there_with_files_copied() {
         let copied = Copied { clipboard: "text".into(), ..Default::default() };
-        let variables = variables(&CommandContext::default(), &copied);
+        let variables = variables(&CommandContext::default(), Some(&copied));
         assert_eq!(value(&variables, "GESTOS_CLIPBOARD"), Some("text"));
         assert_eq!(value(&variables, "GESTOS_FILES"), Some(""));
         assert_eq!(value(&variables, "GESTOS_APP"), Some(""));
         assert_eq!(value(&variables, "NAUTILUS_SCRIPT_SELECTED_URIS"), None);
+    }
+
+    #[test]
+    fn a_command_that_doesnt_use_whats_copied_isnt_given_it() {
+        let context = CommandContext { gesture: "Browser".into(), app: None };
+        let names: Vec<&str> = variables(&context, None).into_iter().map(|(name, _)| name).collect();
+        assert_eq!(names, ["GESTOS_APP", "GESTOS_GESTURE"]);
     }
 
     #[test]
@@ -173,7 +189,9 @@ mod tests {
         assert!(uses_copied(r#"~/bin/upload.sh "$@""#));
         assert!(uses_copied("convert $1 out.png"));
         assert!(uses_copied("echo ${1}"));
+        assert!(uses_copied(r#"for f in "${@}"; do echo "$f"; done"#));
         assert!(!uses_copied(r#"notify-send "$GESTOS_GESTURE" "$HOME""#));
+        assert!(!uses_copied("cd ${HOME} && ls ${PWD}"));
         assert!(!uses_copied("firefox"));
     }
 
