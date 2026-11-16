@@ -347,6 +347,7 @@ pub fn is_custom_shortcut(option: &EditorActionOption) -> bool {
 pub fn category_of(option: &EditorActionOption) -> Category {
     match &option.action_type {
         _ if is_build_your_own(option) => Category::Advanced,
+        ActionType::ToggleMiddleClickPaste => Category::Advanced,
         ActionType::Click(_) => Category::Other,
         _ if crate::ui::app_picker::opened_app(&option.action_type).is_some() => Category::Apps,
         ActionType::Keypress(_) => Category::KeyboardShortcuts,
@@ -508,6 +509,7 @@ mod tests {
     fn toggling_the_middle_button_is_offered_in_windows() {
         let category = |action: ActionType| category_of(&option("", action));
         assert_eq!(category(ActionType::ToggleMiddleButtonWindows), Category::Windows);
+        assert_eq!(category(ActionType::ToggleMiddleClickPaste), Category::Advanced);
     }
 
     #[test]

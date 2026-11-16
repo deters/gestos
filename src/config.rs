@@ -54,6 +54,8 @@ pub enum ActionType {
     Lookup,
     /// Turns controlling windows with the middle button on or off.
     ToggleMiddleButtonWindows,
+    /// Turns GNOME's pasting of the selected text with a middle click on or off.
+    ToggleMiddleClickPaste,
 }
 
 impl ActionType {
@@ -120,6 +122,7 @@ impl ActionType {
             "disabled" | "abort" => Some(ActionType::Abort),
             "lookup" => Some(ActionType::Lookup),
             "toggle-middle-button-windows" => Some(ActionType::ToggleMiddleButtonWindows),
+            "toggle-middle-click-paste" => Some(ActionType::ToggleMiddleClickPaste),
             _ => None,
         }
     }
@@ -135,7 +138,8 @@ impl ActionType {
         match self {
             ActionType::Gnome(_)
             | ActionType::ToggleTileWindows
-            | ActionType::ToggleMiddleButtonWindows => Some("gnome"),
+            | ActionType::ToggleMiddleButtonWindows
+            | ActionType::ToggleMiddleClickPaste => Some("gnome"),
             ActionType::Kde(_, _) => Some("kde"),
             _ => None,
         }
@@ -186,6 +190,7 @@ impl ActionType {
             ActionType::Kde(_, _) => "preferences-system-symbolic",
             ActionType::Lookup => "edit-find-symbolic",
             ActionType::ToggleMiddleButtonWindows => "input-mouse-symbolic",
+            ActionType::ToggleMiddleClickPaste => "edit-paste-symbolic",
             ActionType::Iconify => "window-minimize-symbolic",
             ActionType::Kill => "window-close-symbolic",
             ActionType::Maximize | ActionType::ToggleMaximized => "window-maximize-symbolic",
@@ -264,6 +269,7 @@ impl ActionType {
             ActionType::Abort => "Abort".to_string(),
             ActionType::Lookup => "Look Up Selection".to_string(),
             ActionType::ToggleMiddleButtonWindows => "Toggle Middle Button Window Control".to_string(),
+            ActionType::ToggleMiddleClickPaste => "Toggle Middle Click Paste".to_string(),
         }
     }
 }
@@ -370,6 +376,7 @@ impl std::fmt::Display for ActionType {
             ActionType::Abort => write!(f, "abort"),
             ActionType::Lookup => write!(f, "lookup"),
             ActionType::ToggleMiddleButtonWindows => write!(f, "toggle-middle-button-windows"),
+            ActionType::ToggleMiddleClickPaste => write!(f, "toggle-middle-click-paste"),
         }
     }
 }
@@ -1690,8 +1697,9 @@ mod tests {
 
     #[test]
     fn toggling_the_middle_button_is_read_as_it_is_written() {
-        let action = ActionType::ToggleMiddleButtonWindows;
-        assert_eq!(ActionType::from_string(&action.to_string()), Some(action));
+        for action in [ActionType::ToggleMiddleButtonWindows, ActionType::ToggleMiddleClickPaste] {
+            assert_eq!(ActionType::from_string(&action.to_string()), Some(action));
+        }
     }
 
     #[test]

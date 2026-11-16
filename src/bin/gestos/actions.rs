@@ -424,6 +424,12 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
             name: "Toggle Middle Button Window Control".to_string(),
             tooltip: "Turn moving and resizing windows with the middle button on or off".to_string(),
         });
+        options.push(EditorActionOption {
+            category: 7,
+            action_type: ActionType::ToggleMiddleClickPaste,
+            name: "Toggle Middle Click Paste".to_string(),
+            tooltip: "Turn pasting the selected text with a middle click on or off".to_string(),
+        });
     }
     options
 }

@@ -123,6 +123,7 @@ pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static 
         ActionType::ToggleFullscreen => ("view-fullscreen-symbolic", "icon-bg-blue"),
         ActionType::ToggleTileWindows => ("view-grid-symbolic", "icon-purple"),
         ActionType::ToggleMiddleButtonWindows => ("input-mouse-symbolic", "icon-purple"),
+        ActionType::ToggleMiddleClickPaste => ("edit-paste-symbolic", "icon-purple"),
         ActionType::Lower | ActionType::Raise => ("window-new-symbolic", "icon-bg-blue"),
         ActionType::WorkspaceLeft => ("go-previous-symbolic", "icon-bg-blue"),
         ActionType::WorkspaceRight => ("go-next-symbolic", "icon-bg-blue"),
@@ -341,6 +342,7 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
         ActionType::Abort => "Abort Gesture".to_string(),
         ActionType::Lookup => "Look Up Selection".to_string(),
         ActionType::ToggleMiddleButtonWindows => "Toggle Middle Button Window Control".to_string(),
+        ActionType::ToggleMiddleClickPaste => "Toggle Middle Click Paste".to_string(),
     }
 }
 pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -> gtk::ListBoxRow {

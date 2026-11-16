@@ -379,6 +379,31 @@ fn toggle_middle_button_windows() {
     }
 }
 
+/// Turns GNOME's pasting of the selected text with a middle click on or off, the setting that
+/// Disable Middle Click Paste in Gestos's Settings changes.
+#[cfg(target_os = "linux")]
+fn toggle_middle_click_paste() {
+    use gio::prelude::SettingsExt;
+    const SCHEMA: &str = "org.gnome.desktop.interface";
+    const KEY: &str = "gtk-enable-primary-paste";
+    let installed = gio::SettingsSchemaSource::default()
+        .and_then(|source| source.lookup(SCHEMA, true))
+        .is_some_and(|schema| schema.has_key(KEY));
+    if !installed {
+        gestos::wayland::action_failed("This desktop has no middle click paste setting".to_string());
+        return;
+    }
+    let settings = gio::Settings::new(SCHEMA);
+    let paste = !settings.boolean(KEY);
+    if let Err(e) = settings.set_boolean(KEY, paste) {
+        gestos::wayland::action_failed(format!("Couldn't change it: {e}"));
+        return;
+    }
+    gio::Settings::sync();
+    let text = if paste { "Middle click pastes" } else { "Middle click doesn't paste" };
+    gestos::wayland::action_result(text.to_string(), "edit-paste-symbolic");
+}
+
 /// Runs a gesture's actions in order on their own thread, because they can sleep or wait on a
 /// child process (`swaylock` runs until the screen is unlocked).
 #[cfg(target_os = "linux")]
@@ -397,6 +422,8 @@ fn spawn_gesture_actions(
                 input.click(btn.unwrap_or(1));
             } else if let ActionType::ToggleMiddleButtonWindows = action {
                 toggle_middle_button_windows();
+            } else if let ActionType::ToggleMiddleClickPaste = action {
+                toggle_middle_click_paste();
             } else if let ActionType::Keyboard(steps) = action {
                 let is_gnome = wayland_ctx.is_gnome;
                 input.run_steps(steps, &|app| {
