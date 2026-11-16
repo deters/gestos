@@ -340,6 +340,42 @@ fn wait_for_modifier_release(input: &InputClient) {
     }
 }
 
+/// GNOME's setting for pasting the selection with a middle click.
+#[cfg(target_os = "linux")]
+const INTERFACE_SCHEMA: &str = "org.gnome.desktop.interface";
+#[cfg(target_os = "linux")]
+const PRIMARY_PASTE_KEY: &str = "gtk-enable-primary-paste";
+/// How long apps take to hear that it's on, and to paste once clicked.
+#[cfg(target_os = "linux")]
+const PRIMARY_PASTE_SETTLE: Duration = Duration::from_millis(150);
+#[cfg(target_os = "linux")]
+const PRIMARY_PASTE_DONE: Duration = Duration::from_millis(500);
+
+/// Pastes the selection where the pointer is, by clicking the middle button. Where middle-click
+/// paste is turned off, it's turned on just for that click, and off again once apps have pasted.
+#[cfg(target_os = "linux")]
+fn paste_selection(input: &InputClient) {
+    use gio::prelude::SettingsExt;
+    let settings = gio::SettingsSchemaSource::default()
+        .and_then(|source| source.lookup(INTERFACE_SCHEMA, true))
+        .filter(|schema| schema.has_key(PRIMARY_PASTE_KEY))
+        .map(|_| gio::Settings::new(INTERFACE_SCHEMA));
+    let turned_on = settings.as_ref().filter(|settings| !settings.boolean(PRIMARY_PASTE_KEY));
+    let set = |settings: &gio::Settings, on: bool| {
+        let _ = settings.set_boolean(PRIMARY_PASTE_KEY, on);
+        gio::Settings::sync();
+    };
+    if let Some(settings) = turned_on {
+        set(settings, true);
+        std::thread::sleep(PRIMARY_PASTE_SETTLE);
+    }
+    input.click(2);
+    if let Some(settings) = turned_on {
+        std::thread::sleep(PRIMARY_PASTE_DONE);
+        set(settings, false);
+    }
+}
+
 /// Runs a gesture's actions in order on their own thread, because they can sleep or wait on a
 /// child process (`swaylock` runs until the screen is unlocked).
 #[cfg(target_os = "linux")]
@@ -356,6 +392,8 @@ fn spawn_gesture_actions(
         for action in &actions {
             if let ActionType::Click(btn) = action {
                 input.click(btn.unwrap_or(1));
+            } else if let ActionType::PasteSelection = action {
+                paste_selection(&input);
             } else if let ActionType::Keyboard(steps) = action {
                 let is_gnome = wayland_ctx.is_gnome;
                 input.run_steps(steps, &|app| {

@@ -347,7 +347,7 @@ pub fn is_custom_shortcut(option: &EditorActionOption) -> bool {
 pub fn category_of(option: &EditorActionOption) -> Category {
     match &option.action_type {
         _ if is_build_your_own(option) => Category::Advanced,
-        ActionType::Click(_) => Category::Other,
+        ActionType::Click(_) | ActionType::PasteSelection => Category::Other,
         _ if crate::ui::app_picker::opened_app(&option.action_type).is_some() => Category::Apps,
         ActionType::Keypress(_) => Category::KeyboardShortcuts,
         // GNOME's own custom shortcuts, which run commands.

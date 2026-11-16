@@ -395,6 +395,12 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
             name: "Look Up Selection".to_string(),
             tooltip: "Open the text selected, work it out, or search the web for it".to_string(),
         },
+        EditorActionOption {
+            category: 7,
+            action_type: ActionType::PasteSelection,
+            name: "Paste Selection".to_string(),
+            tooltip: "Paste the text selected where the pointer is, as a middle click does".to_string(),
+        },
         // Other/Internal (7)
         EditorActionOption {
             category: 7,

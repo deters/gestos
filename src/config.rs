@@ -52,6 +52,8 @@ pub enum ActionType {
     /// Opens the text selected, as a web address, email address or file, works it out as a sum,
     /// or searches the web for it.
     Lookup,
+    /// Pastes the text selected where the pointer is, as a middle click does.
+    PasteSelection,
 }
 
 impl ActionType {
@@ -117,6 +119,7 @@ impl ActionType {
             }
             "disabled" | "abort" => Some(ActionType::Abort),
             "lookup" => Some(ActionType::Lookup),
+            "paste-selection" => Some(ActionType::PasteSelection),
             _ => None,
         }
     }
@@ -180,6 +183,7 @@ impl ActionType {
             ActionType::Gnome(key) => gnome_icon_name(key),
             ActionType::Kde(_, _) => "preferences-system-symbolic",
             ActionType::Lookup => "edit-find-symbolic",
+            ActionType::PasteSelection => "edit-paste-symbolic",
             ActionType::Iconify => "window-minimize-symbolic",
             ActionType::Kill => "window-close-symbolic",
             ActionType::Maximize | ActionType::ToggleMaximized => "window-maximize-symbolic",
@@ -257,6 +261,7 @@ impl ActionType {
             ActionType::Kde(comp, method) => format!("KDE: {} {}", comp, method),
             ActionType::Abort => "Abort".to_string(),
             ActionType::Lookup => "Look Up Selection".to_string(),
+            ActionType::PasteSelection => "Paste Selection".to_string(),
         }
     }
 }
@@ -362,6 +367,7 @@ impl std::fmt::Display for ActionType {
             ActionType::Kde(comp, short) => write!(f, "kde {} {}", comp, short),
             ActionType::Abort => write!(f, "abort"),
             ActionType::Lookup => write!(f, "lookup"),
+            ActionType::PasteSelection => write!(f, "paste-selection"),
         }
     }
 }
@@ -1678,6 +1684,12 @@ mod tests {
         config.overview_click = true;
         config.save_to_file().unwrap();
         assert!(Configuration::load_from_file(&file.0).unwrap().overview_click);
+    }
+
+    #[test]
+    fn paste_selection_is_read_as_it_is_written() {
+        let action = ActionType::PasteSelection;
+        assert_eq!(ActionType::from_string(&action.to_string()), Some(action));
     }
 
     #[test]

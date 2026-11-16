@@ -169,6 +169,25 @@ fn middle_button_windows_row(state_rc: &Rc<RefCell<AppState>>) -> (adw::ActionRo
     )
 }
 
+/// GNOME's own setting for pasting the selected text with a middle click, as GNOME Tweaks has it.
+/// Paste Selection pastes it either way.
+fn middle_click_paste_row() -> Option<adw::ActionRow> {
+    const SCHEMA: &str = "org.gnome.desktop.interface";
+    const KEY: &str = "gtk-enable-primary-paste";
+    gio::SettingsSchemaSource::default()?.lookup(SCHEMA, true).filter(|schema| schema.has_key(KEY))?;
+    let settings = gio::Settings::new(SCHEMA);
+    let title = "Middle Click Paste";
+    let (row, row_box, _) = settings_row(title, "Paste the selected text with a middle click");
+    let switch = settings_switch(title);
+    settings.bind(KEY, &switch, "active").build();
+    // The binding needs the settings for as long as the switch is there.
+    switch.connect_destroy(move |_| {
+        let _ = &settings;
+    });
+    row_box.append(&switch);
+    Some(row)
+}
+
 /// A switch for a setting of the daemon's that only works while the right button draws.
 fn right_button_switch_row(
     state_rc: &Rc<RefCell<AppState>>,
@@ -334,6 +353,11 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     if let Some((row, _)) = &middle_button_windows {
         gestures_list.add(row);
         needs_extension.push(row.clone());
+    }
+    if on_gnome {
+        if let Some(row) = middle_click_paste_row() {
+            gestures_list.add(&row);
+        }
     }
     // On GNOME the extension draws it, with its own setting; on X11 and KDE, Gestos does.
     if on_gnome {
