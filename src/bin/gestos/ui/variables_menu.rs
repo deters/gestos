@@ -10,6 +10,19 @@ pub fn variables_button(entry: &gtk::Entry) -> gtk::MenuButton {
     let items = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let popover = gtk::Popover::new();
     popover.set_child(Some(&items));
+    // Outside GNOME, what's copied is read with a program that may not be installed.
+    if let Some(package) = gestos::command_variables::missing_clipboard_reader() {
+        let note = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        note.set_margin_start(6);
+        note.set_margin_end(6);
+        note.set_margin_top(6);
+        note.set_margin_bottom(6);
+        note.append(&gtk::Image::from_icon_name("dialog-warning-symbolic"));
+        let label = gtk::Label::new(Some(&format!("Install {package} to use what's copied")));
+        label.set_xalign(0.0);
+        note.append(&label);
+        items.append(&note);
+    }
     for (name, written) in OFFERED {
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         let label = gtk::Label::new(Some(name));

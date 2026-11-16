@@ -90,6 +90,35 @@ pub fn variables(context: &CommandContext, copied: &Copied) -> Vec<(&'static str
     variables
 }
 
+/// The program that reads what's copied, outside GNOME, where the extension does: its name, and
+/// the package it's installed with.
+pub fn clipboard_reader(is_x11: bool) -> (&'static str, &'static str) {
+    if is_x11 {
+        ("xclip", "xclip")
+    } else {
+        ("wl-paste", "wl-clipboard")
+    }
+}
+
+/// The package to install for commands to get what's copied, if it isn't installed.
+pub fn missing_clipboard_reader() -> Option<&'static str> {
+    if crate::config::get_environment_suffix() == Some("gnome") {
+        return None;
+    }
+    let (program, package) = clipboard_reader(crate::active_app::is_x11_session());
+    (!crate::wayland::is_installed(program)).then_some(package)
+}
+
+/// Whether a command uses what's copied, as far as its own text tells. A script it runs may too.
+pub fn uses_copied(command: &str) -> bool {
+    let named = ["GESTOS_CLIPBOARD", "GESTOS_SELECTION", "GESTOS_FILES", "SCRIPT_SELECTED_", "$@", "$*", "$#"];
+    let numbered = command
+        .as_bytes()
+        .windows(2)
+        .any(|pair| pair[0] == b'$' && (b'1'..=b'9').contains(&pair[1]) || pair == b"${");
+    named.iter().any(|name| command.contains(name)) || numbered
+}
+
 /// Whether a variable is too big to give a command, which then wouldn't start at all.
 pub fn too_big(name: &str, value: &str) -> bool {
     name.len() + value.len() + 2 > MAX_VARIABLE
@@ -136,6 +165,16 @@ mod tests {
         assert_eq!(value(&variables, "GESTOS_FILES"), Some(""));
         assert_eq!(value(&variables, "GESTOS_APP"), Some(""));
         assert_eq!(value(&variables, "NAUTILUS_SCRIPT_SELECTED_URIS"), None);
+    }
+
+    #[test]
+    fn a_command_that_uses_whats_copied_says_so() {
+        assert!(uses_copied(r#"notify-send "$GESTOS_CLIPBOARD""#));
+        assert!(uses_copied(r#"~/bin/upload.sh "$@""#));
+        assert!(uses_copied("convert $1 out.png"));
+        assert!(uses_copied("echo ${1}"));
+        assert!(!uses_copied(r#"notify-send "$GESTOS_GESTURE" "$HOME""#));
+        assert!(!uses_copied("firefox"));
     }
 
     #[test]

@@ -422,7 +422,7 @@ fn parse_gnome_shortcut(raw: &str) -> Option<String> {
 }
 
 /// Whether a program can be found in PATH.
-fn is_installed(program: &str) -> bool {
+pub(crate) fn is_installed(program: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|path| {
         std::env::split_paths(&path).any(|dir| {
             use std::os::unix::fs::PermissionsExt;
@@ -1064,6 +1064,13 @@ impl WaylandContext {
     /// place a shell belongs: Run Command and an advanced action's commands take whatever the user
     /// would type in one.
     pub fn run_shell_cmd(&self, cmd: &str, context: &CommandContext) -> bool {
+        // It would run with nothing in place of what it's meant to get.
+        if crate::command_variables::uses_copied(cmd) {
+            if let Some(package) = crate::command_variables::missing_clipboard_reader() {
+                action_failed(format!("{package} isn't installed, which commands need to get what's copied"));
+                return false;
+            }
+        }
         let copied = self.copied();
         let files = crate::command_variables::file_paths(&crate::command_variables::uris(&copied.uri_list));
         let mut command = Command::new("sh");
@@ -1111,8 +1118,12 @@ impl WaylandContext {
             };
         }
         // Text only, as a command can't be given an image as a variable.
+        let is_x11 = crate::active_app::is_x11_session();
+        if !is_installed(crate::command_variables::clipboard_reader(is_x11).0) {
+            return Copied::default();
+        }
         let (clipboard, selection, uri_list): (&[&str], &[&str], &[&str]) =
-            if crate::active_app::is_x11_session() {
+            if is_x11 {
                 (
                     &["xclip", "-o", "-selection", "clipboard", "-t", "UTF8_STRING"],
                     &["xclip", "-o", "-selection", "primary", "-t", "UTF8_STRING"],
