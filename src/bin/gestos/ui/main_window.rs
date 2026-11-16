@@ -1283,7 +1283,7 @@ pub fn build_ui(app: &gtk::Application) {
     list_container.append(&suggestion_box);
     scrolled.set_child(Some(&clamped(&list_container)));
 
-    if let Err(e) = gestos::config::initialize_user_config_if_missing() {
+    if let Err(e) = crate::system::initialize_config() {
         eprintln!("Warning: Failed to initialize configuration: {}", e);
     }
     let mut config = Configuration::load_from_defaults();

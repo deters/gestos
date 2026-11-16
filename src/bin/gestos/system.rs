@@ -1,5 +1,33 @@
 use std::process::Command;
 
+/// Creates the configuration if it's missing. A new install keeps pasting the selected text with a
+/// middle click on, which newer GNOME versions have off, unless the user chose themselves.
+pub fn initialize_config() -> std::io::Result<std::path::PathBuf> {
+    let new_install = !gestos::config::get_default_config_path().exists();
+    let path = gestos::config::initialize_user_config_if_missing()?;
+    if new_install && gestos::config::get_environment_suffix() == Some("gnome") {
+        allow_middle_click_paste_unless_chosen();
+    }
+    Ok(path)
+}
+
+fn allow_middle_click_paste_unless_chosen() {
+    use gtk4::gio::{self, prelude::SettingsExt};
+    const SCHEMA: &str = "org.gnome.desktop.interface";
+    const KEY: &str = "gtk-enable-primary-paste";
+    let installed = gio::SettingsSchemaSource::default()
+        .and_then(|source| source.lookup(SCHEMA, true))
+        .is_some_and(|schema| schema.has_key(KEY));
+    if !installed {
+        return;
+    }
+    let settings = gio::Settings::new(SCHEMA);
+    if settings.user_value(KEY).is_none() {
+        let _ = settings.set_boolean(KEY, true);
+        gio::Settings::sync();
+    }
+}
+
 pub fn get_autostart_file_path() -> Option<std::path::PathBuf> {
     gestos::config::autostart_dir().map(|dir| dir.join("gestosd.desktop"))
 }

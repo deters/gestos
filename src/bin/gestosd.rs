@@ -380,7 +380,7 @@ fn toggle_middle_button_windows() {
 }
 
 /// Turns GNOME's pasting of the selected text with a middle click on or off, the setting that
-/// Disable Middle Click Paste in Gestos's Settings changes.
+/// Allow Middle Click Paste in Gestos's Settings changes.
 #[cfg(target_os = "linux")]
 fn toggle_middle_click_paste() {
     use gio::prelude::SettingsExt;

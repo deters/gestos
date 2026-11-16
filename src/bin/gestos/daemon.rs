@@ -178,7 +178,7 @@ pub fn stop_daemon(conn: Option<&zbus::blocking::Connection>) {
 /// Starts gestures, including the overlay if the user has it enabled.
 pub fn turn_on(conn: Option<&zbus::blocking::Connection>) -> Result<(), String> {
     set_stopped_by_user(false);
-    gestos::config::initialize_user_config_if_missing()
+    crate::system::initialize_config()
         .map_err(|e| format!("Could not create the configuration: {}", e))?;
     start_daemon(conn)?;
     start_overlay_if_enabled();
