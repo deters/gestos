@@ -184,7 +184,7 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
             category: 0,
             action_type: ActionType::Keyboard(Vec::new()),
             name: "Advanced Action".to_string(),
-            tooltip: "Open apps, press shortcuts, type text and wait, in any order".to_string(),
+            tooltip: "Open apps, press shortcuts, type text, run commands and wait, in any order".to_string(),
         },
         // Window Management (1)
         EditorActionOption {

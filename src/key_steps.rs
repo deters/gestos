@@ -1,5 +1,5 @@
-//! A custom action's steps: apps to open, shortcuts to press, text to type, and pauses, in the
-//! order given. They're written on one line, like
+//! A custom action's steps: apps to open, shortcuts to press, text to type, commands to run, and
+//! pauses, in the order given. They're written on one line, like
 //! `open org.mozilla.firefox; press Control+L; type "gestos"; press Return`, as gestures keep
 //! their actions as text.
 
@@ -14,6 +14,8 @@ pub enum KeyStep {
     /// An app, by its desktop file ID, opened or brought to the front, which the steps after it
     /// then go to.
     Open(String),
+    /// A command run in a shell, as Run Command runs one, finished before the steps after it.
+    Run(String),
 }
 
 /// The most a single pause can be, so that a typo can't leave a gesture running for hours.
@@ -56,6 +58,7 @@ fn parse_step(step: &str) -> Option<KeyStep> {
         "press" if !rest.is_empty() => Some(KeyStep::Press(rest.to_string())),
         "open" if !rest.is_empty() => Some(KeyStep::Open(rest.to_string())),
         "type" => unquote(rest).map(KeyStep::Type),
+        "run" => unquote(rest).map(KeyStep::Run),
         "wait" => {
             let millis = rest.parse::<u32>().ok()?;
             Some(KeyStep::Wait(millis.min(MAX_WAIT_MILLIS)))
@@ -105,6 +108,7 @@ pub fn format_steps(steps: &[KeyStep]) -> String {
             KeyStep::Type(text) => format!("type {}", quote(text)),
             KeyStep::Wait(millis) => format!("wait {millis}"),
             KeyStep::Open(app) => format!("open {app}"),
+            KeyStep::Run(command) => format!("run {}", quote(command)),
         })
         .collect::<Vec<_>>()
         .join("; ")
@@ -119,6 +123,7 @@ pub fn describe_steps(steps: &[KeyStep]) -> String {
             KeyStep::Type(text) => format!("type “{text}”"),
             KeyStep::Wait(millis) => format!("wait {millis} ms"),
             KeyStep::Open(app) => format!("open {}", app_name(app)),
+            KeyStep::Run(command) => format!("run {}", crate::config::short_command(command)),
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -240,6 +245,19 @@ mod tests {
         assert_eq!(text, "open org.mozilla.firefox; press Control+T");
         assert_eq!(parse_steps(&text), steps);
         assert_eq!(parse_steps("open "), []);
+    }
+
+    #[test]
+    fn a_command_to_run_survives_saving() {
+        let steps = vec![
+            KeyStep::Run(r#"~/bin/backup.sh "$HOME/a b"; echo done"#.to_string()),
+            KeyStep::Press("Control+V".to_string()),
+        ];
+        let text = format_steps(&steps);
+        assert_eq!(text, r#"run "~/bin/backup.sh \"$HOME/a b\"; echo done"; press Control+V"#);
+        assert_eq!(parse_steps(&text), steps);
+        let named = [KeyStep::Run("~/bin/backup.sh --now".to_string())];
+        assert_eq!(describe_steps(&named), "run backup.sh --now");
     }
 
     #[test]

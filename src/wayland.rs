@@ -1040,8 +1040,10 @@ impl WaylandContext {
         }
     }
 
-    // The one place a shell belongs: Run Command takes whatever the user would type in one.
-    fn run_shell_cmd(&self, cmd: &str) {
+    /// Runs a command as the user would type it in a shell, and says whether it worked. The one
+    /// place a shell belongs: Run Command and an advanced action's commands take whatever the user
+    /// would type in one.
+    pub fn run_shell_cmd(&self, cmd: &str) -> bool {
         let status = Command::new("sh").arg("-c").arg(cmd).status();
         // The shell says 127 when it can't find the program.
         let failure = match status {
@@ -1050,9 +1052,10 @@ impl WaylandContext {
             }
             status => command_failure(&crate::config::short_command(cmd), status),
         };
-        if let Some(failure) = failure {
-            action_failed(failure);
+        if let Some(failure) = &failure {
+            action_failed(failure.clone());
         }
+        failure.is_none()
     }
 
     // Runs a program in the user session's DBUS environment

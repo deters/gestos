@@ -1,4 +1,5 @@
-//! The steps of a Custom Action: apps to open, shortcuts to press, text to type and pauses. They
+//! The steps of a Custom Action: apps to open, shortcuts to press, text to type, commands to run
+//! and pauses. They
 //! are rows of the action's list: a title row with a button to add each kind of step, and a row
 //! for each step, which can be moved and removed. They're kept as text in the editor's details
 //! entry, which is what the gesture saves.
@@ -24,6 +25,7 @@ const OPEN_ICON: &str = "view-app-grid-symbolic";
 const PRESS_ICON: &str = "input-keyboard-symbolic";
 const TYPE_ICON: &str = "insert-text-symbolic";
 const WAIT_ICON: &str = "alarm-symbolic";
+const RUN_ICON: &str = "utilities-terminal-symbolic";
 
 // How many characters wide the name of each step is, to fit the longest.
 const STEP_NAME_CHARS: i32 = 9;
@@ -34,6 +36,7 @@ fn step_name(step: &KeyStep) -> &'static str {
         KeyStep::Press(_) => "Shortcut",
         KeyStep::Type(_) => "Type",
         KeyStep::Wait(_) => "Pause",
+        KeyStep::Run(_) => "Command",
     }
 }
 
@@ -45,6 +48,7 @@ pub fn step_icon(step: &KeyStep) -> &'static str {
         KeyStep::Press(_) => PRESS_ICON,
         KeyStep::Type(_) => TYPE_ICON,
         KeyStep::Wait(_) => WAIT_ICON,
+        KeyStep::Run(_) => RUN_ICON,
     }
 }
 
@@ -56,7 +60,7 @@ struct StepsEditor {
     rows: RefCell<Vec<gtk::ListBoxRow>>,
     shown: Cell<bool>,
     steps: RefCell<Vec<KeyStep>>,
-    // Whether the text box of a text step just added takes the focus, to type in right away.
+    // Whether the box of a text or command step just added takes the focus, to type in right away.
     focus_new_text: Cell<bool>,
 }
 
@@ -123,6 +127,11 @@ pub fn append_steps_rows(
     add_button("Type", "Type a Text").connect_clicked(move |_| {
         typing.focus_new_text.set(true);
         typing.add(KeyStep::Type(String::new()));
+    });
+    let running = Rc::clone(&editor);
+    add_button("Command", "Run a Command").connect_clicked(move |_| {
+        running.focus_new_text.set(true);
+        running.add(KeyStep::Run(String::new()));
     });
     let waiting = Rc::clone(&editor);
     add_button("Pause", "Add a Pause").connect_clicked(move |_| {
@@ -241,6 +250,23 @@ impl StepsEditor {
                 if i + 1 == count && self.focus_new_text.take() {
                     gtk::glib::idle_add_local_once(move || {
                         view.grab_focus();
+                    });
+                }
+            }
+            KeyStep::Run(command) => {
+                let entry = gtk::Entry::new();
+                entry.set_text(command);
+                entry.set_hexpand(true);
+                entry.add_css_class("monospace");
+                let editor = Rc::clone(self);
+                entry.connect_changed(move |entry| {
+                    editor.steps.borrow_mut()[i] = KeyStep::Run(entry.text().to_string());
+                    editor.changed();
+                });
+                content.append(&entry);
+                if i + 1 == count && self.focus_new_text.take() {
+                    gtk::glib::idle_add_local_once(move || {
+                        entry.grab_focus();
                     });
                 }
             }

@@ -297,6 +297,7 @@ fn action_summary(action: &ActionType) -> String {
                     KeyStep::Type(_) => "type (left out)".to_string(),
                     KeyStep::Wait(ms) => format!("wait {ms}"),
                     KeyStep::Open(app) => format!("open {app}"),
+                    KeyStep::Run(_) => "run (left out)".to_string(),
                 })
                 .collect();
             format!("keyboard [{}]", steps.join("; "))

@@ -147,8 +147,14 @@ impl InputClient {
 
     /// Runs a custom action's steps in order. `open_app` opens an app or brings it to the front,
     /// which only the desktop can do, and says whether it then has focus. If it doesn't, the steps
-    /// after it would go to some other window, so they're left out.
-    pub fn run_steps(&self, steps: &[KeyStep], open_app: &dyn Fn(&str) -> bool) {
+    /// after it would go to some other window, so they're left out. `run` runs a command and says
+    /// whether it worked, as the steps after one that failed may count on what it does.
+    pub fn run_steps(
+        &self,
+        steps: &[KeyStep],
+        open_app: &dyn Fn(&str) -> bool,
+        run: &dyn Fn(&str) -> bool,
+    ) {
         for step in steps {
             match step {
                 KeyStep::Press(keys) => self.keypress_string(keys),
@@ -158,6 +164,11 @@ impl InputClient {
                 }
                 KeyStep::Open(app) => {
                     if !open_app(app) {
+                        return;
+                    }
+                }
+                KeyStep::Run(command) => {
+                    if !run(command) {
                         return;
                     }
                 }
@@ -238,6 +249,7 @@ mod tests {
                 KeyStep::Press("F1".to_string()),
             ],
             &|_| true,
+            &|_| true,
         );
         assert!(started.elapsed() >= Duration::from_millis(30));
         let requests = received(&mut service, 6);
@@ -265,8 +277,26 @@ mod tests {
                 opened.borrow_mut().push(app.to_string());
                 false
             },
+            &|_| true,
         );
         assert_eq!(*opened.borrow(), ["org.example.Missing"]);
+        client.send(&Request::QueryHeld);
+        assert_eq!(received(&mut service, 1), [Request::QueryHeld]);
+    }
+
+    #[test]
+    fn steps_after_a_command_that_fails_are_left_out() {
+        let (client, mut service) = client();
+        let ran = std::cell::RefCell::new(Vec::new());
+        client.run_steps(
+            &[KeyStep::Run("false".to_string()), KeyStep::Press("F1".to_string())],
+            &|_| true,
+            &|command| {
+                ran.borrow_mut().push(command.to_string());
+                false
+            },
+        );
+        assert_eq!(*ran.borrow(), ["false"]);
         client.send(&Request::QueryHeld);
         assert_eq!(received(&mut service, 1), [Request::QueryHeld]);
     }

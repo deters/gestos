@@ -426,9 +426,11 @@ fn spawn_gesture_actions(
                 toggle_middle_click_paste();
             } else if let ActionType::Keyboard(steps) = action {
                 let is_gnome = wayland_ctx.is_gnome;
-                input.run_steps(steps, &|app| {
-                    gestos::wayland::open_app_for_steps(app, is_gnome)
-                });
+                input.run_steps(
+                    steps,
+                    &|app| gestos::wayland::open_app_for_steps(app, is_gnome),
+                    &|command| wayland_ctx.run_shell_cmd(command),
+                );
             } else {
                 wayland_ctx.execute_action(action, &|keys_str| input.keypress_string(keys_str));
             }
