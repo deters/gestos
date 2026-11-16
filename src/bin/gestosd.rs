@@ -31,6 +31,7 @@ static RELOAD_WAKE: OnceLock<UnixStream> = OnceLock::new();
 const EXIT_PERMANENT_ERROR: i32 = 2;
 
 const DBUS_PATH: &str = "/io/github/deters/Gestos/Daemon";
+const DBUS_INTERFACE: &str = "io.github.deters.Gestos.Daemon";
 const LEGACY_DBUS_NAME: &str = "org.mygestures.Daemon";
 const LEGACY_DBUS_PATH: &str = "/org/mygestures/Daemon";
 #[cfg(target_os = "linux")]
@@ -340,39 +341,41 @@ fn wait_for_modifier_release(input: &InputClient) {
     }
 }
 
-/// GNOME's setting for pasting the selection with a middle click.
+/// Turns controlling windows with the middle button on or off, in the configuration, and has the
+/// daemon read it again, so that every mouse's process does as it says.
 #[cfg(target_os = "linux")]
-const INTERFACE_SCHEMA: &str = "org.gnome.desktop.interface";
-#[cfg(target_os = "linux")]
-const PRIMARY_PASTE_KEY: &str = "gtk-enable-primary-paste";
-/// How long apps take to hear that it's on, and to paste once clicked.
-#[cfg(target_os = "linux")]
-const PRIMARY_PASTE_SETTLE: Duration = Duration::from_millis(150);
-#[cfg(target_os = "linux")]
-const PRIMARY_PASTE_DONE: Duration = Duration::from_millis(500);
-
-/// Pastes the selection where the pointer is, by clicking the middle button. Where middle-click
-/// paste is turned off, it's turned on just for that click, and off again once apps have pasted.
-#[cfg(target_os = "linux")]
-fn paste_selection(input: &InputClient) {
-    use gio::prelude::SettingsExt;
-    let settings = gio::SettingsSchemaSource::default()
-        .and_then(|source| source.lookup(INTERFACE_SCHEMA, true))
-        .filter(|schema| schema.has_key(PRIMARY_PASTE_KEY))
-        .map(|_| gio::Settings::new(INTERFACE_SCHEMA));
-    let turned_on = settings.as_ref().filter(|settings| !settings.boolean(PRIMARY_PASTE_KEY));
-    let set = |settings: &gio::Settings, on: bool| {
-        let _ = settings.set_boolean(PRIMARY_PASTE_KEY, on);
-        gio::Settings::sync();
+fn toggle_middle_button_windows() {
+    let Some(path) = CONFIG_PATH.get() else { return };
+    let mut config = match Configuration::load_trusted(path) {
+        Ok(config) => config,
+        Err(problem) => {
+            gestos::wayland::action_failed(format!("Couldn't read the configuration: {problem}"));
+            return;
+        }
     };
-    if let Some(settings) = turned_on {
-        set(settings, true);
-        std::thread::sleep(PRIMARY_PASTE_SETTLE);
+    if config.button.unwrap_or(DEFAULT_BUTTON) != DEFAULT_BUTTON {
+        let why = "It only works while gestures are drawn with the right button";
+        gestos::wayland::action_failed(why.to_string());
+        return;
     }
-    input.click(2);
-    if let Some(settings) = turned_on {
-        std::thread::sleep(PRIMARY_PASTE_DONE);
-        set(settings, false);
+    config.middle_button_windows = !config.middle_button_windows;
+    if let Err(e) = config.save_to_file() {
+        gestos::wayland::action_failed(format!("Couldn't save the configuration: {e}"));
+        return;
+    }
+    // Said first, as reloading may restart this process, when there are several mice.
+    let text = if config.middle_button_windows {
+        "Middle button controls windows"
+    } else {
+        "Middle button doesn't control windows"
+    };
+    gestos::wayland::action_result(text.to_string(), "input-mouse-symbolic");
+    let reloaded = zbus::blocking::Connection::session().and_then(|conn| {
+        let name = gestos::config::get_dbus_name();
+        conn.call_method(Some(name), DBUS_PATH, Some(DBUS_INTERFACE), "Reload", &()).map(|_| ())
+    });
+    if let Err(e) = reloaded {
+        gestos::wayland::action_failed(format!("Couldn't apply it: {e}"));
     }
 }
 
@@ -392,8 +395,8 @@ fn spawn_gesture_actions(
         for action in &actions {
             if let ActionType::Click(btn) = action {
                 input.click(btn.unwrap_or(1));
-            } else if let ActionType::MiddleClickPaste = action {
-                paste_selection(&input);
+            } else if let ActionType::ToggleMiddleButtonWindows = action {
+                toggle_middle_button_windows();
             } else if let ActionType::Keyboard(steps) = action {
                 let is_gnome = wayland_ctx.is_gnome;
                 input.run_steps(steps, &|app| {

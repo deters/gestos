@@ -189,7 +189,7 @@ pub fn report_results_to(reporter: impl Fn(String, &'static str) + Send + Sync +
     let _ = RESULT_REPORTER.set(Box::new(reporter));
 }
 
-fn action_result(text: String, icon: &'static str) {
+pub fn action_result(text: String, icon: &'static str) {
     log::info!("Action result: {text}");
     if let Some(report) = RESULT_REPORTER.get() {
         report(text, icon);
@@ -209,7 +209,7 @@ fn ask_selected_text(conn: &zbus::blocking::Connection, shell: &str) -> zbus::Re
 }
 
 /// Says that the action being run failed, and why, in a few words.
-fn action_failed(why: String) {
+pub fn action_failed(why: String) {
     log::warn!("Action failed: {why}");
     if let Some(report) = FAILURE_REPORTER.get() {
         report(why);

@@ -395,12 +395,6 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
             name: "Look Up Selection".to_string(),
             tooltip: "Open the text selected, work it out, or search the web for it".to_string(),
         },
-        EditorActionOption {
-            category: 7,
-            action_type: ActionType::MiddleClickPaste,
-            name: "Middle Click Paste".to_string(),
-            tooltip: "Paste the text selected where the pointer is, as a middle click does".to_string(),
-        },
         // Other/Internal (7)
         EditorActionOption {
             category: 7,
@@ -423,6 +417,12 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
             name: "Toggle Tile Windows".to_string(),
             tooltip: "Keep the windows on the workspace from overlapping, or put them back"
                 .to_string(),
+        });
+        options.push(EditorActionOption {
+            category: 1,
+            action_type: ActionType::ToggleMiddleButtonWindows,
+            name: "Toggle Middle Button Window Control".to_string(),
+            tooltip: "Turn moving and resizing windows with the middle button on or off".to_string(),
         });
     }
     options

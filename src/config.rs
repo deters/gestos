@@ -52,8 +52,8 @@ pub enum ActionType {
     /// Opens the text selected, as a web address, email address or file, works it out as a sum,
     /// or searches the web for it.
     Lookup,
-    /// Pastes the text selected where the pointer is, as a middle click does.
-    MiddleClickPaste,
+    /// Turns controlling windows with the middle button on or off.
+    ToggleMiddleButtonWindows,
 }
 
 impl ActionType {
@@ -119,22 +119,23 @@ impl ActionType {
             }
             "disabled" | "abort" => Some(ActionType::Abort),
             "lookup" => Some(ActionType::Lookup),
-            // It was called Paste Selection.
-            "middle-click-paste" | "paste-selection" => Some(ActionType::MiddleClickPaste),
+            "toggle-middle-button-windows" => Some(ActionType::ToggleMiddleButtonWindows),
             _ => None,
         }
     }
 
     /// Whether this runs in the Gestos GNOME Shell extension, which is optional.
     pub fn needs_gnome_extension(&self) -> bool {
-        matches!(self, ActionType::ToggleTileWindows)
+        matches!(self, ActionType::ToggleTileWindows | ActionType::ToggleMiddleButtonWindows)
     }
 
     /// The one desktop this runs on, named as `get_environment_suffix` names it, or None for an
     /// action that runs on any. GNOME's shortcuts and its tiling are its own, and KDE's are KDE's.
     pub fn only_on_desktop(&self) -> Option<&'static str> {
         match self {
-            ActionType::Gnome(_) | ActionType::ToggleTileWindows => Some("gnome"),
+            ActionType::Gnome(_)
+            | ActionType::ToggleTileWindows
+            | ActionType::ToggleMiddleButtonWindows => Some("gnome"),
             ActionType::Kde(_, _) => Some("kde"),
             _ => None,
         }
@@ -184,7 +185,7 @@ impl ActionType {
             ActionType::Gnome(key) => gnome_icon_name(key),
             ActionType::Kde(_, _) => "preferences-system-symbolic",
             ActionType::Lookup => "edit-find-symbolic",
-            ActionType::MiddleClickPaste => "edit-paste-symbolic",
+            ActionType::ToggleMiddleButtonWindows => "input-mouse-symbolic",
             ActionType::Iconify => "window-minimize-symbolic",
             ActionType::Kill => "window-close-symbolic",
             ActionType::Maximize | ActionType::ToggleMaximized => "window-maximize-symbolic",
@@ -262,7 +263,7 @@ impl ActionType {
             ActionType::Kde(comp, method) => format!("KDE: {} {}", comp, method),
             ActionType::Abort => "Abort".to_string(),
             ActionType::Lookup => "Look Up Selection".to_string(),
-            ActionType::MiddleClickPaste => "Middle Click Paste".to_string(),
+            ActionType::ToggleMiddleButtonWindows => "Toggle Middle Button Window Control".to_string(),
         }
     }
 }
@@ -368,7 +369,7 @@ impl std::fmt::Display for ActionType {
             ActionType::Kde(comp, short) => write!(f, "kde {} {}", comp, short),
             ActionType::Abort => write!(f, "abort"),
             ActionType::Lookup => write!(f, "lookup"),
-            ActionType::MiddleClickPaste => write!(f, "middle-click-paste"),
+            ActionType::ToggleMiddleButtonWindows => write!(f, "toggle-middle-button-windows"),
         }
     }
 }
@@ -1688,8 +1689,8 @@ mod tests {
     }
 
     #[test]
-    fn middle_click_paste_is_read_as_it_is_written() {
-        let action = ActionType::MiddleClickPaste;
+    fn toggling_the_middle_button_is_read_as_it_is_written() {
+        let action = ActionType::ToggleMiddleButtonWindows;
         assert_eq!(ActionType::from_string(&action.to_string()), Some(action));
     }
 
