@@ -10,3 +10,4 @@ pub mod main_window;
 pub mod overlay;
 pub mod gesture_status;
 pub mod gesture_chooser;
+pub mod variables_menu;

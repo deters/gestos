@@ -294,6 +294,7 @@ fn show_action_parameter(
     entry: &gtk::Entry,
     shortcut_display: &gtk::Box,
     record_button: &gtk::Button,
+    variables_button: &gtk::MenuButton,
     show_steps: &dyn Fn(bool),
 ) {
     // A custom action has its list of steps instead of the one value other actions take. An app's
@@ -310,6 +311,7 @@ fn show_action_parameter(
     entry.set_visible(!is_keypress);
     shortcut_display.set_visible(is_keypress);
     record_button.set_visible(is_keypress);
+    variables_button.set_visible(matches!(&opt.action_type, ActionType::Execute(_)));
 
     match &opt.action_type {
         ActionType::Keypress(_) => label.set_text("Keys to Send"),
@@ -994,6 +996,10 @@ fn open_editor(
     record_btn.set_tooltip_text(Some("Record keys"));
     entry_container.append(&record_btn);
 
+    let variables_btn = crate::ui::variables_menu::variables_button(&action_details_entry);
+    variables_btn.set_visible(false);
+    entry_container.append(&variables_btn);
+
     action_details_row.append(&entry_container);
     settings_list.append(&action_details_row);
 
@@ -1173,6 +1179,7 @@ fn open_editor(
             &action_details_entry,
             &shortcut_display_box,
             &record_btn,
+            &variables_btn,
             &*show_steps,
         );
         // A chosen action is all a new gesture's default name needs.
@@ -1265,6 +1272,7 @@ fn open_editor(
                 &action_details_entry,
                 &shortcut_display_box,
                 &record_btn,
+                &variables_btn,
                 &*show_steps,
             );
             dialog.set_title(Some(&custom.name));

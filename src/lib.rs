@@ -1,6 +1,7 @@
 pub mod active_app;
 pub mod app_cache;
 pub mod chooser;
+pub mod command_variables;
 pub mod config;
 pub mod gesture;
 pub mod gnome_extension;

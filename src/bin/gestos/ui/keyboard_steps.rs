@@ -264,6 +264,7 @@ impl StepsEditor {
                     editor.changed();
                 });
                 content.append(&entry);
+                content.append(&crate::ui::variables_menu::variables_button(&entry));
                 if i + 1 == count && self.focus_new_text.take() {
                     gtk::glib::idle_add_local_once(move || {
                         entry.grab_focus();

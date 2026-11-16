@@ -38,6 +38,11 @@ const INTERFACE_XML = `
     <method name="SelectedText">
       <arg type="s" direction="out" name="text"/>
     </method>
+    <method name="Copied">
+      <arg type="s" direction="out" name="clipboard"/>
+      <arg type="s" direction="out" name="selection"/>
+      <arg type="s" direction="out" name="uriList"/>
+    </method>
     <method name="ChooseGesture">
       <arg type="a(ssad)" direction="in" name="gestures"/>
       <arg type="i" direction="out" name="choice"/>
@@ -1849,6 +1854,25 @@ class WindowActions {
     SelectedTextAsync(_params, invocation) {
         St.Clipboard.get_default().get_text(St.ClipboardType.PRIMARY, (_clipboard, text) =>
             invocation.return_value(new GLib.Variant('(s)', [text ?? ''])));
+    }
+
+    /**
+     * What's copied and selected, for a command a gesture runs, which can't read it itself on
+     * Wayland: the clipboard's text, the selected text, and the files copied, as a list of URIs.
+     *
+     * @param {Array} _params - none
+     * @param {Gio.DBusMethodInvocation} invocation - answered with each, empty if there's none
+     */
+    CopiedAsync(_params, invocation) {
+        const clipboard = St.Clipboard.get_default();
+        const text = type => new Promise(resolve =>
+            clipboard.get_text(type, (_clipboard, value) => resolve(value ?? '')));
+        const uriList = new Promise(resolve =>
+            clipboard.get_content(St.ClipboardType.CLIPBOARD, 'text/uri-list', (_clipboard, bytes) =>
+                resolve(bytes?.get_size() ? new TextDecoder().decode(bytes.toArray()) : '')));
+        Promise.all([text(St.ClipboardType.CLIPBOARD), text(St.ClipboardType.PRIMARY), uriList])
+            .then(values => invocation.return_value(new GLib.Variant('(sss)', values)))
+            .catch(e => invocation.return_error_literal(Gio.DBusError, Gio.DBusError.FAILED, `${e}`));
     }
 
     /**

@@ -1,4 +1,5 @@
 use gestos::chooser::{encode_entries, parse_choice, ChooserEntry};
+use gestos::command_variables::CommandContext;
 use gestos::config::{ActionType, Configuration, Gesture};
 #[cfg(target_os = "linux")]
 use gestos::input_client::InputClient;
@@ -409,11 +410,16 @@ fn toggle_middle_click_paste() {
 #[cfg(target_os = "linux")]
 fn spawn_gesture_actions(
     actions: Vec<ActionType>,
+    mut context: CommandContext,
     wayland_ctx: WaylandContext,
     input: InputClient,
     wait_for_release: bool,
 ) {
     std::thread::spawn(move || {
+        // The app is only looked up for a gesture when some are only for some apps.
+        if context.app.is_none() && actions.iter().any(runs_a_command) {
+            context.app = ask_focused_app(&wayland_ctx).flatten();
+        }
         if wait_for_release {
             wait_for_modifier_release(&input);
         }
@@ -429,13 +435,22 @@ fn spawn_gesture_actions(
                 input.run_steps(
                     steps,
                     &|app| gestos::wayland::open_app_for_steps(app, is_gnome),
-                    &|command| wayland_ctx.run_shell_cmd(command),
+                    &|command| wayland_ctx.run_shell_cmd(command, &context),
                 );
             } else {
-                wayland_ctx.execute_action(action, &|keys_str| input.keypress_string(keys_str));
+                wayland_ctx.execute_action(action, &context, &|keys_str| input.keypress_string(keys_str));
             }
         }
     });
+}
+
+/// Whether an action runs a command, which is told the app in use.
+fn runs_a_command(action: &ActionType) -> bool {
+    match action {
+        ActionType::Execute(_) => true,
+        ActionType::Keyboard(steps) => steps.iter().any(|step| matches!(step, gestos::key_steps::KeyStep::Run(_))),
+        _ => false,
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -471,17 +486,7 @@ fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> (Option<
     if !limited {
         return (None, false);
     }
-    let asked = if wayland_ctx.is_gnome {
-        gestos::wayland::focused_app_in_gnome_extension().ok()
-    } else if wayland_ctx.is_kde {
-        gestos::active_app::kde_active_app()
-    } else if wayland_ctx.is_sway || wayland_ctx.is_hypr {
-        wayland_ctx.compositor_active_app()
-    } else if gestos::active_app::is_x11_session() {
-        gestos::active_app::x11_active_app()
-    } else {
-        None
-    };
+    let asked = ask_focused_app(wayland_ctx);
     if asked.is_none() {
         println!(
             "Gestures limited to some apps can't run, as the app in use isn't known. That \
@@ -491,6 +496,22 @@ fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> (Option<
     }
     let unknown = asked.is_none();
     (asked.flatten(), unknown)
+}
+
+/// The app in use, by its desktop file ID: None if the desktop can't say, Some(None) if no app
+/// is.
+fn ask_focused_app(wayland_ctx: &WaylandContext) -> Option<Option<String>> {
+    if wayland_ctx.is_gnome {
+        gestos::wayland::focused_app_in_gnome_extension().ok()
+    } else if wayland_ctx.is_kde {
+        gestos::active_app::kde_active_app()
+    } else if wayland_ctx.is_sway || wayland_ctx.is_hypr {
+        wayland_ctx.compositor_active_app()
+    } else if gestos::active_app::is_x11_session() {
+        gestos::active_app::x11_active_app()
+    } else {
+        None
+    }
 }
 
 /// Whether the drawing would match a gesture limited to some apps, if the app in use were known.
@@ -589,7 +610,7 @@ fn dispatch_gesture(
                 let _ = signals.try_send(DaemonSignal::GestureUnrecognized);
             }
         }
-        1 => run_gesture(&candidates[0], input, signals, wayland_ctx),
+        1 => run_gesture(&candidates[0], app, input, signals, wayland_ctx),
         _ => {
             let signals = signals.clone();
             let wayland_ctx = wayland_ctx.clone();
@@ -604,7 +625,7 @@ fn dispatch_gesture(
                         println!("Waiting {} ms for focus to return.", delay.as_millis());
                         std::thread::sleep(delay);
                     }
-                    run_gesture(&gesture, &input, &signals, &wayland_ctx);
+                    run_gesture(&gesture, app, &input, &signals, &wayland_ctx);
                 } else {
                     println!("No gesture was chosen.");
                 }
@@ -696,6 +717,7 @@ fn announce_gesture(gesture: &Gesture, signals: &std::sync::mpsc::SyncSender<Dae
 #[cfg(target_os = "linux")]
 fn run_gesture(
     gesture: &Gesture,
+    app: Option<String>,
     input: &InputClient,
     signals: &std::sync::mpsc::SyncSender<DaemonSignal>,
     wayland_ctx: &WaylandContext,
@@ -704,8 +726,10 @@ fn run_gesture(
 
     announce_gesture(gesture, signals);
 
+    let context = CommandContext { gesture: gesture.name.clone(), app };
     spawn_gesture_actions(
         gesture.actions.clone(),
+        context,
         wayland_ctx.clone(),
         input.clone(),
         !gesture.modifiers.is_empty(),
@@ -720,7 +744,13 @@ fn show_overview_on_click(input: &InputClient, wayland_ctx: &WaylandContext) {
         return;
     }
     println!("Clicked left while holding right: Show Overview");
-    spawn_gesture_actions(vec![ActionType::ShowOverview], wayland_ctx.clone(), input.clone(), false);
+    spawn_gesture_actions(
+        vec![ActionType::ShowOverview],
+        CommandContext::default(),
+        wayland_ctx.clone(),
+        input.clone(),
+        false,
+    );
 }
 
 /// Why a connection to the input service ended.

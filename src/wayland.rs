@@ -1,4 +1,5 @@
 use crate::chooser::ChooserEntry;
+use crate::command_variables::{CommandContext, Copied};
 use crate::config::ActionType;
 use gio::prelude::*;
 use std::collections::HashMap;
@@ -206,6 +207,19 @@ fn ask_selected_text(conn: &zbus::blocking::Connection, shell: &str) -> zbus::Re
         &(),
     )?;
     reply.body().deserialize()
+}
+
+/// What's copied and selected, as the extension says.
+fn ask_copied(conn: &zbus::blocking::Connection, shell: &str) -> zbus::Result<Copied> {
+    let reply = conn.call_method(
+        Some(shell),
+        GESTOS_EXTENSION_PATH,
+        Some(GESTOS_EXTENSION_INTERFACE),
+        "Copied",
+        &(),
+    )?;
+    let (clipboard, selection, uri_list): (String, String, String) = reply.body().deserialize()?;
+    Ok(Copied { clipboard, selection, uri_list })
 }
 
 /// Says that the action being run failed, and why, in a few words.
@@ -545,7 +559,12 @@ impl WaylandContext {
         ctx
     }
 
-    pub fn execute_action(&self, action: &ActionType, uinput_handler: &dyn Fn(&str)) {
+    pub fn execute_action(
+        &self,
+        action: &ActionType,
+        context: &CommandContext,
+        uinput_handler: &dyn Fn(&str),
+    ) {
         match action {
             ActionType::Lookup => {
                 let self_clone = self.clone();
@@ -555,8 +574,9 @@ impl WaylandContext {
                 // Spawn the command asynchronously in shell
                 let self_clone = self.clone();
                 let cmd_clone = cmd.clone();
+                let context = context.clone();
                 std::thread::spawn(move || {
-                    self_clone.run_shell_cmd(&cmd_clone);
+                    self_clone.run_shell_cmd(&cmd_clone, &context);
                 });
             }
             ActionType::Keypress(keys) => {
@@ -1043,8 +1063,20 @@ impl WaylandContext {
     /// Runs a command as the user would type it in a shell, and says whether it worked. The one
     /// place a shell belongs: Run Command and an advanced action's commands take whatever the user
     /// would type in one.
-    pub fn run_shell_cmd(&self, cmd: &str) -> bool {
-        let status = Command::new("sh").arg("-c").arg(cmd).status();
+    pub fn run_shell_cmd(&self, cmd: &str, context: &CommandContext) -> bool {
+        let copied = self.copied();
+        let files = crate::command_variables::file_paths(&crate::command_variables::uris(&copied.uri_list));
+        let mut command = Command::new("sh");
+        // The copied files are its arguments, after the name the shell gives itself.
+        command.arg("-c").arg(cmd).arg("gestos").args(&files);
+        for (name, value) in crate::command_variables::variables(context, &copied) {
+            if crate::command_variables::too_big(name, &value) {
+                log::warn!("{name} is too big to give to a command");
+                continue;
+            }
+            command.env(name, value);
+        }
+        let status = command.status();
         // The shell says 127 when it can't find the program.
         let failure = match status {
             Ok(status) if status.code() == Some(127) => {
@@ -1056,6 +1088,50 @@ impl WaylandContext {
             action_failed(failure.clone());
         }
         failure.is_none()
+    }
+
+    /// What's copied and selected, for a command, which can't read it itself on GNOME. Without a
+    /// way to read it, it's empty.
+    fn copied(&self) -> Copied {
+        if self.is_gnome {
+            let conn = zbus::blocking::Connection::session();
+            return match conn.as_ref().map(|conn| ask_copied(conn, GNOME_SHELL_NAME)) {
+                Ok(Ok(copied)) => copied,
+                // An extension from before it said this, until the user logs in again.
+                Ok(Err(_)) => Copied {
+                    selection: conn
+                        .and_then(|conn| ask_selected_text(&conn, GNOME_SHELL_NAME))
+                        .unwrap_or_default(),
+                    ..Default::default()
+                },
+                Err(e) => {
+                    log::warn!("Couldn't ask the extension what's copied: {e}");
+                    Copied::default()
+                }
+            };
+        }
+        // Text only, as a command can't be given an image as a variable.
+        let (clipboard, selection, uri_list): (&[&str], &[&str], &[&str]) =
+            if crate::active_app::is_x11_session() {
+                (
+                    &["xclip", "-o", "-selection", "clipboard", "-t", "UTF8_STRING"],
+                    &["xclip", "-o", "-selection", "primary", "-t", "UTF8_STRING"],
+                    &["xclip", "-o", "-selection", "clipboard", "-t", "text/uri-list"],
+                )
+            } else {
+                (
+                    &["wl-paste", "--no-newline", "--type", "text"],
+                    &["wl-paste", "--no-newline", "--primary", "--type", "text"],
+                    &["wl-paste", "--no-newline", "--type", "text/uri-list"],
+                )
+            };
+        let read = |command: &[&str]| -> String {
+            match self.build_user_command(command[0], &command[1..]).stderr(Stdio::null()).output() {
+                Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).into_owned(),
+                _ => String::new(),
+            }
+        };
+        Copied { clipboard: read(clipboard), selection: read(selection), uri_list: read(uri_list) }
     }
 
     // Runs a program in the user session's DBUS environment
