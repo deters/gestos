@@ -169,19 +169,18 @@ fn middle_button_windows_row(state_rc: &Rc<RefCell<AppState>>) -> (adw::ActionRo
     )
 }
 
-/// GNOME's own setting for pasting the selected text with a middle click, as GNOME Tweaks has it.
-/// The Middle Click Paste action pastes it either way.
+/// GNOME's own setting for pasting the selected text with a middle click, as GNOME Tweaks has it,
+/// turned around, as it's there to turn it off. The Middle Click Paste action pastes it either way.
 fn middle_click_paste_row() -> Option<adw::ActionRow> {
     const SCHEMA: &str = "org.gnome.desktop.interface";
     const KEY: &str = "gtk-enable-primary-paste";
     gio::SettingsSchemaSource::default()?.lookup(SCHEMA, true).filter(|schema| schema.has_key(KEY))?;
     let settings = gio::Settings::new(SCHEMA);
-    let title = "Middle Click Paste";
-    let description = "Paste the selected text with a middle click. \
-        Gestures can paste it either way with the Middle Click Paste action";
+    let title = "Disable Middle Click Paste";
+    let description = "Paste with the Middle Click Paste action instead";
     let (row, row_box, _) = settings_row(title, description);
     let switch = settings_switch(title);
-    settings.bind(KEY, &switch, "active").build();
+    settings.bind(KEY, &switch, "active").invert_boolean().build();
     // The binding needs the settings for as long as the switch is there.
     switch.connect_destroy(move |_| {
         let _ = &settings;
