@@ -155,7 +155,7 @@ impl InputClient {
         &self,
         steps: &[KeyStep],
         open_app: &dyn Fn(&str) -> bool,
-        run: &dyn Fn(&str, bool) -> bool,
+        run: &dyn Fn(&crate::command_variables::ShellCommand, bool) -> bool,
         clear_copied: &dyn Fn() -> bool,
     ) {
         let copies = crate::key_steps::copies_for_commands(steps);
@@ -204,6 +204,7 @@ fn us_char_key(c: char) -> Option<(u16, bool, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command_variables::ShellCommand;
     use crate::input_protocol::LineBuffer;
     use std::io::Read;
 
@@ -303,10 +304,10 @@ mod tests {
         let (client, mut service) = client();
         let ran = std::cell::RefCell::new(Vec::new());
         client.run_steps(
-            &[KeyStep::Run("false".to_string()), KeyStep::Press("F1".to_string())],
+            &[KeyStep::Run("false".into()), KeyStep::Press("F1".to_string())],
             &|_| true,
             &|command, _| {
-                ran.borrow_mut().push(command.to_string());
+                ran.borrow_mut().push(command.text.clone());
                 false
             },
             &|| true,
@@ -324,8 +325,8 @@ mod tests {
         client.run_steps(
             &[
                 KeyStep::Press("Control+C".to_string()),
-                KeyStep::Run(r#"upload.sh "$@""#.to_string()),
-                KeyStep::Run(r#"echo "$GESTOS_CLIPBOARD""#.to_string()),
+                KeyStep::Run(ShellCommand::new(r#"upload.sh "$@""#, true)),
+                KeyStep::Run(ShellCommand::new(r#"echo "$GESTOS_CLIPBOARD""#, true)),
             ],
             &|_| true,
             &|_, after_copy| {
@@ -348,7 +349,7 @@ mod tests {
         let (client, mut service) = client();
         let ran = std::cell::Cell::new(false);
         client.run_steps(
-            &[KeyStep::Press("Control+C".to_string()), KeyStep::Run(r#"upload.sh "$@""#.to_string())],
+            &[KeyStep::Press("Control+C".to_string()), KeyStep::Run(ShellCommand::new(r#"upload.sh "$@""#, true))],
             &|_| true,
             &|_, _| {
                 ran.set(true);

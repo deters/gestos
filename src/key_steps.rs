@@ -3,6 +3,8 @@
 //! `open org.mozilla.firefox; press Control+L; type "gestos"; press Return`, as gestures keep
 //! their actions as text.
 
+use crate::command_variables::ShellCommand;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum KeyStep {
     /// Keys pressed together, like `Control+L`.
@@ -15,7 +17,7 @@ pub enum KeyStep {
     /// then go to.
     Open(String),
     /// A command run in a shell, as Run Command runs one, finished before the steps after it.
-    Run(String),
+    Run(crate::command_variables::ShellCommand),
 }
 
 /// The most a single pause can be, so that a typo can't leave a gesture running for hours.
@@ -58,7 +60,8 @@ fn parse_step(step: &str) -> Option<KeyStep> {
         "press" if !rest.is_empty() => Some(KeyStep::Press(rest.to_string())),
         "open" if !rest.is_empty() => Some(KeyStep::Open(rest.to_string())),
         "type" => unquote(rest).map(KeyStep::Type),
-        "run" => unquote(rest).map(KeyStep::Run),
+        "run" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, false))),
+        "run-with-variables" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, true))),
         "wait" => {
             let millis = rest.parse::<u32>().ok()?;
             Some(KeyStep::Wait(millis.min(MAX_WAIT_MILLIS)))
@@ -108,6 +111,7 @@ pub fn format_steps(steps: &[KeyStep]) -> String {
             KeyStep::Type(text) => format!("type {}", quote(text)),
             KeyStep::Wait(millis) => format!("wait {millis}"),
             KeyStep::Open(app) => format!("open {app}"),
+            KeyStep::Run(command) if command.variables => format!("run-with-variables {}", quote(command)),
             KeyStep::Run(command) => format!("run {}", quote(command)),
         })
         .collect::<Vec<_>>()
@@ -146,14 +150,14 @@ pub fn is_copy_shortcut(keys: &str) -> bool {
     )
 }
 
-/// The steps that copy what a command after them uses: the last shortcut before such a command,
-/// if it copies. What was copied before is cleared first, so that the command can tell when the
+/// The steps that copy for a command after them that's given what's copied: the last shortcut
+/// before such a command, if it copies. What was copied before is cleared first, so that the command can tell when the
 /// copy is there, and never gets what was copied earlier when nothing is selected.
 pub fn copies_for_commands(steps: &[KeyStep]) -> Vec<usize> {
     let mut copies = Vec::new();
     for (i, step) in steps.iter().enumerate() {
         let KeyStep::Run(command) = step else { continue };
-        if !crate::command_variables::uses_copied(command) {
+        if !command.variables {
             continue;
         }
         let last_press = steps[..i].iter().rposition(|step| matches!(step, KeyStep::Press(_)));
@@ -295,18 +299,18 @@ mod tests {
     }
 
     #[test]
-    fn a_copy_is_waited_for_only_by_a_command_that_uses_it() {
+    fn a_copy_is_waited_for_only_by_a_command_given_the_variables() {
         let press = |keys: &str| KeyStep::Press(keys.to_string());
-        let run = |command: &str| KeyStep::Run(command.to_string());
+        let run = |command: &str, variables| KeyStep::Run(ShellCommand::new(command, variables));
         let steps = [
             press("Control+C"),
             KeyStep::Wait(100),
-            run(r#"upload.sh "$@""#),
+            run(r#"upload.sh "$@""#, true),
             press("Control+C"),
-            run("notify-send done"),
+            run(r#"upload.sh "$@""#, false),
             press("Control+C"),
             press("Return"),
-            run(r#"echo "$GESTOS_CLIPBOARD""#),
+            run(r#"echo "$GESTOS_CLIPBOARD""#, true),
         ];
         assert_eq!(copies_for_commands(&steps), [0]);
     }
@@ -314,13 +318,17 @@ mod tests {
     #[test]
     fn a_command_to_run_survives_saving() {
         let steps = vec![
-            KeyStep::Run(r#"~/bin/backup.sh "$HOME/a b"; echo done"#.to_string()),
+            KeyStep::Run(r#"~/bin/backup.sh "$HOME/a b"; echo done"#.into()),
             KeyStep::Press("Control+V".to_string()),
+            KeyStep::Run(ShellCommand::new(r#"upload.sh "$@""#, true)),
         ];
         let text = format_steps(&steps);
-        assert_eq!(text, r#"run "~/bin/backup.sh \"$HOME/a b\"; echo done"; press Control+V"#);
+        assert_eq!(
+            text,
+            r#"run "~/bin/backup.sh \"$HOME/a b\"; echo done"; press Control+V; run-with-variables "upload.sh \"$@\"""#
+        );
         assert_eq!(parse_steps(&text), steps);
-        let named = [KeyStep::Run("~/bin/backup.sh --now".to_string())];
+        let named = [KeyStep::Run("~/bin/backup.sh --now".into())];
         assert_eq!(describe_steps(&named), "run backup.sh --now");
     }
 

@@ -5,6 +5,7 @@
 //! entry, which is what the gesture saves.
 
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
+use gestos::command_variables::ShellCommand;
 use gestos::key_steps::{format_steps, parse_steps, KeyStep, MAX_WAIT_MILLIS};
 use gtk::prelude::*;
 use gtk4 as gtk;
@@ -131,7 +132,7 @@ pub fn append_steps_rows(
     let running = Rc::clone(&editor);
     add_button("Command", "Run a Command").connect_clicked(move |_| {
         running.focus_new_text.set(true);
-        running.add(KeyStep::Run(String::new()));
+        running.add(KeyStep::Run(Default::default()));
     });
     let waiting = Rc::clone(&editor);
     add_button("Pause", "Add a Pause").connect_clicked(move |_| {
@@ -258,13 +259,23 @@ impl StepsEditor {
                 entry.set_text(command);
                 entry.set_hexpand(true);
                 entry.add_css_class("monospace");
+                let (controls, check) =
+                    crate::ui::variables_menu::variables_controls(&entry, command.variables);
                 let editor = Rc::clone(self);
+                let variables = check.clone();
                 entry.connect_changed(move |entry| {
-                    editor.steps.borrow_mut()[i] = KeyStep::Run(entry.text().to_string());
+                    editor.steps.borrow_mut()[i] =
+                        KeyStep::Run(ShellCommand::new(entry.text(), variables.is_active()));
+                    editor.changed();
+                });
+                let editor = Rc::clone(self);
+                let text = entry.clone();
+                check.connect_toggled(move |check| {
+                    editor.steps.borrow_mut()[i] = KeyStep::Run(ShellCommand::new(text.text(), check.is_active()));
                     editor.changed();
                 });
                 content.append(&entry);
-                content.append(&crate::ui::variables_menu::variables_button(&entry));
+                content.append(&controls);
                 if i + 1 == count && self.focus_new_text.take() {
                     gtk::glib::idle_add_local_once(move || {
                         entry.grab_focus();

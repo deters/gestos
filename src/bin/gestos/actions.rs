@@ -398,7 +398,7 @@ pub fn get_static_action_options() -> Vec<EditorActionOption> {
         // Other/Internal (7)
         EditorActionOption {
             category: 7,
-            action_type: ActionType::Execute(String::new()),
+            action_type: ActionType::Execute(Default::default()),
             name: "Run Command in Shell".to_string(),
             tooltip: "Run any command a shell accepts".to_string(),
         },
@@ -615,7 +615,7 @@ pub fn fetch_gnome_action_options() -> Vec<EditorActionOption> {
                 if !c_name.is_empty() {
                     options.push(EditorActionOption {
                         category: 6, // CAT_GNOME
-                        action_type: ActionType::Execute(c_cmd.clone()),
+                        action_type: ActionType::Execute(c_cmd.as_str().into()),
                         name: c_name,
                         tooltip: format!("Custom GNOME shortcut: {}", c_cmd),
                     });
@@ -649,14 +649,14 @@ mod tests {
         assert!(action_needs_parameter(&option(0, ActionType::Keyboard(Vec::new()))));
         assert!(action_needs_parameter(&option(0, ActionType::Click(None))));
         assert!(action_needs_parameter(&option(0, ActionType::Keypress(String::new()))));
-        assert!(action_needs_parameter(&option(7, ActionType::Execute(String::new()))));
+        assert!(action_needs_parameter(&option(7, ActionType::Execute(Default::default()))));
 
         assert!(!action_needs_parameter(&option(6, ActionType::Gnome("close".to_string()))));
         assert!(!action_needs_parameter(&option(
             8,
             ActionType::Kde("kwin".to_string(), "Overview".to_string())
         )));
-        assert!(!action_needs_parameter(&option(6, ActionType::Execute("firefox".to_string()))));
+        assert!(!action_needs_parameter(&option(6, ActionType::Execute("firefox".into()))));
         assert!(!action_needs_parameter(&option(1, ActionType::Kill)));
         assert!(!action_needs_parameter(&option(0, ActionType::Keypress("Control+C".to_string()))));
         assert!(!action_needs_parameter(&option(7, ActionType::Abort)));

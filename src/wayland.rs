@@ -1,5 +1,5 @@
 use crate::chooser::ChooserEntry;
-use crate::command_variables::{CommandContext, Copied};
+use crate::command_variables::{CommandContext, Copied, ShellCommand};
 use crate::config::ActionType;
 use gio::prelude::*;
 use std::collections::HashMap;
@@ -1082,37 +1082,34 @@ impl WaylandContext {
 
     /// Runs a command as the user would type it in a shell, and says whether it worked. The one
     /// place a shell belongs: Run Command and an advanced action's commands take whatever the user
-    /// would type in one. One that uses what's copied doesn't run without it, as it would run
-    /// with nothing in its place. `after_copy` says it comes right after a copy made for it, which
-    /// it waits for.
-    pub fn run_shell_cmd(&self, cmd: &str, context: &CommandContext, after_copy: bool) -> bool {
-        use crate::command_variables::{file_paths, too_big, uris, uses_copied, variables};
+    /// would type in one. One given the variables doesn't run without what's copied, as it would
+    /// run with nothing in its place. `after_copy` says it comes right after a copy made for it,
+    /// which it waits for.
+    pub fn run_shell_cmd(&self, shell_command: &ShellCommand, context: &CommandContext, after_copy: bool) -> bool {
+        use crate::command_variables::{file_paths, too_big, uris, variables};
+        let cmd = shell_command.text.as_str();
         let mut command = Command::new("sh");
-        // Any copied files are its arguments, after the name the shell gives itself.
-        command.arg("-c").arg(cmd).arg("gestos");
-        let copied = if uses_copied(cmd) {
-            match self.copied_for_command(after_copy) {
-                Ok(copied) => Some(copied),
+        command.arg("-c").arg(cmd);
+        if shell_command.variables {
+            let copied = match self.copied_for_command(after_copy) {
+                Ok(copied) => copied,
                 Err(why) => {
                     action_failed(why);
                     return false;
                 }
+            };
+            // The copied files are its arguments, after the name the shell gives itself.
+            command.arg("gestos").args(file_paths(&uris(&copied.uri_list)));
+            for (name, value) in variables(context, &copied) {
+                if too_big(name, &value) {
+                    action_failed(format!(
+                        "What's copied is too big to give to {}",
+                        crate::config::short_command(cmd)
+                    ));
+                    return false;
+                }
+                command.env(name, value);
             }
-        } else {
-            None
-        };
-        if let Some(copied) = &copied {
-            command.args(file_paths(&uris(&copied.uri_list)));
-        }
-        for (name, value) in variables(context, copied.as_ref()) {
-            if too_big(name, &value) {
-                action_failed(format!(
-                    "What's copied is too big to give to {}",
-                    crate::config::short_command(cmd)
-                ));
-                return false;
-            }
-            command.env(name, value);
         }
         let status = command.status();
         // The shell says 127 when it can't find the program.

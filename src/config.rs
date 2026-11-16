@@ -1,3 +1,4 @@
+use crate::command_variables::ShellCommand;
 use crate::key_steps::{describe_steps, format_steps, parse_steps, KeyStep};
 use crate::modifiers::Modifiers;
 use crate::protractor::Point2D;
@@ -17,7 +18,7 @@ pub enum ActionType {
     Keypress(String),
     /// Shortcuts, text and pauses, in order. With no steps, it's the generic action to fill in.
     Keyboard(Vec<KeyStep>),
-    Execute(String),
+    Execute(crate::command_variables::ShellCommand),
     WorkspaceLeft,
     WorkspaceRight,
     WorkspaceUp,
@@ -78,7 +79,8 @@ impl ActionType {
                 Some(ActionType::Keypress(normalized))
             }
             "keyboard" => Some(ActionType::Keyboard(parse_steps(&arg))),
-            "exec" => Some(ActionType::Execute(arg)),
+            "exec" => Some(ActionType::Execute(ShellCommand::new(arg, false))),
+            "exec-with-variables" => Some(ActionType::Execute(ShellCommand::new(arg, true))),
             "workspace-left" => Some(ActionType::WorkspaceLeft),
             "workspace-right" => Some(ActionType::WorkspaceRight),
             "workspace-up" => Some(ActionType::WorkspaceUp),
@@ -336,7 +338,8 @@ impl std::fmt::Display for ActionType {
             ActionType::ToggleMaximized => write!(f, "toggle-maximized"),
             ActionType::Keypress(arg) => write!(f, "keypress {}", arg),
             ActionType::Keyboard(steps) => write!(f, "keyboard {}", format_steps(steps)),
-            ActionType::Execute(arg) => write!(f, "exec {}", arg),
+            ActionType::Execute(command) if command.variables => write!(f, "exec-with-variables {}", command),
+            ActionType::Execute(command) => write!(f, "exec {}", command),
             ActionType::WorkspaceLeft => write!(f, "workspace-left"),
             ActionType::WorkspaceRight => write!(f, "workspace-right"),
             ActionType::WorkspaceUp => write!(f, "workspace-up"),
@@ -901,11 +904,11 @@ impl Configuration {
         for gesture in self.gestures.iter().filter(|g| !g.is_deleted) {
             for action in &gesture.actions {
                 let run: Vec<&String> = match action {
-                    ActionType::Execute(command) => vec![command],
+                    ActionType::Execute(command) => vec![&command.text],
                     ActionType::Keyboard(steps) => steps
                         .iter()
                         .filter_map(|step| match step {
-                            crate::key_steps::KeyStep::Run(command) => Some(command),
+                            crate::key_steps::KeyStep::Run(command) => Some(&command.text),
                             _ => None,
                         })
                         .collect(),
@@ -1240,7 +1243,7 @@ mod tests {
         let kde = ActionType::Kde("kwin".to_string(), "Window Close".to_string());
         assert_eq!(kde.only_on_desktop(), Some("kde"));
         assert_eq!(ActionType::Kill.only_on_desktop(), None);
-        assert_eq!(ActionType::Execute("true".to_string()).only_on_desktop(), None);
+        assert_eq!(ActionType::Execute("true".into()).only_on_desktop(), None);
     }
 
     #[test]
@@ -1453,6 +1456,15 @@ mod tests {
     }
 
     #[test]
+    fn a_command_is_only_given_the_variables_when_asked() {
+        let plain = ActionType::from_string("exec notify-send hi").unwrap();
+        assert_eq!(plain, ActionType::Execute(ShellCommand::new("notify-send hi", false)));
+        let given = ActionType::Execute(ShellCommand::new(r#"upload.sh "$@""#, true));
+        assert_eq!(given.to_string(), r#"exec-with-variables upload.sh "$@""#);
+        assert_eq!(ActionType::from_string(&given.to_string()), Some(given));
+    }
+
+    #[test]
     fn the_commands_gestures_run_are_listed_once() {
         use crate::key_steps::KeyStep;
         let mut deleted = gesture("Old", vec![ActionType::Execute("rm -rf ~/old".into())]);
@@ -1578,7 +1590,7 @@ mod tests {
     fn saving_preserves_yaml_special_characters() {
         let name = "Say \"hi\": it's #1";
         let command = r#"echo "a: b" # not a comment \ 'quoted' [x] {y}"#;
-        let actions = vec![ActionType::Execute(command.to_string())];
+        let actions = vec![ActionType::Execute(command.into())];
         let reloaded = save_and_reload("special", vec![gesture(name, actions.clone())]);
         assert_eq!(reloaded.gestures[0].name, name);
         assert_eq!(reloaded.gestures[0].actions, actions);

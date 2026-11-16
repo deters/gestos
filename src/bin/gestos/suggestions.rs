@@ -499,7 +499,7 @@ mod tests {
         let options = vec![
             option("Open Files", ActionType::Execute("nautilus".into())),
             option("Advanced Action", ActionType::Keyboard(Vec::new())),
-            option("Run Command in Shell", ActionType::Execute(String::new())),
+            option("Run Command in Shell", ActionType::Execute(Default::default())),
         ];
         let (apart, _) = arrange_suggestions(options, false, Some(Category::Advanced), &BTreeMap::new());
         assert_eq!(names(&apart), ["Advanced Action", "Run Command in Shell"]);
@@ -567,7 +567,7 @@ mod tests {
     fn actions_to_build_are_advanced() {
         let category = |action: ActionType| category_of(&option("", action));
         assert_eq!(category(ActionType::Keyboard(Vec::new())), Category::Advanced);
-        assert_eq!(category(ActionType::Execute(String::new())), Category::Advanced);
+        assert_eq!(category(ActionType::Execute(Default::default())), Category::Advanced);
         assert_eq!(category(ActionType::Click(None)), Category::Other);
         assert_eq!(category(ActionType::Keypress(String::new())), Category::KeyboardShortcuts);
         assert_eq!(category(ActionType::Execute("backup.sh".into())), Category::CustomShortcuts);
@@ -675,11 +675,11 @@ mod tests {
     #[test]
     fn parameter_actions_stay_available_however_often_they_are_used() {
         let options = vec![
-            option("Run Command in Shell", ActionType::Execute(String::new())),
+            option("Run Command in Shell", ActionType::Execute(Default::default())),
             option("Keyboard Action", ActionType::Keyboard(Vec::new())),
         ];
         let gestures = [
-            gesture(ActionType::Execute("firefox".to_string())),
+            gesture(ActionType::Execute("firefox".into())),
             gesture(ActionType::Keypress("Alt+Left".to_string())),
         ];
         assert_eq!(
@@ -694,9 +694,9 @@ mod tests {
 
     #[test]
     fn a_custom_shortcut_is_in_use_only_with_its_own_command() {
-        let options = vec![option("Browser", ActionType::Execute("firefox".to_string()))];
-        let same = [gesture(ActionType::Execute("firefox".to_string()))];
-        let other = [gesture(ActionType::Execute("gedit".to_string()))];
+        let options = vec![option("Browser", ActionType::Execute("firefox".into()))];
+        let same = [gesture(ActionType::Execute("firefox".into()))];
+        let other = [gesture(ActionType::Execute("gedit".into()))];
         assert!(find_suggestions(&options, &same, "browser").is_empty());
         assert_eq!(find_suggestions(&options, &other, "browser").len(), 1);
     }
@@ -763,7 +763,7 @@ mod tests {
             option("Copy", ActionType::Keypress("Control+C".to_string())),
             option("Advanced Action", ActionType::Keyboard(Vec::new())),
             option("Custom Keyboard Shortcut", ActionType::Keypress(String::new())),
-            option("Run Command in Shell", ActionType::Execute(String::new())),
+            option("Run Command in Shell", ActionType::Execute(Default::default())),
             option("Close Window", ActionType::Kill),
         ];
         assert_eq!(

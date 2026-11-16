@@ -1,12 +1,25 @@
-//! A menu of what a command can use, such as what's copied, which puts the one picked into the
-//! command where the cursor is.
+//! Giving a command the variables, such as what's copied, and a menu of them, which puts the one
+//! picked into the command where the cursor is.
 
 use gestos::command_variables::OFFERED;
 use gtk::prelude::*;
 use gtk4 as gtk;
 
+/// What goes by a command's entry: a check box that gives it the variables, which it doesn't get
+/// otherwise, and a menu of them, which checks it when one is picked.
+pub fn variables_controls(entry: &gtk::Entry, variables: bool) -> (gtk::Box, gtk::CheckButton) {
+    let check = gtk::CheckButton::with_label("Use Variables");
+    check.set_active(variables);
+    check.set_valign(gtk::Align::Center);
+    let menu = variables_button(entry, &check);
+    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    controls.append(&check);
+    controls.append(&menu);
+    (controls, check)
+}
+
 /// A button by a command's entry, whose menu lists the variables a command is given.
-pub fn variables_button(entry: &gtk::Entry) -> gtk::MenuButton {
+fn variables_button(entry: &gtk::Entry, check: &gtk::CheckButton) -> gtk::MenuButton {
     let items = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let popover = gtk::Popover::new();
     popover.set_child(Some(&items));
@@ -38,7 +51,9 @@ pub fn variables_button(entry: &gtk::Entry) -> gtk::MenuButton {
         item.add_css_class("flat");
         let entry = entry.clone();
         let popover = popover.clone();
+        let check = check.clone();
         item.connect_clicked(move |_| {
+            check.set_active(true);
             insert_at_cursor(&entry, written);
             popover.popdown();
             entry.grab_focus_without_selecting();

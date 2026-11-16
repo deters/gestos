@@ -294,7 +294,7 @@ fn show_action_parameter(
     entry: &gtk::Entry,
     shortcut_display: &gtk::Box,
     record_button: &gtk::Button,
-    variables_button: &gtk::MenuButton,
+    variables_controls: &gtk::Box,
     show_steps: &dyn Fn(bool),
 ) {
     // A custom action has its list of steps instead of the one value other actions take. An app's
@@ -311,7 +311,7 @@ fn show_action_parameter(
     entry.set_visible(!is_keypress);
     shortcut_display.set_visible(is_keypress);
     record_button.set_visible(is_keypress);
-    variables_button.set_visible(matches!(&opt.action_type, ActionType::Execute(_)));
+    variables_controls.set_visible(matches!(&opt.action_type, ActionType::Execute(_)));
 
     match &opt.action_type {
         ActionType::Keypress(_) => label.set_text("Keys to Send"),
@@ -996,7 +996,8 @@ fn open_editor(
     record_btn.set_tooltip_text(Some("Record keys"));
     entry_container.append(&record_btn);
 
-    let variables_btn = crate::ui::variables_menu::variables_button(&action_details_entry);
+    let (variables_btn, variables_check) =
+        crate::ui::variables_menu::variables_controls(&action_details_entry, false);
     variables_btn.set_visible(false);
     entry_container.append(&variables_btn);
 
@@ -1108,6 +1109,8 @@ fn open_editor(
     let name_follows_details = Rc::clone(&is_name_customized);
     let name_entry_details = name_entry.clone();
     let action_details = Rc::clone(&selected_action);
+    let check_variables = check.clone();
+    variables_check.connect_toggled(move |_| check_variables());
     let check_details = check.clone();
     action_details_entry.connect_changed(move |_| {
         check_details();
@@ -1148,6 +1151,7 @@ fn open_editor(
                     if option.as_ref().is_some_and(action_needs_parameter) =>
                 {
                     action_details_entry.set_text(command);
+                    variables_check.set_active(command.variables);
                 }
                 Some(ActionType::Click(button)) => {
                     let button = button.map(|b| b.to_string()).unwrap_or_default();
@@ -1417,7 +1421,9 @@ fn open_editor(
                 [KeyStep::Press(keys)] => ActionType::Keypress(keys.clone()),
                 steps => ActionType::Keyboard(steps.to_vec()),
             },
-            ActionType::Execute(_) if opt.category == 7 => ActionType::Execute(detail),
+            ActionType::Execute(_) if opt.category == 7 => {
+                ActionType::Execute(gestos::command_variables::ShellCommand::new(detail, variables_check.is_active()))
+            }
             // The keys recorded, or a standard shortcut's own, as a new gesture for one has none
             // recorded.
             ActionType::Keypress(keys) => {
@@ -1632,7 +1638,7 @@ mod tests {
         assert!(!action_needs_parameter(&found));
 
         let mut command = gesture("b", "Editor");
-        command.actions = vec![ActionType::Execute("gedit".to_string())];
+        command.actions = vec![ActionType::Execute("gedit".into())];
         assert!(action_needs_parameter(&option_for_gesture(&command, &[]).unwrap()));
     }
 
