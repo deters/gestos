@@ -509,34 +509,15 @@ impl WaylandContext {
             ctx.hypr_sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").unwrap();
         }
 
-        // Fallback checks using pgrep if env variables are missing
+        // Without the variables that name it, the desktop is found by what it runs.
         if !ctx.is_gnome && !ctx.is_kde && !ctx.is_xfce {
-            if Command::new("pgrep")
-                .arg("-x")
-                .arg("gnome-shell")
-                .stdout(Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-            {
+            let running = crate::processes::running();
+            let runs = |name: &str| running.iter().any(|process| process.name == name);
+            if runs("gnome-shell") {
                 ctx.is_gnome = true;
-            } else if Command::new("pgrep")
-                .arg("-x")
-                .arg("kwin_wayland")
-                .stdout(Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-            {
+            } else if runs("kwin_wayland") {
                 ctx.is_kde = true;
-            } else if Command::new("pgrep")
-                .arg("-x")
-                .arg("xfwm4")
-                .stdout(Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-            {
+            } else if runs("xfwm4") {
                 ctx.is_xfce = true;
             }
         }

@@ -19,6 +19,7 @@ pub mod keys;
 pub mod lookup;
 pub mod modifiers;
 pub mod panel;
+pub mod processes;
 pub mod protractor;
 #[cfg(target_os = "linux")]
 pub mod smooth;
