@@ -12,7 +12,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {GestureChooser} from './lib/chooser.js';
 import {ActionPanel} from './lib/panel.js';
 import {GestureTrail} from './lib/trail.js';
-import {grownRect} from './lib/resize.js';
+import {steppedRect} from './lib/resize.js';
 import {addSize, readSizes, removeSize, takeSize, writeSizes} from './lib/sizes.js';
 import {fitSize, freeArea, hasSize, isBelievableMinimum, keepInside, restoreRect, tileWindows} from './lib/tile.js';
 
@@ -225,17 +225,18 @@ class WindowActions {
         // Windows on shared monitors go with the workspace in use.
         this._activeWorkspaceId = global.workspace_manager.connect('active-workspace-changed',
             () => this._onActiveWorkspaceChanged());
-        // Dragging up or down with the wheel button held, which the daemon reports, resizes the
-        // window under the pointer.
-        this._wheelResize = null;
-        const wheelHandlers = {
-            WheelDragStarted: () => this._onWheelDragStarted(),
-            WheelDragMoved: () => this._onWheelDragMoved(),
-            WheelDragEnded: () => this._onWheelDragEnded(),
+        // Dragging with the middle button held moves the window under the pointer, and scrolling
+        // resizes it, as the daemon reports.
+        this._middle = null;
+        const middleHandlers = {
+            MiddleDragStarted: () => this._onMiddleDragStarted(),
+            MiddleDragMoved: () => this._onMiddleDragMoved(),
+            MiddleScrolled: params => this._onMiddleScrolled(params.deepUnpack()[0]),
+            MiddleDragEnded: () => this._onMiddleReleased(),
         };
-        this._wheelIds = Object.entries(wheelHandlers).map(([signal, handler]) =>
+        this._middleIds = Object.entries(middleHandlers).map(([signal, handler]) =>
             Gio.DBus.session.signal_subscribe(null, DAEMON_INTERFACE, signal, DAEMON_PATH, null,
-                Gio.DBusSignalFlags.NONE, handler));
+                Gio.DBusSignalFlags.NONE, (...args) => handler(args.at(-1))));
         // Monitors that come and go move windows, which isn't the user placing them.
         this._monitorsSettleId = 0;
         this._monitorsId = Main.layoutManager.connect('monitors-changed',
@@ -261,9 +262,9 @@ class WindowActions {
         this._settings.disconnect(this._gapId);
         this._settings.disconnect(this._autoId);
         Gio.DBus.session.signal_unsubscribe(this._endSessionId);
-        for (const id of this._wheelIds)
+        for (const id of this._middleIds)
             Gio.DBus.session.signal_unsubscribe(id);
-        this._onWheelDragEnded();
+        this._onMiddleReleased();
         global.window_manager.disconnect(this._mapId);
         global.window_manager.disconnect(this._minimizeId);
         global.window_manager.disconnect(this._unminimizeId);
@@ -1591,46 +1592,83 @@ class WindowActions {
         this._layout(tiling);
     }
 
-    // A maximized window is made smaller from the size it has maximized. A tiled one is resized as
-    // one resized by hand: the others make room for it.
-    _onWheelDragStarted() {
-        this._onWheelDragEnded();
-        if (Main.overview.visible)
+    // One press of the middle button controls one window, the one under the pointer as it's first
+    // dragged or scrolled: dragging moves it and scrolling resizes it, in any order, until it's
+    // released. A maximized one is restored as it moves, and made smaller from its maximized size.
+    // A tiled one is moved or resized as by hand: the others make room for it.
+    _middleWindow(op) {
+        const middle = this._middle;
+        if (middle) {
+            if (!middle.window || middle.window.get_compositor_private())
+                return middle;
+            // One that closed meanwhile has nothing more to move or resize.
+            this._onMiddleReleased();
+            this._middle = {window: null};
+            return this._middle;
+        }
+        const [x, y] = global.get_pointer();
+        const window = Main.overview.visible ? null : windowAt(x, y);
+        // A press that started with no window stays with none, wherever the pointer goes.
+        if (!window || window.is_fullscreen()) {
+            this._middle = {window: null};
+            return this._middle;
+        }
+        this._middle = {window, rect: null, hold: null};
+        this._onGrabBegin(window, op);
+        return this._middle;
+    }
+
+    _onMiddleDragStarted() {
+        const middle = this._middleWindow(Meta.GrabOp.MOVING);
+        if (!middle?.window?.allows_move())
+            return;
+        // It's held where the pointer took it, as a part of its size, so one that changes size as
+        // it's restored stays under the pointer.
+        const [x, y] = global.get_pointer();
+        const frame = middle.rect ?? middle.window.get_frame_rect();
+        middle.hold = {x: (x - frame.x) / frame.width, y: (y - frame.y) / frame.height};
+        if (isMaximizedAtAll(middle.window)) {
+            middle.window.unmaximize();
+            middle.rect = null;
+        }
+    }
+
+    _onMiddleDragMoved() {
+        const middle = this._middle;
+        if (!middle?.hold || !middle.window.get_compositor_private())
             return;
         const [x, y] = global.get_pointer();
-        const window = windowAt(x, y);
-        if (!window || !window.allows_resize() || window.is_fullscreen())
+        const size = middle.rect ?? middle.window.get_frame_rect();
+        const left = Math.round(x - middle.hold.x * size.width);
+        const top = Math.round(y - middle.hold.y * size.height);
+        if (middle.rect)
+            middle.rect = {...middle.rect, x: left, y: top};
+        middle.window.move_frame(true, left, top);
+    }
+
+    // Each notch up makes it bigger, and each one down smaller. The size asked for is kept, as the
+    // app may not have taken the last one yet when the next notch comes.
+    _onMiddleScrolled(notches) {
+        const middle = this._middleWindow(Meta.GrabOp.RESIZING_SE);
+        if (!middle?.window?.allows_resize())
             return;
-        const start = copyRect(window.get_frame_rect());
+        const window = middle.window;
+        const from = middle.rect ?? copyRect(window.get_frame_rect());
         if (isMaximizedAtAll(window))
             window.unmaximize();
-        this._wheelResize = {window, start, pointerY: y};
-        this._onGrabBegin(window, Meta.GrabOp.RESIZING_SE);
+        middle.rect = steppedRect(from, notches, window.get_work_area_current_monitor());
+        const {x, y, width, height} = middle.rect;
+        window.move_resize_frame(true, x, y, width, height);
     }
 
-    _onWheelDragMoved() {
-        const resize = this._wheelResize;
-        if (!resize)
+    _onMiddleReleased() {
+        const middle = this._middle;
+        this._middle = null;
+        if (!middle?.window)
             return;
-        // One that closed while it was resized has nothing more to resize.
-        if (!resize.window.get_compositor_private()) {
-            this._onWheelDragEnded();
-            return;
-        }
-        const [, y] = global.get_pointer();
-        const {x, y: top, width, height} = grownRect(resize.start, resize.pointerY - y,
-            resize.window.get_work_area_current_monitor());
-        resize.window.move_resize_frame(true, x, top, width, height);
-    }
-
-    _onWheelDragEnded() {
-        const resize = this._wheelResize;
-        if (!resize)
-            return;
-        this._wheelResize = null;
-        if (resize.window.get_compositor_private())
-            this._onGrabEnd(resize.window);
-        else if (this._grabbed === resize.window)
+        if (middle.window.get_compositor_private())
+            this._onGrabEnd(middle.window);
+        else if (this._grabbed === middle.window)
             this._grabbed = null;
     }
 

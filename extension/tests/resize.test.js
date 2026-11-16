@@ -2,15 +2,19 @@
 
 import {exit} from 'system';
 
-import {MIN_RESIZED_SIZE, grownRect} from '../lib/resize.js';
+import {MIN_RESIZED_SIZE, RESIZE_STEP, grownRect, steppedRect} from '../lib/resize.js';
 
 const area = {x: 0, y: 32, width: 1920, height: 1048};
 const start = {x: 600, y: 300, width: 800, height: 500};
 const results = [];
 
-results.push(['grows every side by as much as the pointer moved up',
+results.push(['grows every side by a step for each notch up',
+    steppedRect(start, 2, area), grownRect(start, 2 * RESIZE_STEP, area)]);
+results.push(['shrinks every side by a step for each notch down',
+    steppedRect(start, -1, area), {x: 640, y: 340, width: 720, height: 420}]);
+results.push(['grows every side by as much as asked',
     grownRect(start, 50, area), {x: 550, y: 250, width: 900, height: 600}]);
-results.push(['shrinks every side by as much as the pointer moved down',
+results.push(['shrinks every side by as much as asked',
     grownRect(start, -100, area), {x: 700, y: 400, width: 600, height: 300}]);
 results.push(['stops at the smallest size',
     grownRect(start, -1000, area),

@@ -524,9 +524,10 @@ pub struct YamlConfig {
     /// Whether clicking left while right is held shows the overview.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub overview_click: bool,
-    /// Whether dragging up or down with the wheel button held resizes the window under the pointer.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub wheel_resize: bool,
+    /// Whether the middle button moves the window under the pointer by dragging, and resizes it by
+    /// scrolling. It was called `wheel_resize` while it only resized by dragging.
+    #[serde(default, alias = "wheel_resize", skip_serializing_if = "std::ops::Not::not")]
+    pub middle_button_windows: bool,
     /// Whether a gesture's path is drawn on screen, where Gestos draws it itself. Only written
     /// when it's off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -588,8 +589,9 @@ pub struct Configuration {
     pub button: Option<i32>,
     /// Whether clicking left while right is held shows the overview, instead of drawing.
     pub overview_click: bool,
-    /// Whether dragging up or down with the wheel button held resizes the window under the pointer.
-    pub wheel_resize: bool,
+    /// Whether the middle button moves the window under the pointer by dragging, and resizes it by
+    /// scrolling.
+    pub middle_button_windows: bool,
     /// Whether a gesture's path is drawn on screen, on X11. GNOME's extension has its own setting.
     pub show_path: bool,
     /// Whether the main page lists every gesture, above the categories.
@@ -900,7 +902,7 @@ impl Configuration {
             user_config_path: user_path.clone(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };
@@ -921,7 +923,7 @@ impl Configuration {
             user_config_path: path.as_ref().to_path_buf(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };
@@ -939,7 +941,7 @@ impl Configuration {
 
         self.button = parsed.button;
         self.overview_click = parsed.overview_click;
-        self.wheel_resize = parsed.wheel_resize;
+        self.middle_button_windows = parsed.middle_button_windows;
         self.show_path = parsed.show_path.unwrap_or(true);
         self.all_gestures = parsed.all_gestures;
 
@@ -1076,7 +1078,7 @@ impl Configuration {
             global: (!global.is_empty()).then_some(global),
             button: self.button,
             overview_click: self.overview_click,
-            wheel_resize: self.wheel_resize,
+            middle_button_windows: self.middle_button_windows,
             show_path: (!self.show_path).then_some(false),
             all_gestures: self.all_gestures,
         };
@@ -1420,7 +1422,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };
@@ -1442,7 +1444,7 @@ mod tests {
             user_config_path: file.0.clone(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };
@@ -1539,7 +1541,7 @@ mod tests {
             user_config_path: file.0.clone(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };
@@ -1650,7 +1652,7 @@ mod tests {
             user_config_path: file.0.clone(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };
@@ -1667,7 +1669,7 @@ mod tests {
             user_config_path: file.0.clone(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };
@@ -1679,22 +1681,22 @@ mod tests {
     }
 
     #[test]
-    fn the_wheel_resize_is_kept_and_only_written_when_on() {
-        let file = TempConfig::new("wheel-resize", "");
+    fn controlling_windows_with_the_middle_button_is_kept_and_only_written_when_on() {
+        let file = TempConfig::new("middle-button-windows", "");
         let mut config = Configuration {
             gestures: Vec::new(),
             user_config_path: file.0.clone(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };
         config.save_to_file().unwrap();
-        assert!(!fs::read_to_string(&file.0).unwrap().contains("wheel_resize"));
-        config.wheel_resize = true;
+        assert!(!fs::read_to_string(&file.0).unwrap().contains("middle_button_windows"));
+        config.middle_button_windows = true;
         config.save_to_file().unwrap();
-        assert!(Configuration::load_from_file(&file.0).unwrap().wheel_resize);
+        assert!(Configuration::load_from_file(&file.0).unwrap().middle_button_windows);
     }
 
     #[test]
@@ -1708,7 +1710,7 @@ mod tests {
             user_config_path: link.clone(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };
@@ -1773,7 +1775,7 @@ mod tests {
             user_config_path: file.0.clone(),
             button: Some(2),
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };

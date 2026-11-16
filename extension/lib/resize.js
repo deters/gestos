@@ -2,17 +2,32 @@
 
 import {keepInside} from './tile.js';
 
-// The smallest a window gets by dragging with the wheel button, in pixels, as apps may not have a
-// minimum of their own.
+// The smallest a window gets by scrolling with the middle button held, in pixels, as apps may not
+// have a minimum of their own.
 export const MIN_RESIZED_SIZE = 120;
+// How far each side of a window moves for each notch scrolled, in pixels.
+export const RESIZE_STEP = 40;
 
 /**
- * Where a window goes as the pointer is dragged with the wheel button held: each of its sides moves
- * out by as much as the pointer moved up, or in by as much as it moved down, around its center. It
- * never gets bigger than the work area, or smaller than a minimum, and stays inside the work area.
+ * Where a window goes as it's scrolled with the middle button held: each of its sides moves out by a
+ * step for each notch up, or in for each notch down, around its center.
  *
- * @param {{x: number, y: number, width: number, height: number}} start - where it was at the start
- * @param {number} grow - how far up the pointer moved since, in pixels, negative for down
+ * @param {{x: number, y: number, width: number, height: number}} rect - where it is
+ * @param {number} notches - how many notches the wheel turned, up for positive
+ * @param {{x: number, y: number, width: number, height: number}} area - the work area it's in
+ * @returns {{x: number, y: number, width: number, height: number}} where it goes
+ */
+export function steppedRect(rect, notches, area) {
+    return grownRect(rect, notches * RESIZE_STEP, area);
+}
+
+/**
+ * Where a window goes as each of its sides moves out by as much, or in for a negative amount,
+ * around its center. It never gets bigger than the work area, or smaller than a minimum, and stays
+ * inside the work area.
+ *
+ * @param {{x: number, y: number, width: number, height: number}} start - where it is
+ * @param {number} grow - how far each side moves out, in pixels, negative for in
  * @param {{x: number, y: number, width: number, height: number}} area - the work area it's in
  * @returns {{x: number, y: number, width: number, height: number}} where it goes
  */

@@ -157,15 +157,15 @@ fn overview_click_row(state_rc: &Rc<RefCell<AppState>>) -> Option<(adw::ActionRo
     ))
 }
 
-/// Dragging up or down with the wheel button held resizes the window under the pointer. The
-/// extension resizes it, and the wheel button is only held back from apps while the right button
-/// draws, as the mouse is only grabbed then.
-fn wheel_resize_row(state_rc: &Rc<RefCell<AppState>>) -> (adw::ActionRow, gtk::Switch) {
+/// Dragging with the middle button held moves the window under the pointer, and scrolling resizes
+/// it. The extension moves and resizes it, and the middle button is only held back from apps while
+/// the right button draws, as the mouse is only grabbed then.
+fn middle_button_windows_row(state_rc: &Rc<RefCell<AppState>>) -> (adw::ActionRow, gtk::Switch) {
     right_button_switch_row(
         state_rc,
-        "Resize Windows With the Wheel Button",
-        "Hold the wheel button and drag up or down",
-        |config| &mut config.wheel_resize,
+        "Control Windows With the Middle Button",
+        "Hold it and drag to move, or scroll to resize",
+        |config| &mut config.middle_button_windows,
     )
 }
 
@@ -323,15 +323,15 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     let gestures_list = append_section(&page, "Gestures");
     append_autostart_row(&gestures_list);
     let overview_row = overview_click_row(state_rc);
-    let wheel_resize = on_gnome.then(|| wheel_resize_row(state_rc));
-    let right_only = overview_row.iter().chain(&wheel_resize)
+    let middle_button_windows = on_gnome.then(|| middle_button_windows_row(state_rc));
+    let right_only = overview_row.iter().chain(&middle_button_windows)
         .map(|(_, switch)| switch.clone().upcast())
         .collect();
     append_button_row(state_rc, &gestures_list, &dialog, right_only);
     if let Some((row, _)) = &overview_row {
         gestures_list.add(row);
     }
-    if let Some((row, _)) = &wheel_resize {
+    if let Some((row, _)) = &middle_button_windows {
         gestures_list.add(row);
         needs_extension.push(row.clone());
     }

@@ -96,7 +96,8 @@ impl GestureRecognizer {
     }
 }
 
-/// What a held wheel button is doing: nothing yet, or resizing once it has moved far enough.
+/// What a held middle button is doing: nothing yet, or moving a window once it has moved far
+/// enough.
 /// Ordered so the most that happened in one input frame is the greatest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WheelDragStep {
@@ -105,12 +106,13 @@ pub enum WheelDragStep {
     Started,
 }
 
-/// Tells a wheel button that drags from one that clicks. It's only a click once it's released
-/// without having moved, so the press is held back until then.
+/// Tells a middle button that drags or scrolls from one that clicks. It's only a click once it's
+/// released without having done either, so the press is held back until then.
 pub struct WheelDrag {
     min_distance_squared: f64,
     held: bool,
     dragging: bool,
+    scrolled: bool,
     dx: f64,
     dy: f64,
 }
@@ -121,6 +123,7 @@ impl WheelDrag {
             min_distance_squared: min_distance * min_distance,
             held: false,
             dragging: false,
+            scrolled: false,
             dx: 0.0,
             dy: 0.0,
         }
@@ -133,6 +136,7 @@ impl WheelDrag {
     pub fn press(&mut self) {
         self.held = true;
         self.dragging = false;
+        self.scrolled = false;
         self.dx = 0.0;
         self.dy = 0.0;
     }
@@ -153,10 +157,16 @@ impl WheelDrag {
         WheelDragStep::Started
     }
 
-    /// Whether it dragged. One that didn't was a click.
+    /// Whether a scroll is while it's held, which makes it no click.
+    pub fn scroll(&mut self) -> bool {
+        self.scrolled |= self.held;
+        self.held
+    }
+
+    /// Whether it dragged or scrolled. One that did neither was a click.
     pub fn release(&mut self) -> bool {
         self.held = false;
-        std::mem::take(&mut self.dragging)
+        std::mem::take(&mut self.dragging) | std::mem::take(&mut self.scrolled)
     }
 }
 
@@ -181,6 +191,17 @@ mod tests {
         assert_eq!(drag.move_by(0.0, 1.0), WheelDragStep::Moved);
         assert!(drag.release());
         assert_eq!(drag.move_by(0.0, 50.0), WheelDragStep::Nothing);
+    }
+
+    #[test]
+    fn a_wheel_press_that_scrolled_is_no_click() {
+        let mut drag = WheelDrag::new(15.0);
+        assert!(!drag.scroll());
+        drag.press();
+        assert!(drag.scroll());
+        assert!(drag.release());
+        drag.press();
+        assert!(!drag.release());
     }
 
     #[test]

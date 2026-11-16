@@ -345,8 +345,8 @@ mod service {
         let mut trigger_held = false;
         let mut chorded = false;
         let mut holding_back_left = false;
-        // Dragging with the wheel button held is reported instead of reaching the app, and the
-        // press only reaches it as a click once released without moving.
+        // Dragging or scrolling with the middle button held is reported instead of reaching the
+        // app, and the press only reaches it as a click once released having done neither.
         let mut wheel_drag_enabled = false;
         let mut wheel = WheelDrag::new(min_path_length);
         let mut wheel_frame = WheelDragStep::Nothing;
@@ -529,8 +529,7 @@ mod service {
 
                 // Forward whole frames, so one movement isn't split across several reports
                 if grabbed {
-                    // Pressing a wheel often turns it, and scrolling while it's held isn't meant
-                    // for the app.
+                    // Scrolling while the middle button is held is reported instead.
                     let held_scroll =
                         wheel.is_held() && ev_type == EventType::RELATIVE && is_scroll(ev_code);
                     if ev_type != EventType::SYNCHRONIZATION {
@@ -543,6 +542,15 @@ mod service {
                         }
                         pending_frame.clear();
                     }
+                }
+
+                // Only whole notches, as wheels that report finer steps report notches too.
+                if ev_type == EventType::RELATIVE
+                    && ev_code == evdev::RelativeAxisCode::REL_WHEEL.0
+                    && ev_value != 0
+                    && wheel.scroll()
+                {
+                    outbox.send(&Event::DragScrolled(ev_value));
                 }
 
                 if ev_type == EventType::RELATIVE {

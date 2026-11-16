@@ -213,10 +213,12 @@ enum DaemonSignal {
     GestureStarted(f64, f64),
     GestureUpdated(f64, f64),
     GestureEnded,
-    /// Dragging with the wheel button held, which resizes the window under the pointer.
-    WheelDragStarted,
-    WheelDragMoved,
-    WheelDragEnded,
+    /// Dragging with the middle button held, which moves the window under the pointer, and
+    /// scrolling, which resizes it, by the notches turned.
+    MiddleDragStarted,
+    MiddleDragMoved,
+    MiddleScrolled(i32),
+    MiddleDragEnded,
     ActionExecuted(String, String, String),
     /// The action that just ran couldn't, and why, in a few words.
     ActionFailed(String),
@@ -283,14 +285,17 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
                 DaemonSignal::GestureEnded => {
                     conn.emit_signal(dest.clone(), path, iface, "GestureEnded", &())
                 }
-                DaemonSignal::WheelDragStarted => {
-                    conn.emit_signal(dest.clone(), path, iface, "WheelDragStarted", &())
+                DaemonSignal::MiddleDragStarted => {
+                    conn.emit_signal(dest.clone(), path, iface, "MiddleDragStarted", &())
                 }
-                DaemonSignal::WheelDragMoved => {
-                    conn.emit_signal(dest.clone(), path, iface, "WheelDragMoved", &())
+                DaemonSignal::MiddleDragMoved => {
+                    conn.emit_signal(dest.clone(), path, iface, "MiddleDragMoved", &())
                 }
-                DaemonSignal::WheelDragEnded => {
-                    conn.emit_signal(dest.clone(), path, iface, "WheelDragEnded", &())
+                DaemonSignal::MiddleScrolled(notches) => {
+                    conn.emit_signal(dest.clone(), path, iface, "MiddleScrolled", &(notches,))
+                }
+                DaemonSignal::MiddleDragEnded => {
+                    conn.emit_signal(dest.clone(), path, iface, "MiddleDragEnded", &())
                 }
                 DaemonSignal::ActionExecuted(name, desc, icon) => {
                     conn.emit_signal(dest.clone(), path, iface, "ActionExecuted", &(name, desc, icon))
@@ -684,10 +689,10 @@ impl<T> UpdateThrottle<T> {
     }
 }
 
-/// Whether dragging with the wheel button resizes windows. Only GNOME's extension resizes them,
-/// so elsewhere the wheel button is left to the apps.
-fn uses_wheel_resize(config: &Configuration) -> bool {
-    config.wheel_resize && gestos::config::get_environment_suffix() == Some("gnome")
+/// Whether the middle button moves and resizes windows. Only GNOME's extension does that, so
+/// elsewhere the middle button is left to the apps.
+fn uses_middle_button(config: &Configuration) -> bool {
+    config.middle_button_windows && gestos::config::get_environment_suffix() == Some("gnome")
 }
 
 /// Handles one connection to the input service. Sets `opened` once the device is in use.
@@ -722,7 +727,7 @@ fn run_session(
     if config.overview_click {
         input.send(&Request::SetChord(true));
     }
-    if uses_wheel_resize(config) {
+    if uses_middle_button(config) {
         input.send(&Request::SetWheelDrag(true));
     }
 
@@ -738,8 +743,8 @@ fn run_session(
                     if new_config.overview_click != config.overview_click {
                         input.send(&Request::SetChord(new_config.overview_click));
                     }
-                    if uses_wheel_resize(&new_config) != uses_wheel_resize(config) {
-                        input.send(&Request::SetWheelDrag(uses_wheel_resize(&new_config)));
+                    if uses_middle_button(&new_config) != uses_middle_button(config) {
+                        input.send(&Request::SetWheelDrag(uses_middle_button(&new_config)));
                     }
                     *config = new_config;
                     SHOW_PATH.store(config.show_path, Ordering::Relaxed);
@@ -830,19 +835,22 @@ fn run_session(
                 Some(Event::Chord) => show_overview_on_click(&input, wayland_ctx),
                 Some(Event::DragStarted) => {
                     drags = UpdateThrottle::default();
-                    let _ = signals.try_send(DaemonSignal::WheelDragStarted);
+                    let _ = signals.try_send(DaemonSignal::MiddleDragStarted);
                 }
                 Some(Event::DragMoved) => {
                     if drags.moved((), std::time::Instant::now()).is_some() {
-                        let _ = signals.try_send(DaemonSignal::WheelDragMoved);
+                        let _ = signals.try_send(DaemonSignal::MiddleDragMoved);
                     }
                 }
+                Some(Event::DragScrolled(notches)) => {
+                    let _ = signals.try_send(DaemonSignal::MiddleScrolled(notches));
+                }
                 Some(Event::DragEnded) => {
-                    // So the window ends at the size the pointer was at.
+                    // So the window ends where the pointer was.
                     if drags.last().is_some() {
-                        let _ = signals.try_send(DaemonSignal::WheelDragMoved);
+                        let _ = signals.try_send(DaemonSignal::MiddleDragMoved);
                     }
-                    let _ = signals.try_send(DaemonSignal::WheelDragEnded);
+                    let _ = signals.try_send(DaemonSignal::MiddleDragEnded);
                 }
                 Some(Event::Held(held)) => input.answer_held(held),
                 Some(Event::Refused { permanent, message }) => {
@@ -1558,7 +1566,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };
@@ -1627,7 +1635,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };
@@ -1652,7 +1660,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };
@@ -1684,7 +1692,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
-            wheel_resize: false,
+            middle_button_windows: false,
             show_path: true,
             all_gestures: false,
         };

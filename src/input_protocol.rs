@@ -43,8 +43,8 @@ pub enum Request {
     SetKeyboards(bool),
     /// Whether clicking the left button while the right one draws is reported, as `Chord`.
     SetChord(bool),
-    /// Whether dragging with the wheel button held is reported, as `Resize…`, instead of
-    /// reaching the app under the pointer.
+    /// Whether dragging or scrolling with the middle button held is reported, as `Drag…`, instead
+    /// of reaching the app under the pointer.
     SetWheelDrag(bool),
     Key { code: u16, pressed: bool },
     QueryHeld,
@@ -60,11 +60,13 @@ pub enum Event {
     Finished(HeldKeys),
     /// The left button was clicked while the right one was held, which then draws nothing.
     Chord,
-    /// The wheel button is held and the pointer moved, so it drags instead of clicking.
+    /// The middle button is held and the pointer moved, so it drags instead of clicking.
     DragStarted,
-    /// The pointer moved during a wheel drag.
+    /// The pointer moved during a middle button drag.
     DragMoved,
-    /// The wheel button was released after dragging.
+    /// The wheel turned by some notches, up for positive, while the middle button is held.
+    DragScrolled(i32),
+    /// The middle button was released after dragging or scrolling.
     DragEnded,
     Held(HeldKeys),
     Refused { permanent: bool, message: String },
@@ -144,6 +146,7 @@ impl Event {
             Event::Chord => "chord\n".to_string(),
             Event::DragStarted => "dragstarted\n".to_string(),
             Event::DragMoved => "dragmoved\n".to_string(),
+            Event::DragScrolled(notches) => format!("dragscrolled {notches}\n"),
             Event::DragEnded => "dragended\n".to_string(),
             Event::Held(held) => format!("held {}\n", held.encode()),
             Event::Refused { permanent, message } => {
@@ -164,6 +167,7 @@ impl Event {
             "chord" if rest.is_empty() => Some(Event::Chord),
             "dragstarted" if rest.is_empty() => Some(Event::DragStarted),
             "dragmoved" if rest.is_empty() => Some(Event::DragMoved),
+            "dragscrolled" => Some(Event::DragScrolled(rest.parse().ok()?)),
             "dragended" if rest.is_empty() => Some(Event::DragEnded),
             "held" => Some(Event::Held(HeldKeys::decode(rest))),
             "refused" => {
@@ -272,6 +276,7 @@ mod tests {
             Event::Chord,
             Event::DragStarted,
             Event::DragMoved,
+            Event::DragScrolled(-2),
             Event::DragEnded,
             Event::Held(held),
             Event::Held(HeldKeys::default()),
@@ -290,7 +295,7 @@ mod tests {
         for line in ["", "open", "open x 30 1 /dev/input/event1", "key 29", "key 99999 1", "key 1 2", "held now", "chord 2", "wheeldrag", "rm -rf"] {
             assert_eq!(Request::decode(line), None, "{line}");
         }
-        for line in ["", "started 1", "point a b", "refused", "chord now", "dragmoved 1"] {
+        for line in ["", "started 1", "point a b", "refused", "chord now", "dragmoved 1", "dragscrolled up"] {
             assert_eq!(Event::decode(line), None, "{line}");
         }
     }
