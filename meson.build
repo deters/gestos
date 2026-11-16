@@ -131,6 +131,7 @@ if get_option('gnome_extension')
       'extension/lib/panel.js',
       'extension/lib/smooth.js',
       'extension/lib/sizes.js',
+      'extension/lib/resize.js',
       'extension/schemas/org.gnome.shell.extensions.gestos.gschema.xml',
     ),
     build_by_default: true,
@@ -139,7 +140,7 @@ if get_option('gnome_extension')
   )
   install_data('extension/lib/tile.js', 'extension/lib/chooser.js', 'extension/lib/trail.js',
     'extension/lib/panel.js', 'extension/lib/smooth.js',
-    'extension/lib/sizes.js', install_dir: extension_dir / 'lib')
+    'extension/lib/sizes.js', 'extension/lib/resize.js', install_dir: extension_dir / 'lib')
   install_data('extension/schemas/org.gnome.shell.extensions.gestos.gschema.xml', install_dir: extension_dir / 'schemas')
   # Compiled here, as extensions keep their own settings schema instead of sharing the system's.
   custom_target(

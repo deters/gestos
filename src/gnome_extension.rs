@@ -100,6 +100,17 @@ mod tests {
     }
 
     #[test]
+    fn every_part_of_the_extension_is_installed() {
+        let meson = include_str!("../meson.build");
+        let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("extension/lib");
+        for entry in std::fs::read_dir(lib).unwrap() {
+            let name = entry.unwrap().file_name().into_string().unwrap();
+            let listed = format!("'extension/lib/{name}'");
+            assert_eq!(meson.matches(&listed).count(), 2, "{name} is installed and fingerprinted");
+        }
+    }
+
+    #[test]
     fn the_fingerprint_is_built_in() {
         assert_eq!(FINGERPRINT.len(), 16, "{FINGERPRINT:?}");
     }
