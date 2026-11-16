@@ -253,12 +253,13 @@ mod service {
         (threshold, min_path_length)
     }
 
-    fn read_open_request(stream: &mut UnixStream) -> Result<Request, Refusal> {
+    /// Reads the open request. Whatever came after it is left in `lines`, as the client may send
+    /// more requests right away.
+    fn read_open_request(stream: &mut UnixStream, lines: &mut LineBuffer) -> Result<Request, Refusal> {
         let not_understood = || refused(true, "The request was not understood.");
         stream
             .set_read_timeout(Some(OPEN_TIMEOUT))
             .map_err(|e| refused(false, e.to_string()))?;
-        let mut lines = LineBuffer::default();
         let mut bytes = [0u8; 512];
         loop {
             if let Some(line) = lines.next_line() {
@@ -277,6 +278,7 @@ mod service {
 
     fn run_session(mut stream: UnixStream) -> Result<(), Refusal> {
         let peer = peer_uid(&stream).map_err(|e| refused(false, e.to_string()))?;
+        let mut lines = LineBuffer::default();
         if active_uid() != Some(peer) {
             return Err(refused(false, "Only the user active on this seat can use gestures."));
         }
@@ -286,7 +288,7 @@ mod service {
             sensitivity,
             keyboards,
             device,
-        } = read_open_request(&mut stream)?
+        } = read_open_request(&mut stream, &mut lines)?
         else {
             return Err(refused(true, "Nothing has been opened yet."));
         };
@@ -333,7 +335,6 @@ mod service {
         };
         outbox.send(&Event::Ready);
 
-        let mut lines = LineBuffer::default();
         let mut recognizer = GestureRecognizer::new(threshold / 10.0, min_path_length);
         let mut pending_frame: Vec<evdev::InputEvent> = Vec::new();
         let mut held_at_press = HeldKeys::default();
@@ -409,34 +410,36 @@ mod service {
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
                     Err(_) => return Ok(()),
                 }
-                while let Some(line) = lines.next_line() {
-                    match Request::decode(&line) {
-                        Some(Request::Key { code, pressed }) if may_press_key(code) => {
-                            // Keys must not reach another user's session, even for a moment.
-                            if active_uid() != Some(peer) {
-                                return Err(refused(false, "Another user is now active on this seat."));
-                            }
-                            if let Some(ref u) = uinput {
-                                u.key(code, pressed);
-                            }
+            }
+
+            // Also the ones that came with the open request, before anything was polled.
+            while let Some(line) = lines.next_line() {
+                match Request::decode(&line) {
+                    Some(Request::Key { code, pressed }) if may_press_key(code) => {
+                        // Keys must not reach another user's session, even for a moment.
+                        if active_uid() != Some(peer) {
+                            return Err(refused(false, "Another user is now active on this seat."));
                         }
-                        Some(Request::SetKeyboards(enabled)) => modifiers.set_enabled(enabled),
-                        Some(Request::SetChord(enabled)) => chord_enabled = enabled,
-                        Some(Request::SetWheelDrag(enabled)) => wheel_drag_enabled = enabled,
-                        Some(Request::QueryHeld) => {
-                            let held = if may_report_held(last_gesture, Instant::now()) {
-                                modifiers.held()
-                            } else {
-                                HeldKeys::default()
-                            };
-                            outbox.send(&Event::Held(held));
+                        if let Some(ref u) = uinput {
+                            u.key(code, pressed);
                         }
-                        _ => return Err(refused(true, "The request was not understood.")),
                     }
+                    Some(Request::SetKeyboards(enabled)) => modifiers.set_enabled(enabled),
+                    Some(Request::SetChord(enabled)) => chord_enabled = enabled,
+                    Some(Request::SetWheelDrag(enabled)) => wheel_drag_enabled = enabled,
+                    Some(Request::QueryHeld) => {
+                        let held = if may_report_held(last_gesture, Instant::now()) {
+                            modifiers.held()
+                        } else {
+                            HeldKeys::default()
+                        };
+                        outbox.send(&Event::Held(held));
+                    }
+                    _ => return Err(refused(true, "The request was not understood.")),
                 }
-                if lines.overflowed() {
-                    return Err(refused(true, "The request was not understood."));
-                }
+            }
+            if lines.overflowed() {
+                return Err(refused(true, "The request was not understood."));
             }
 
             if poll_fds[0].revents == 0 {
@@ -640,6 +643,22 @@ mod service {
         };
         serve(stream);
         std::process::ExitCode::SUCCESS
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn requests_sent_with_the_open_request_are_kept() {
+            let (mut client, mut service) = UnixStream::pair().unwrap();
+            client.write_all(b"open 3 30 0 /dev/input/event1\nwheeldrag 1\nchord 1\n").unwrap();
+            let mut lines = LineBuffer::default();
+            let open = read_open_request(&mut service, &mut lines).ok();
+            assert!(matches!(open, Some(Request::Open { button: 3, .. })));
+            assert_eq!(lines.next_line().as_deref(), Some("wheeldrag 1"));
+            assert_eq!(lines.next_line().as_deref(), Some("chord 1"));
+        }
     }
 }
 
