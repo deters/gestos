@@ -1253,17 +1253,19 @@ fn migrate_legacy_files() {
 const DEFAULT_BUTTON: i32 = 3;
 const MOUSE_SCHEMA: &str = "org.gnome.desktop.peripherals.mouse";
 
+/// The mouse's settings, if the desktop has them. Opening a schema that isn't installed would
+/// abort the whole program.
+fn mouse_settings() -> Option<gio::Settings> {
+    let source = gio::SettingsSchemaSource::default()?;
+    source.lookup(MOUSE_SCHEMA, true)?;
+    Some(gio::Settings::new(MOUSE_SCHEMA))
+}
+
 /// Whether the desktop swaps the left and right buttons, if it says. Only the desktop swaps them:
 /// devices still report each button where it is.
 fn left_handed() -> Option<bool> {
-    let output = Command::new("gsettings")
-        .args(["get", MOUSE_SCHEMA, "left-handed"])
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim() == "true")
+    use gio::prelude::SettingsExt;
+    Some(mouse_settings()?.boolean("left-handed"))
 }
 
 /// The button a device reports for one picked as the user sees it, so that "right" is always
@@ -1277,39 +1279,36 @@ fn physical_button(button: i32, left_handed: bool) -> i32 {
 }
 
 /// Starts over when the buttons are swapped or put back, as the button to listen to and the
-/// mice that have it are only found at the start.
+/// mice that have it are only found at the start. Watched here, rather than by a program of its
+/// own, which would be one more process running for as long as Gestos does.
 fn restart_when_hand_changes(started_left_handed: bool) {
+    when_hand_changes(started_left_handed, || {
+        println!("gestosd: The mouse buttons were swapped. Restarting...");
+        kill_children();
+        // Started as it was started the first time, as the binary may have been replaced.
+        let mut args = std::env::args_os();
+        let program = args.next().unwrap_or_else(|| "gestosd".into());
+        let error = std::os::unix::process::CommandExt::exec(Command::new(program).args(args));
+        eprintln!("gestosd: Could not restart: {error}");
+        std::process::exit(1);
+    });
+}
+
+/// Calls `changed` whenever the buttons stop being as they were at the start.
+fn when_hand_changes(started_left_handed: bool, changed: impl Fn() + Send + 'static) {
     std::thread::spawn(move || {
-        let mut command = Command::new("gsettings");
-        command
-            .args(["monitor", MOUSE_SCHEMA, "left-handed"])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null());
-        // It goes away with the daemon, instead of lingering until the next change.
-        unsafe {
-            std::os::unix::process::CommandExt::pre_exec(&mut command, || {
-                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
-                Ok(())
+        use gio::prelude::SettingsExt;
+        let context = gio::glib::MainContext::new();
+        // Changes come to the context the settings were opened in.
+        let _ = context.with_thread_default(|| {
+            let Some(settings) = mouse_settings() else { return };
+            settings.connect_changed(Some("left-handed"), move |settings, key| {
+                if settings.boolean(key) != started_left_handed {
+                    changed();
+                }
             });
-        }
-        let Ok(mut monitor) = command.spawn() else {
-            return;
-        };
-        let Some(changes) = monitor.stdout.take() else { return };
-        for _ in std::io::BufRead::lines(std::io::BufReader::new(changes)) {
-            if left_handed() == Some(started_left_handed) {
-                continue;
-            }
-            println!("gestosd: The mouse buttons were swapped. Restarting...");
-            kill_children();
-            let _ = monitor.kill();
-            // Started as it was started the first time, as the binary may have been replaced.
-            let mut args = std::env::args_os();
-            let program = args.next().unwrap_or_else(|| "gestosd".into());
-            let error = std::os::unix::process::CommandExt::exec(Command::new(program).args(args));
-            eprintln!("gestosd: Could not restart: {error}");
-            std::process::exit(1);
-        }
+            gio::glib::MainLoop::new(Some(&context), false).run();
+        });
     });
 }
 
@@ -1591,6 +1590,32 @@ mod tests {
             modifiers: Modifiers::parse(modifiers),
             apps: Vec::new(),
         }
+    }
+
+    // Changes the setting in memory only, never the user's own.
+    #[test]
+    fn swapping_the_buttons_is_noticed() {
+        use gio::prelude::SettingsExt;
+        std::env::set_var("GSETTINGS_BACKEND", "memory");
+        if mouse_settings().is_none() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = std::sync::Mutex::new(tx);
+        when_hand_changes(false, move || {
+            let _ = tx.lock().unwrap().send(());
+        });
+        // Until the watch is set, a change wouldn't be seen.
+        let settings = mouse_settings().unwrap();
+        for _ in 0..50 {
+            settings.set_boolean("left-handed", true).unwrap();
+            gio::Settings::sync();
+            if rx.recv_timeout(Duration::from_millis(100)).is_ok() {
+                return;
+            }
+            settings.set_boolean("left-handed", false).unwrap();
+        }
+        panic!("Swapping the buttons wasn't noticed");
     }
 
     #[test]
