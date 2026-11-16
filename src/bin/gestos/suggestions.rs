@@ -207,7 +207,7 @@ pub fn arrange_suggestions(
     if let Some(category) = open_category {
         let (apart, in_it): (Vec<_>, Vec<_>) = found
             .into_iter()
-            .filter(|option| is_in(option, category))
+            .filter(|option| category_of(option) == category)
             .partition(|option| is_custom_shortcut(option) || is_build_your_own(option));
         return (apart, in_it.into_iter().map(Suggestion::Action).collect());
     }
@@ -337,12 +337,6 @@ fn is_build_your_own(option: &EditorActionOption) -> bool {
     }
 }
 
-/// Whether an action is offered in a category: its own, or another it's also offered in.
-fn is_in(option: &EditorActionOption, category: Category) -> bool {
-    category_of(option) == category
-        || matches!((&option.action_type, category), (ActionType::MiddleClickPaste, Category::Advanced))
-}
-
 /// Whether it's the keyboard shortcut whose keys are recorded, rather than one that's ready.
 pub fn is_custom_shortcut(option: &EditorActionOption) -> bool {
     matches!(&option.action_type, ActionType::Keypress(keys) if keys.is_empty())
@@ -353,7 +347,8 @@ pub fn is_custom_shortcut(option: &EditorActionOption) -> bool {
 pub fn category_of(option: &EditorActionOption) -> Category {
     match &option.action_type {
         _ if is_build_your_own(option) => Category::Advanced,
-        ActionType::Click(_) | ActionType::MiddleClickPaste => Category::Other,
+        ActionType::MiddleClickPaste => Category::Advanced,
+        ActionType::Click(_) => Category::Other,
         _ if crate::ui::app_picker::opened_app(&option.action_type).is_some() => Category::Apps,
         ActionType::Keypress(_) => Category::KeyboardShortcuts,
         // GNOME's own custom shortcuts, which run commands.
@@ -508,12 +503,9 @@ mod tests {
     }
 
     #[test]
-    fn middle_click_paste_is_offered_in_other_and_advanced() {
-        for category in [Category::Other, Category::Advanced] {
-            let options = vec![option("Middle Click Paste", ActionType::MiddleClickPaste)];
-            let (_, offered) = arrange_suggestions(options, false, Some(category), &BTreeMap::new());
-            assert_eq!(offered.len(), 1, "{category:?}");
-        }
+    fn middle_click_paste_is_offered_in_advanced() {
+        let category = |action: ActionType| category_of(&option("", action));
+        assert_eq!(category(ActionType::MiddleClickPaste), Category::Advanced);
     }
 
     #[test]
