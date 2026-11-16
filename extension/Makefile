@@ -19,6 +19,7 @@ test:
 	gjs -m tests/tile.test.js
 	gjs -m tests/sizes.test.js
 	gjs -m tests/smooth.test.js
+	gjs -m tests/resize.test.js
 
 clean:
 	rm -rf $(PACK) $(STAGE)

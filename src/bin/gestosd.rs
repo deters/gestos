@@ -213,6 +213,10 @@ enum DaemonSignal {
     GestureStarted(f64, f64),
     GestureUpdated(f64, f64),
     GestureEnded,
+    /// Dragging with the wheel button held, which resizes the window under the pointer.
+    WheelDragStarted,
+    WheelDragMoved,
+    WheelDragEnded,
     ActionExecuted(String, String, String),
     /// The action that just ran couldn't, and why, in a few words.
     ActionFailed(String),
@@ -278,6 +282,15 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
                 }
                 DaemonSignal::GestureEnded => {
                     conn.emit_signal(dest.clone(), path, iface, "GestureEnded", &())
+                }
+                DaemonSignal::WheelDragStarted => {
+                    conn.emit_signal(dest.clone(), path, iface, "WheelDragStarted", &())
+                }
+                DaemonSignal::WheelDragMoved => {
+                    conn.emit_signal(dest.clone(), path, iface, "WheelDragMoved", &())
+                }
+                DaemonSignal::WheelDragEnded => {
+                    conn.emit_signal(dest.clone(), path, iface, "WheelDragEnded", &())
                 }
                 DaemonSignal::ActionExecuted(name, desc, icon) => {
                     conn.emit_signal(dest.clone(), path, iface, "ActionExecuted", &(name, desc, icon))
@@ -648,27 +661,33 @@ const UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(8)
 
 /// Passes on a gesture's moves at most once each interval, the latest one held back until then.
 #[derive(Default)]
-struct UpdateThrottle {
+struct UpdateThrottle<T = (f64, f64)> {
     sent: Option<std::time::Instant>,
-    held: Option<(f64, f64)>,
+    held: Option<T>,
 }
 
-impl UpdateThrottle {
-    /// The moves to pass on as the pointer moves to `x`, `y`: none, or the latest one.
-    fn moved(&mut self, x: f64, y: f64, now: std::time::Instant) -> Option<(f64, f64)> {
+impl<T> UpdateThrottle<T> {
+    /// The moves to pass on as the pointer moves to `to`: none, or the latest one.
+    fn moved(&mut self, to: T, now: std::time::Instant) -> Option<T> {
         if self.sent.is_some_and(|sent| now.duration_since(sent) < UPDATE_INTERVAL) {
-            self.held = Some((x, y));
+            self.held = Some(to);
             return None;
         }
         self.sent = Some(now);
         self.held = None;
-        Some((x, y))
+        Some(to)
     }
 
     /// The move held back, if one is, to pass on as the gesture ends.
-    fn last(&mut self) -> Option<(f64, f64)> {
+    fn last(&mut self) -> Option<T> {
         self.held.take()
     }
+}
+
+/// Whether dragging with the wheel button resizes windows. Only GNOME's extension resizes them,
+/// so elsewhere the wheel button is left to the apps.
+fn uses_wheel_resize(config: &Configuration) -> bool {
+    config.wheel_resize && gestos::config::get_environment_suffix() == Some("gnome")
 }
 
 /// Handles one connection to the input service. Sets `opened` once the device is in use.
@@ -703,10 +722,14 @@ fn run_session(
     if config.overview_click {
         input.send(&Request::SetChord(true));
     }
+    if uses_wheel_resize(config) {
+        input.send(&Request::SetWheelDrag(true));
+    }
 
     let mut lines = LineBuffer::default();
     let mut points = Vec::new();
     let mut updates = UpdateThrottle::default();
+    let mut drags = UpdateThrottle::<()>::default();
     loop {
         if RELOAD_REQUESTED.swap(false, Ordering::Relaxed) {
             println!("gestosd: Reloading configuration dynamically...");
@@ -714,6 +737,9 @@ fn run_session(
                 Ok(new_config) => {
                     if new_config.overview_click != config.overview_click {
                         input.send(&Request::SetChord(new_config.overview_click));
+                    }
+                    if uses_wheel_resize(&new_config) != uses_wheel_resize(config) {
+                        input.send(&Request::SetWheelDrag(uses_wheel_resize(&new_config)));
                     }
                     *config = new_config;
                     SHOW_PATH.store(config.show_path, Ordering::Relaxed);
@@ -777,7 +803,7 @@ fn run_session(
                     let _ = signals.try_send(DaemonSignal::GestureStarted(x, y));
                 }
                 Some(Event::Updated(x, y)) => {
-                    if let Some((x, y)) = updates.moved(x, y, std::time::Instant::now()) {
+                    if let Some((x, y)) = updates.moved((x, y), std::time::Instant::now()) {
                         let _ = signals.try_send(DaemonSignal::GestureUpdated(x, y));
                     }
                 }
@@ -802,6 +828,22 @@ fn run_session(
                     points.clear();
                 }
                 Some(Event::Chord) => show_overview_on_click(&input, wayland_ctx),
+                Some(Event::DragStarted) => {
+                    drags = UpdateThrottle::default();
+                    let _ = signals.try_send(DaemonSignal::WheelDragStarted);
+                }
+                Some(Event::DragMoved) => {
+                    if drags.moved((), std::time::Instant::now()).is_some() {
+                        let _ = signals.try_send(DaemonSignal::WheelDragMoved);
+                    }
+                }
+                Some(Event::DragEnded) => {
+                    // So the window ends at the size the pointer was at.
+                    if drags.last().is_some() {
+                        let _ = signals.try_send(DaemonSignal::WheelDragMoved);
+                    }
+                    let _ = signals.try_send(DaemonSignal::WheelDragEnded);
+                }
                 Some(Event::Held(held)) => input.answer_held(held),
                 Some(Event::Refused { permanent, message }) => {
                     return SessionEnd::Refused { permanent, message };
@@ -1336,12 +1378,12 @@ mod tests {
         let start = std::time::Instant::now();
         let at = |ms| start + std::time::Duration::from_millis(ms);
         let mut updates = UpdateThrottle::default();
-        assert_eq!(updates.moved(1.0, 1.0, at(0)), Some((1.0, 1.0)));
-        assert_eq!(updates.moved(2.0, 2.0, at(1)), None);
-        assert_eq!(updates.moved(3.0, 3.0, at(4)), None);
-        assert_eq!(updates.moved(4.0, 4.0, at(9)), Some((4.0, 4.0)));
+        assert_eq!(updates.moved((1.0, 1.0), at(0)), Some((1.0, 1.0)));
+        assert_eq!(updates.moved((2.0, 2.0), at(1)), None);
+        assert_eq!(updates.moved((3.0, 3.0), at(4)), None);
+        assert_eq!(updates.moved((4.0, 4.0), at(9)), Some((4.0, 4.0)));
         assert_eq!(updates.last(), None);
-        assert_eq!(updates.moved(5.0, 5.0, at(10)), None);
+        assert_eq!(updates.moved((5.0, 5.0), at(10)), None);
         assert_eq!(updates.last(), Some((5.0, 5.0)));
         assert_eq!(updates.last(), None);
     }
@@ -1516,6 +1558,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
+            wheel_resize: false,
             show_path: true,
             all_gestures: false,
         };
@@ -1584,6 +1627,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
+            wheel_resize: false,
             show_path: true,
             all_gestures: false,
         };
@@ -1608,6 +1652,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
+            wheel_resize: false,
             show_path: true,
             all_gestures: false,
         };
@@ -1639,6 +1684,7 @@ mod tests {
             user_config_path: PathBuf::new(),
             button: None,
             overview_click: false,
+            wheel_resize: false,
             show_path: true,
             all_gestures: false,
         };

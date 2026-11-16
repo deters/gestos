@@ -96,9 +96,102 @@ impl GestureRecognizer {
     }
 }
 
+/// What a held wheel button is doing: nothing yet, or resizing once it has moved far enough.
+/// Ordered so the most that happened in one input frame is the greatest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum WheelDragStep {
+    Nothing,
+    Moved,
+    Started,
+}
+
+/// Tells a wheel button that drags from one that clicks. It's only a click once it's released
+/// without having moved, so the press is held back until then.
+pub struct WheelDrag {
+    min_distance_squared: f64,
+    held: bool,
+    dragging: bool,
+    dx: f64,
+    dy: f64,
+}
+
+impl WheelDrag {
+    pub fn new(min_distance: f64) -> Self {
+        WheelDrag {
+            min_distance_squared: min_distance * min_distance,
+            held: false,
+            dragging: false,
+            dx: 0.0,
+            dy: 0.0,
+        }
+    }
+
+    pub fn is_held(&self) -> bool {
+        self.held
+    }
+
+    pub fn press(&mut self) {
+        self.held = true;
+        self.dragging = false;
+        self.dx = 0.0;
+        self.dy = 0.0;
+    }
+
+    pub fn move_by(&mut self, dx: f64, dy: f64) -> WheelDragStep {
+        if !self.held {
+            return WheelDragStep::Nothing;
+        }
+        if self.dragging {
+            return WheelDragStep::Moved;
+        }
+        self.dx += dx;
+        self.dy += dy;
+        if self.dx * self.dx + self.dy * self.dy < self.min_distance_squared {
+            return WheelDragStep::Nothing;
+        }
+        self.dragging = true;
+        WheelDragStep::Started
+    }
+
+    /// Whether it dragged. One that didn't was a click.
+    pub fn release(&mut self) -> bool {
+        self.held = false;
+        std::mem::take(&mut self.dragging)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_wheel_press_without_movement_is_a_click() {
+        let mut drag = WheelDrag::new(15.0);
+        drag.press();
+        assert_eq!(drag.move_by(3.0, 4.0), WheelDragStep::Nothing);
+        assert!(!drag.release());
+    }
+
+    #[test]
+    fn a_wheel_drag_starts_once_far_enough() {
+        let mut drag = WheelDrag::new(15.0);
+        drag.press();
+        assert_eq!(drag.move_by(0.0, -10.0), WheelDragStep::Nothing);
+        assert_eq!(drag.move_by(0.0, -10.0), WheelDragStep::Started);
+        assert_eq!(drag.move_by(0.0, 1.0), WheelDragStep::Moved);
+        assert!(drag.release());
+        assert_eq!(drag.move_by(0.0, 50.0), WheelDragStep::Nothing);
+    }
+
+    #[test]
+    fn each_wheel_press_starts_from_where_it_is() {
+        let mut drag = WheelDrag::new(15.0);
+        drag.press();
+        drag.move_by(0.0, 10.0);
+        drag.release();
+        drag.press();
+        assert_eq!(drag.move_by(0.0, 10.0), WheelDragStep::Nothing);
+    }
 
     fn recognizer() -> GestureRecognizer {
         GestureRecognizer::new(3.0, 15.0)

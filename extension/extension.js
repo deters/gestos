@@ -12,10 +12,13 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {GestureChooser} from './lib/chooser.js';
 import {ActionPanel} from './lib/panel.js';
 import {GestureTrail} from './lib/trail.js';
+import {grownRect} from './lib/resize.js';
 import {addSize, readSizes, removeSize, takeSize, writeSizes} from './lib/sizes.js';
 import {fitSize, freeArea, hasSize, isBelievableMinimum, keepInside, restoreRect, tileWindows} from './lib/tile.js';
 
 const OBJECT_PATH = '/io/github/deters/Gestos/Extension';
+const DAEMON_INTERFACE = 'io.github.deters.Gestos.Daemon';
+const DAEMON_PATH = '/io/github/deters/Gestos/Daemon';
 const INTERFACE_XML = `
 <node>
   <interface name="io.github.deters.Gestos.Extension">
@@ -73,6 +76,17 @@ const TILE_SLACK = 40;
 function appIdOf(window) {
     const app = Shell.WindowTracker.get_default().get_window_app(window);
     return app && !app.is_window_backed() ? app.get_id() : window.get_wm_class();
+}
+
+// The window the pointer is over on the workspace in use: the one on top there.
+function windowAt(x, y) {
+    const workspace = global.workspace_manager.get_active_workspace();
+    return global.get_window_actors().map(actor => actor.meta_window).reverse().find(window => {
+        const frame = window.get_frame_rect();
+        return [Meta.WindowType.NORMAL, Meta.WindowType.DIALOG].includes(window.get_window_type()) &&
+            window.showing_on_its_workspace() && window.located_on_workspace(workspace) &&
+            x >= frame.x && x < frame.x + frame.width && y >= frame.y && y < frame.y + frame.height;
+    }) ?? null;
 }
 
 function isMoving(op) {
@@ -211,6 +225,17 @@ class WindowActions {
         // Windows on shared monitors go with the workspace in use.
         this._activeWorkspaceId = global.workspace_manager.connect('active-workspace-changed',
             () => this._onActiveWorkspaceChanged());
+        // Dragging up or down with the wheel button held, which the daemon reports, resizes the
+        // window under the pointer.
+        this._wheelResize = null;
+        const wheelHandlers = {
+            WheelDragStarted: () => this._onWheelDragStarted(),
+            WheelDragMoved: () => this._onWheelDragMoved(),
+            WheelDragEnded: () => this._onWheelDragEnded(),
+        };
+        this._wheelIds = Object.entries(wheelHandlers).map(([signal, handler]) =>
+            Gio.DBus.session.signal_subscribe(null, DAEMON_INTERFACE, signal, DAEMON_PATH, null,
+                Gio.DBusSignalFlags.NONE, handler));
         // Monitors that come and go move windows, which isn't the user placing them.
         this._monitorsSettleId = 0;
         this._monitorsId = Main.layoutManager.connect('monitors-changed',
@@ -236,6 +261,9 @@ class WindowActions {
         this._settings.disconnect(this._gapId);
         this._settings.disconnect(this._autoId);
         Gio.DBus.session.signal_unsubscribe(this._endSessionId);
+        for (const id of this._wheelIds)
+            Gio.DBus.session.signal_unsubscribe(id);
+        this._onWheelDragEnded();
         global.window_manager.disconnect(this._mapId);
         global.window_manager.disconnect(this._minimizeId);
         global.window_manager.disconnect(this._unminimizeId);
@@ -1561,6 +1589,49 @@ class WindowActions {
         if (!isSnapped(window))
             this._originals.get(window).rect = copyRect(window.get_frame_rect());
         this._layout(tiling);
+    }
+
+    // A maximized window is made smaller from the size it has maximized. A tiled one is resized as
+    // one resized by hand: the others make room for it.
+    _onWheelDragStarted() {
+        this._onWheelDragEnded();
+        if (Main.overview.visible)
+            return;
+        const [x, y] = global.get_pointer();
+        const window = windowAt(x, y);
+        if (!window || !window.allows_resize() || window.is_fullscreen())
+            return;
+        const start = copyRect(window.get_frame_rect());
+        if (isMaximizedAtAll(window))
+            window.unmaximize();
+        this._wheelResize = {window, start, pointerY: y};
+        this._onGrabBegin(window, Meta.GrabOp.RESIZING_SE);
+    }
+
+    _onWheelDragMoved() {
+        const resize = this._wheelResize;
+        if (!resize)
+            return;
+        // One that closed while it was resized has nothing more to resize.
+        if (!resize.window.get_compositor_private()) {
+            this._onWheelDragEnded();
+            return;
+        }
+        const [, y] = global.get_pointer();
+        const {x, y: top, width, height} = grownRect(resize.start, resize.pointerY - y,
+            resize.window.get_work_area_current_monitor());
+        resize.window.move_resize_frame(true, x, top, width, height);
+    }
+
+    _onWheelDragEnded() {
+        const resize = this._wheelResize;
+        if (!resize)
+            return;
+        this._wheelResize = null;
+        if (resize.window.get_compositor_private())
+            this._onGrabEnd(resize.window);
+        else if (this._grabbed === resize.window)
+            this._grabbed = null;
     }
 
     // The tiled window the user takes becomes the one they touched last. One that's moved gets its

@@ -92,7 +92,7 @@ fn append_button_row(
     state_rc: &Rc<RefCell<AppState>>,
     list: &adw::PreferencesGroup,
     dialog: &gtk::Window,
-    overview_row: Option<adw::ActionRow>,
+    right_only: Vec<gtk::Widget>,
 ) {
     let (row, row_box, subtitle) =
         settings_row("Draw With", "The mouse button that draws gestures");
@@ -108,13 +108,13 @@ fn append_button_row(
         let state_rc = Rc::clone(state_rc);
         let dialog = dialog.clone();
         let subtitle = subtitle.clone();
-        let overview_row = overview_row.clone();
+        let right_only = right_only.clone();
         toggle.connect_toggled(move |toggle| {
             if !toggle.is_active() {
                 return;
             }
-            if let Some(row) = &overview_row {
-                row.set_sensitive(button == DEFAULT_DRAW_BUTTON);
+            for widget in &right_only {
+                widget.set_sensitive(button == DEFAULT_DRAW_BUTTON);
             }
             let mut state = state_rc.borrow_mut();
             let picked = (button != DEFAULT_DRAW_BUTTON).then_some(button);
@@ -145,25 +145,50 @@ fn append_button_row(
 
 /// Clicking left while holding right shows the overview, as on a Mac. Only desktops with an
 /// overview have it, and it only works while the right button draws.
-fn overview_click_row(state_rc: &Rc<RefCell<AppState>>) -> Option<adw::ActionRow> {
+fn overview_click_row(state_rc: &Rc<RefCell<AppState>>) -> Option<(adw::ActionRow, gtk::Switch)> {
     if !matches!(gestos::config::get_environment_suffix(), Some("gnome" | "kde")) {
         return None;
     }
-    let title = "Show Overview With Both Buttons";
-    let description = "Hold right, then click left";
+    Some(right_button_switch_row(
+        state_rc,
+        "Show Overview With Both Buttons",
+        "Hold right, then click left",
+        |config| &mut config.overview_click,
+    ))
+}
+
+/// Dragging up or down with the wheel button held resizes the window under the pointer. The
+/// extension resizes it, and the wheel button is only held back from apps while the right button
+/// draws, as the mouse is only grabbed then.
+fn wheel_resize_row(state_rc: &Rc<RefCell<AppState>>) -> (adw::ActionRow, gtk::Switch) {
+    right_button_switch_row(
+        state_rc,
+        "Resize Windows With the Wheel Button",
+        "Hold the wheel button and drag up or down",
+        |config| &mut config.wheel_resize,
+    )
+}
+
+/// A switch for a setting of the daemon's that only works while the right button draws.
+fn right_button_switch_row(
+    state_rc: &Rc<RefCell<AppState>>,
+    title: &'static str,
+    description: &'static str,
+    setting: fn(&mut gestos::config::Configuration) -> &mut bool,
+) -> (adw::ActionRow, gtk::Switch) {
     let (row, row_box, subtitle) = settings_row(title, description);
     let switch = settings_switch(title);
     {
-        let state = state_rc.borrow();
-        switch.set_active(state.config.overview_click);
-        row.set_sensitive(state.config.button.unwrap_or(DEFAULT_DRAW_BUTTON) == DEFAULT_DRAW_BUTTON);
+        let mut state = state_rc.borrow_mut();
+        switch.set_active(*setting(&mut state.config));
+        switch.set_sensitive(state.config.button.unwrap_or(DEFAULT_DRAW_BUTTON) == DEFAULT_DRAW_BUTTON);
     }
     let state_rc = Rc::clone(state_rc);
     switch.connect_state_set(move |switch, enabled| {
         let mut state = state_rc.borrow_mut();
-        state.config.overview_click = enabled;
+        *setting(&mut state.config) = enabled;
         if let Err(e) = state.config.save_to_file() {
-            state.config.overview_click = !enabled;
+            *setting(&mut state.config) = !enabled;
             subtitle.set_text(&format!("Could not change this setting: {e}"));
             return glib::Propagation::Stop;
         }
@@ -173,7 +198,7 @@ fn overview_click_row(state_rc: &Rc<RefCell<AppState>>) -> Option<adw::ActionRow
         glib::Propagation::Proceed
     });
     row_box.append(&switch);
-    Some(row)
+    (row, switch)
 }
 
 /// Whether the main page lists every gesture, above the categories. It only changes what Gestos
@@ -298,9 +323,17 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     let gestures_list = append_section(&page, "Gestures");
     append_autostart_row(&gestures_list);
     let overview_row = overview_click_row(state_rc);
-    append_button_row(state_rc, &gestures_list, &dialog, overview_row.clone());
-    if let Some(row) = &overview_row {
+    let wheel_resize = on_gnome.then(|| wheel_resize_row(state_rc));
+    let right_only = overview_row.iter().chain(&wheel_resize)
+        .map(|(_, switch)| switch.clone().upcast())
+        .collect();
+    append_button_row(state_rc, &gestures_list, &dialog, right_only);
+    if let Some((row, _)) = &overview_row {
         gestures_list.add(row);
+    }
+    if let Some((row, _)) = &wheel_resize {
+        gestures_list.add(row);
+        needs_extension.push(row.clone());
     }
     // On GNOME the extension draws it, with its own setting; on X11 and KDE, Gestos does.
     if on_gnome {

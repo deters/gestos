@@ -43,6 +43,9 @@ pub enum Request {
     SetKeyboards(bool),
     /// Whether clicking the left button while the right one draws is reported, as `Chord`.
     SetChord(bool),
+    /// Whether dragging with the wheel button held is reported, as `Resize…`, instead of
+    /// reaching the app under the pointer.
+    SetWheelDrag(bool),
     Key { code: u16, pressed: bool },
     QueryHeld,
 }
@@ -57,6 +60,12 @@ pub enum Event {
     Finished(HeldKeys),
     /// The left button was clicked while the right one was held, which then draws nothing.
     Chord,
+    /// The wheel button is held and the pointer moved, so it drags instead of clicking.
+    DragStarted,
+    /// The pointer moved during a wheel drag.
+    DragMoved,
+    /// The wheel button was released after dragging.
+    DragEnded,
     Held(HeldKeys),
     Refused { permanent: bool, message: String },
 }
@@ -84,6 +93,7 @@ impl Request {
             } => format!("open {button} {sensitivity} {} {device}\n", flag(*keyboards)),
             Request::SetKeyboards(on) => format!("keyboards {}\n", flag(*on)),
             Request::SetChord(on) => format!("chord {}\n", flag(*on)),
+            Request::SetWheelDrag(on) => format!("wheeldrag {}\n", flag(*on)),
             Request::Key { code, pressed } => format!("key {code} {}\n", flag(*pressed)),
             Request::QueryHeld => "held\n".to_string(),
         }
@@ -103,6 +113,7 @@ impl Request {
             }
             "keyboards" => Some(Request::SetKeyboards(parse_flag(rest)?)),
             "chord" => Some(Request::SetChord(parse_flag(rest)?)),
+            "wheeldrag" => Some(Request::SetWheelDrag(parse_flag(rest)?)),
             "key" => {
                 let (code, pressed) = rest.split_once(' ')?;
                 Some(Request::Key {
@@ -131,6 +142,9 @@ impl Event {
             Event::Ended => "ended\n".to_string(),
             Event::Finished(held) => format!("finished {}\n", held.encode()),
             Event::Chord => "chord\n".to_string(),
+            Event::DragStarted => "dragstarted\n".to_string(),
+            Event::DragMoved => "dragmoved\n".to_string(),
+            Event::DragEnded => "dragended\n".to_string(),
             Event::Held(held) => format!("held {}\n", held.encode()),
             Event::Refused { permanent, message } => {
                 format!("refused {} {}\n", flag(*permanent), message.replace('\n', " "))
@@ -148,6 +162,9 @@ impl Event {
             "ended" => Some(Event::Ended),
             "finished" => Some(Event::Finished(HeldKeys::decode(rest))),
             "chord" if rest.is_empty() => Some(Event::Chord),
+            "dragstarted" if rest.is_empty() => Some(Event::DragStarted),
+            "dragmoved" if rest.is_empty() => Some(Event::DragMoved),
+            "dragended" if rest.is_empty() => Some(Event::DragEnded),
             "held" => Some(Event::Held(HeldKeys::decode(rest))),
             "refused" => {
                 let (permanent, message) = rest.split_once(' ')?;
@@ -232,6 +249,7 @@ mod tests {
             },
             Request::SetKeyboards(false),
             Request::SetChord(true),
+            Request::SetWheelDrag(true),
             Request::Key { code: 29, pressed: true },
             Request::QueryHeld,
         ] {
@@ -252,6 +270,9 @@ mod tests {
             Event::Finished(held.clone()),
             Event::Finished(HeldKeys::default()),
             Event::Chord,
+            Event::DragStarted,
+            Event::DragMoved,
+            Event::DragEnded,
             Event::Held(held),
             Event::Held(HeldKeys::default()),
             Event::Refused {
@@ -266,10 +287,10 @@ mod tests {
 
     #[test]
     fn nonsense_is_not_understood() {
-        for line in ["", "open", "open x 30 1 /dev/input/event1", "key 29", "key 99999 1", "key 1 2", "held now", "chord 2", "rm -rf"] {
+        for line in ["", "open", "open x 30 1 /dev/input/event1", "key 29", "key 99999 1", "key 1 2", "held now", "chord 2", "wheeldrag", "rm -rf"] {
             assert_eq!(Request::decode(line), None, "{line}");
         }
-        for line in ["", "started 1", "point a b", "refused", "chord now"] {
+        for line in ["", "started 1", "point a b", "refused", "chord now", "dragmoved 1"] {
             assert_eq!(Event::decode(line), None, "{line}");
         }
     }

@@ -28,7 +28,7 @@ mod uinput;
 
 #[cfg(target_os = "linux")]
 mod service {
-    use crate::gesture::GestureRecognizer;
+    use crate::gesture::{GestureRecognizer, WheelDrag, WheelDragStep};
     use crate::input_protocol::{
         active_seat_uid, is_event_node, may_press_key, may_report_held, Event, LineBuffer, Request,
         SOCKET_PATH,
@@ -218,6 +218,14 @@ mod service {
 
     /// How far the pointer must move for a new point, and for a path to count as a gesture.
     /// Absolute units vary by device, so they scale from its resolution (units per mm) or range.
+    /// Whether a relative axis is a scroll wheel's, in steps or in finer units.
+    fn is_scroll(code: u16) -> bool {
+        use evdev::RelativeAxisCode as Rel;
+        [Rel::REL_WHEEL, Rel::REL_HWHEEL, Rel::REL_WHEEL_HI_RES, Rel::REL_HWHEEL_HI_RES]
+            .iter()
+            .any(|axis| axis.0 == code)
+    }
+
     fn path_thresholds(dev: &Device, sensitivity: i32) -> (f64, f64) {
         let mut threshold = sensitivity as f64;
         let mut min_path_length = 15.0;
@@ -337,6 +345,11 @@ mod service {
         let mut trigger_held = false;
         let mut chorded = false;
         let mut holding_back_left = false;
+        // Dragging with the wheel button held is reported instead of reaching the app, and the
+        // press only reaches it as a click once released without moving.
+        let mut wheel_drag_enabled = false;
+        let mut wheel = WheelDrag::new(min_path_length);
+        let mut wheel_frame = WheelDragStep::Nothing;
 
         loop {
             if !outbox.flush() {
@@ -409,6 +422,7 @@ mod service {
                         }
                         Some(Request::SetKeyboards(enabled)) => modifiers.set_enabled(enabled),
                         Some(Request::SetChord(enabled)) => chord_enabled = enabled,
+                        Some(Request::SetWheelDrag(enabled)) => wheel_drag_enabled = enabled,
                         Some(Request::QueryHeld) => {
                             let held = if may_report_held(last_gesture, Instant::now()) {
                                 modifiers.held()
@@ -457,6 +471,22 @@ mod service {
                     }
                 }
 
+                if ev_type == EventType::KEY && ev_code == KeyCode::BTN_MIDDLE.0 && grabbed {
+                    if ev_value == 1 && wheel_drag_enabled && !trigger_held {
+                        wheel.press();
+                        continue;
+                    }
+                    if ev_value == 0 && wheel.is_held() {
+                        if wheel.release() {
+                            outbox.send(&Event::DragEnded);
+                        } else if let Some(ref u) = uinput {
+                            let u = u.clone();
+                            std::thread::spawn(move || u.click(2));
+                        }
+                        continue;
+                    }
+                }
+
                 if ev_type == EventType::KEY && ev_code == target_button {
                     if ev_value == 1 {
                         trigger_held = true;
@@ -499,8 +529,14 @@ mod service {
 
                 // Forward whole frames, so one movement isn't split across several reports
                 if grabbed {
+                    // Pressing a wheel often turns it, and scrolling while it's held isn't meant
+                    // for the app.
+                    let held_scroll =
+                        wheel.is_held() && ev_type == EventType::RELATIVE && is_scroll(ev_code);
                     if ev_type != EventType::SYNCHRONIZATION {
-                        pending_frame.push(ev);
+                        if !held_scroll {
+                            pending_frame.push(ev);
+                        }
                     } else if ev_code == 0 && !pending_frame.is_empty() {
                         if let Some(ref u) = uinput {
                             u.forward_frame(&pending_frame);
@@ -511,8 +547,14 @@ mod service {
 
                 if ev_type == EventType::RELATIVE {
                     match ev_code {
-                        0 => recognizer.move_by(ev_value as f64, 0.0),
-                        1 => recognizer.move_by(0.0, ev_value as f64),
+                        0 => {
+                            recognizer.move_by(ev_value as f64, 0.0);
+                            wheel_frame = wheel_frame.max(wheel.move_by(ev_value as f64, 0.0));
+                        }
+                        1 => {
+                            recognizer.move_by(0.0, ev_value as f64);
+                            wheel_frame = wheel_frame.max(wheel.move_by(0.0, ev_value as f64));
+                        }
                         _ => {}
                     }
                 } else if ev_type == EventType::ABSOLUTE {
@@ -522,6 +564,11 @@ mod service {
                         _ => {}
                     }
                 } else if ev_type == EventType::SYNCHRONIZATION && ev_code == 0 {
+                    match std::mem::replace(&mut wheel_frame, WheelDragStep::Nothing) {
+                        WheelDragStep::Started => outbox.send(&Event::DragStarted),
+                        WheelDragStep::Moved => outbox.send(&Event::DragMoved),
+                        WheelDragStep::Nothing => {}
+                    }
                     if let Some(point) = recognizer.sync() {
                         outbox.send(&Event::Updated(point.x, point.y));
                     }
