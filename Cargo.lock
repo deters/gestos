@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "gestos"
-version = "8.0.1"
+version = "8.1.0"
 dependencies = [
  "cairo-rs",
  "env_logger",
