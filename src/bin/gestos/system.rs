@@ -112,8 +112,18 @@ pub fn should_enable_autostart_on_first_start() -> bool {
     )
 }
 
+/// Stops this user's overlay, which is Gestos run with `--overlay`.
 pub fn stop_overlay() {
-    let _ = Command::new("pkill").args(["-f", "gestos --overlay"]).status();
+    for process in gestos::processes::running() {
+        let is_overlay = process.program() == Some("gestos")
+            && process.args.get(1).map(String::as_str) == Some("--overlay");
+        if is_overlay && process.is_own() {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(process.pid),
+                nix::sys::signal::Signal::SIGTERM,
+            );
+        }
+    }
 }
 
 /// Starts the overlay if the user has it enabled. Only the daemon's signals drive it, so it's

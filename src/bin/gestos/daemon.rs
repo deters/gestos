@@ -153,24 +153,12 @@ pub fn stop_daemon(conn: Option<&zbus::blocking::Connection>) {
     }
 
     // Not reachable over D-Bus, or not responding.
-    let uid = nix::unistd::Uid::current();
-    if let Ok(output) = Command::new("pgrep")
-        .arg("-u")
-        .arg(uid.to_string())
-        .arg("-x")
-        .arg("gestosd")
-        .output()
-    {
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                if let Ok(pid_val) = line.trim().parse::<i32>() {
-                    let _ = nix::sys::signal::kill(
-                        nix::unistd::Pid::from_raw(pid_val),
-                        nix::sys::signal::Signal::SIGTERM,
-                    );
-                }
-            }
+    for process in gestos::processes::running() {
+        if process.name == "gestosd" && process.is_own() {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(process.pid),
+                nix::sys::signal::Signal::SIGTERM,
+            );
         }
     }
 }
