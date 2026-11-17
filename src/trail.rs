@@ -307,7 +307,10 @@ mod x11 {
         pub fn open_trail(&self) -> Result<Trail<'_>, Error> {
             let conn = &self.conn;
             let screen = &conn.setup().roots[self.number];
-            let (width, height) = (screen.width_in_pixels, screen.height_in_pixels);
+            // Its size now, as monitors plugged in or out since connecting change it, which the
+            // connection's setup doesn't.
+            let geometry = conn.get_geometry(self.root)?.reply()?;
+            let (width, height) = (geometry.width, geometry.height);
             let window = conn.generate_id()?;
             let visual = if self.compositing()? { self.see_through_visual() } else { None };
             let aux = CreateWindowAux::new().override_redirect(1).border_pixel(0);
