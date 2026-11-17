@@ -42,9 +42,9 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Actions are now grouped in categories, such as Windows, Navigation and Sound and Media. You can still see all your gestures together by turning on "Show Gestures in the Main Page" in Settings.
 - A page for each app, with its gestures and the shortcuts it offers.
 - A panel that shows what a gesture ran, or why nothing ran (GNOME, KDE, X11).
-- The gesture path is now also shown on KDE and X11.
+- Now Gestos will also show the gesture path on KDE and X11.
 - New action "Look Up Selection": opens the selected text as a link, works out a sum, or searches the web for it.
-- Gestures per app now also work on Sway and Hyprland.
+- Now Gestos will also detect the app in use on Sway and Hyprland, and allow gestures per app there.
 
 ### Changed
 
@@ -120,7 +120,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Gestures per app now also work on KDE and X11.
+- Now Gestos will also detect the app in use on KDE and X11, and allow gestures per app there.
 
 ### Fixed
 
