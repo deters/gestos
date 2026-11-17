@@ -161,7 +161,7 @@ fn show_action_parameter(
     entry: &gtk::Entry,
     shortcut_display: &gtk::Box,
     record_button: &gtk::Button,
-    variables_controls: &gtk::Box,
+    command_display: &gtk::Box,
     show_steps: &dyn Fn(bool),
 ) {
     // A custom action has its list of steps instead of the one value other actions take. An app's
@@ -175,10 +175,12 @@ fn show_action_parameter(
     }
     show_steps(has_steps);
 
-    entry.set_visible(!is_keypress);
+    // A command is written in a window of its own, with room for it and its variables.
+    let is_command = matches!(&opt.action_type, ActionType::Execute(_));
+    entry.set_visible(!is_keypress && !is_command);
     shortcut_display.set_visible(is_keypress);
     record_button.set_visible(is_keypress);
-    variables_controls.set_visible(matches!(&opt.action_type, ActionType::Execute(_)));
+    command_display.set_visible(is_command);
 
     match &opt.action_type {
         ActionType::Keypress(_) => label.set_text("Keys to Send"),
@@ -620,10 +622,37 @@ fn open_editor(
     record_btn.set_tooltip_text(Some("Record keys"));
     entry_container.append(&record_btn);
 
-    let (variables_btn, variables_check) =
-        crate::ui::variables_menu::variables_controls(&action_details_entry, false);
-    variables_btn.set_visible(false);
-    entry_container.append(&variables_btn);
+    // A command shows on one line, with a button to the window it's written in. Whether it gets
+    // the variables is kept here, as the entry keeps the command.
+    let variables_check = gtk::CheckButton::new();
+    let command_display = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    command_display.set_hexpand(true);
+    command_display.set_visible(false);
+    let command_shown = crate::ui::command_editor::command_preview();
+    command_display.append(&command_shown);
+    let edit_command = crate::ui::command_editor::edit_command_button();
+    command_display.append(&edit_command);
+    entry_container.append(&command_display);
+    {
+        let dialog = dialog.clone();
+        let entry = action_details_entry.clone();
+        let variables = variables_check.clone();
+        edit_command.connect_clicked(move |_| {
+            let command = gestos::command_variables::ShellCommand::new(entry.text(), variables.is_active());
+            let entry = entry.clone();
+            let variables = variables.clone();
+            let on_set: Rc<dyn Fn(gestos::command_variables::ShellCommand)> = Rc::new(move |command| {
+                variables.set_active(command.variables);
+                entry.set_text(&command.text);
+            });
+            crate::ui::command_editor::open_command_editor(&dialog, &command, on_set);
+        });
+    }
+    let shown_from = command_shown.clone();
+    action_details_entry.connect_changed(move |entry| {
+        crate::ui::command_editor::show_command(&shown_from, &entry.text());
+    });
+    crate::ui::command_editor::show_command(&command_shown, "");
 
     action_details_row.append(&entry_container);
     settings_list.append(&action_details_row);
@@ -807,7 +836,7 @@ fn open_editor(
             &action_details_entry,
             &shortcut_display_box,
             &record_btn,
-            &variables_btn,
+            &command_display,
             &*show_steps,
         );
         // A chosen action is all a new gesture's default name needs.
@@ -900,7 +929,7 @@ fn open_editor(
                 &action_details_entry,
                 &shortcut_display_box,
                 &record_btn,
-                &variables_btn,
+                &command_display,
                 &*show_steps,
             );
             dialog.set_title(Some(&custom.name));

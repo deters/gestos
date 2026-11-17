@@ -1,4 +1,5 @@
 pub mod components;
+pub mod command_editor;
 pub mod shortcut_recorder;
 pub mod keyboard_steps;
 pub mod app_picker;

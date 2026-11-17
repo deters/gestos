@@ -61,7 +61,7 @@ struct StepsEditor {
     rows: RefCell<Vec<gtk::ListBoxRow>>,
     shown: Cell<bool>,
     steps: RefCell<Vec<KeyStep>>,
-    // Whether the box of a text or command step just added takes the focus, to type in right away.
+    // Whether the box of a text step just added takes the focus, to type in right away.
     focus_new_text: Cell<bool>,
 }
 
@@ -131,8 +131,8 @@ pub fn append_steps_rows(
     });
     let running = Rc::clone(&editor);
     add_button("Command", "Run a Command").connect_clicked(move |_| {
-        running.focus_new_text.set(true);
-        running.add(KeyStep::Run(Default::default()));
+        // Written in a window of its own, and only added once there's one.
+        running.edit_command(None);
     });
     let waiting = Rc::clone(&editor);
     add_button("Pause", "Add a Pause").connect_clicked(move |_| {
@@ -255,32 +255,13 @@ impl StepsEditor {
                 }
             }
             KeyStep::Run(command) => {
-                let entry = gtk::Entry::new();
-                entry.set_text(command);
-                entry.set_hexpand(true);
-                entry.add_css_class("monospace");
-                let (controls, check) =
-                    crate::ui::variables_menu::variables_controls(&entry, command.variables);
+                let preview = crate::ui::command_editor::command_preview();
+                crate::ui::command_editor::show_command(&preview, command);
+                content.append(&preview);
+                let edit = crate::ui::command_editor::edit_command_button();
                 let editor = Rc::clone(self);
-                let variables = check.clone();
-                entry.connect_changed(move |entry| {
-                    editor.steps.borrow_mut()[i] =
-                        KeyStep::Run(ShellCommand::new(entry.text(), variables.is_active()));
-                    editor.changed();
-                });
-                let editor = Rc::clone(self);
-                let text = entry.clone();
-                check.connect_toggled(move |check| {
-                    editor.steps.borrow_mut()[i] = KeyStep::Run(ShellCommand::new(text.text(), check.is_active()));
-                    editor.changed();
-                });
-                content.append(&entry);
-                content.append(&controls);
-                if i + 1 == count && self.focus_new_text.take() {
-                    gtk::glib::idle_add_local_once(move || {
-                        entry.grab_focus();
-                    });
-                }
+                edit.connect_clicked(move |_| editor.edit_command(Some(i)));
+                content.append(&edit);
             }
             KeyStep::Wait(millis) => {
                 let spin =
@@ -326,6 +307,29 @@ impl StepsEditor {
         row.append(&remove);
 
         row
+    }
+
+    /// Opens the window to write a step's command in, or a new one's, which is only added once it's
+    /// set.
+    fn edit_command(self: &Rc<Self>, i: Option<usize>) {
+        let command = match i.and_then(|i| self.steps.borrow().get(i).cloned()) {
+            Some(KeyStep::Run(command)) => command,
+            _ => ShellCommand::default(),
+        };
+        let editor = Rc::clone(self);
+        let on_set: Rc<dyn Fn(ShellCommand)> = Rc::new(move |command| {
+            {
+                let mut steps = editor.steps.borrow_mut();
+                match i {
+                    None => steps.push(KeyStep::Run(command)),
+                    Some(i) if i < steps.len() => steps[i] = KeyStep::Run(command),
+                    Some(_) => {}
+                }
+            }
+            editor.changed();
+            editor.rebuild();
+        });
+        crate::ui::command_editor::open_command_editor(&self.parent, &command, on_set);
     }
 
     /// Asks for the keys of a step, or of a new one, with the recorder the other shortcuts use. A
