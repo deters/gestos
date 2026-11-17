@@ -412,7 +412,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
         settings_row("Export Configuration", "Save your gestures to a YAML file");
     let export_btn = gtk::Button::with_mnemonic("_Export…");
     export_btn.set_valign(gtk::Align::Center);
-    let parent_clone = parent.clone();
+    let parent_clone = dialog.clone();
     export_btn.connect_clicked(move |_| {
         let chooser = gtk::FileChooserNative::new(
             Some("Export Configuration"),
@@ -487,7 +487,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
         settings_row("Import Configuration", "Load gestures from a YAML file");
     let import_btn = gtk::Button::with_mnemonic("_Import…");
     import_btn.set_valign(gtk::Align::Center);
-    let parent_clone = parent.clone();
+    let parent_clone = dialog.clone();
     let state_rc_clone = Rc::clone(state_rc);
     import_btn.connect_clicked(move |_| {
         let chooser = gtk::FileChooserNative::new(
@@ -563,7 +563,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     let reset_btn = gtk::Button::with_mnemonic("_Remove All…");
     reset_btn.set_valign(gtk::Align::Center);
     reset_btn.add_css_class("destructive-action");
-    let parent_clone = parent.clone();
+    let parent_clone = dialog.clone();
     let state_rc_clone2 = Rc::clone(state_rc);
     reset_btn.connect_clicked(move |_| {
         let parent_confirm = parent_clone.clone();

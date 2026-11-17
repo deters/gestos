@@ -37,6 +37,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Gestos didn't start when no mouse was connected. It now starts and waits for one.
 - The path of a gesture wasn't drawn on a monitor plugged in after Gestos started (X11).
 - After plugging in or unplugging a monitor, the path of the next gesture could be drawn on the wrong screen, or not at all (KDE).
+- The windows that "Export…", "Import…" and "Remove All…" open in Preferences belonged to the main window instead of Preferences. They could open on another monitor, apart from Preferences.
 
 ## [8.1.0] - 2026-11-16
 

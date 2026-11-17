@@ -234,7 +234,7 @@ fn delete_gesture(state_rc: &Rc<RefCell<AppState>>, id: &str) {
         println!("Failed to save config to file on delete: {}", e);
     }
     println!("Gesture deleted successfully: {}", removed.name);
-    reload_daemon(state.dbus_conn.as_ref(), Some(&state.window));
+    reload_daemon(state.dbus_conn.as_ref(), Some(&crate::ui::main_window::dialog_parent(&state)));
 
     let toast = adw::Toast::new(&format!(
         "\u{201c}{}\u{201d} deleted",
@@ -267,7 +267,7 @@ fn restore_gesture(state_rc: &Rc<RefCell<AppState>>, removed: &Gesture, pos: usi
     if let Err(e) = state.config.save_to_file() {
         println!("Failed to save config to file on undo: {}", e);
     }
-    reload_daemon(state.dbus_conn.as_ref(), Some(&state.window));
+    reload_daemon(state.dbus_conn.as_ref(), Some(&crate::ui::main_window::dialog_parent(&state)));
     drop(state);
     refresh_gesture_list(state_rc, Some(&name));
 }
