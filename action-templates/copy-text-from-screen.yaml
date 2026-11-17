@@ -1,0 +1,45 @@
+gestos-action-template: 1
+name: Copy Text from Screen
+description: Copies the text in an area of the screen you select, even in images and videos
+needs:
+  - program: tesseract
+    package: Tesseract OCR
+steps:
+  - run: |
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+      has() { command -v "$1" >/dev/null; }
+
+      image="${XDG_RUNTIME_DIR:-/tmp}/gestos-screen-text.png"
+      rm -f "$image"
+      # Each desktop has its own way to select an area.
+      case "${XDG_CURRENT_DESKTOP:-}" in
+          *KDE*) has spectacle || fail "Install Spectacle"
+                 spectacle --region --background --nonotify --output "$image" ;;
+          *GNOME*) has gnome-screenshot || fail "Install gnome-screenshot"
+                   gnome-screenshot --area --file="$image" ;;
+          *) if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+                 has grim && has slurp || fail "Install grim and slurp"
+                 area=$(slurp) && grim -g "$area" "$image"
+             else
+                 has import || fail "Install ImageMagick"
+                 import "$image"
+             fi ;;
+      esac
+      [ -s "$image" ] || exit 0
+
+      # The languages installed for it, which are the ones the user wants.
+      languages=$(tesseract --list-langs 2>/dev/null | tail -n +2 | grep -vx osd | paste -sd+)
+      text=$(tesseract "$image" - ${languages:+-l "$languages"} 2>/dev/null)
+      rm -f "$image"
+      [ -n "$(printf %s "$text" | tr -d '[:space:]')" ] || fail "There's no text in the selected area"
+
+      # They stay to hand the text over, and mustn't keep what Gestos reads from this open.
+      if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+          has wl-copy || fail "Install wl-clipboard to copy the text"
+          printf %s "$text" | wl-copy >/dev/null 2>&1
+      else
+          has xclip || fail "Install xclip to copy the text"
+          printf %s "$text" | xclip -selection clipboard >/dev/null 2>&1
+      fi
+      show "$text"

@@ -1,0 +1,18 @@
+gestos-action-template: 1
+name: Show QR Code
+description: Shows the selected text or link as a QR code, to scan with a phone
+needs:
+  - program: qrencode
+    package: qrencode
+steps:
+  - run: |
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+
+      [ -n "$GESTOS_SELECTION" ] || fail "Select some text first"
+
+      image="${XDG_RUNTIME_DIR:-/tmp}/gestos-qr-code.png"
+      printf %s "$GESTOS_SELECTION" | qrencode -s 12 -m 2 -o "$image" 2>/dev/null ||
+          fail "The selected text is too long for a QR code"
+      # A viewer that stays open mustn't keep what Gestos reads from this open.
+      xdg-open "$image" >/dev/null 2>&1

@@ -1,0 +1,26 @@
+gestos-action-template: 1
+name: Convert PDF to Images
+description: Saves each page of the selected PDFs as a PNG image, in a folder next to it
+apps: [FileManager]
+needs:
+  - program: pdftoppm
+    package: poppler-utils
+steps:
+  - copy: files
+  - run: |
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+
+      for f in "$@"; do
+          case $f in *.pdf|*.PDF) ;; *) fail "${f##*/} isn't a PDF" ;; esac
+      done
+
+      for f in "$@"; do
+          folder="${f%.*} (images)"
+          [ -e "$folder" ] && fail "${folder##*/} is there already"
+          mkdir "$folder" || fail "Couldn't make ${folder##*/}"
+          name="${f##*/}"
+          pdftoppm -png -r 150 "$f" "$folder/${name%.*} page" || fail "Couldn't convert ${f##*/}"
+      done
+
+      [ $# -eq 1 ] && show "Saved $(ls "$folder" | wc -l) images in ${folder##*/}" || show "Converted $# PDFs"
