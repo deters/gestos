@@ -164,6 +164,12 @@ function isSnapped(window) {
     return flags !== 0 && flags !== Meta.MaximizeFlags.BOTH && !window.is_fullscreen();
 }
 
+// The work area of the monitor a window is on, or null while it's on none, as it is for a moment
+// after a monitor is unplugged. Asking Mutter for that one crashes the Shell.
+function workAreaOf(window) {
+    return window.get_monitor() >= 0 ? window.get_work_area_current_monitor() : null;
+}
+
 // With workspaces only on the primary monitor, as GNOME has by default, windows on the others are
 // on every workspace. They're tiled with the workspace in use.
 function isOnSharedMonitor(window) {
@@ -481,9 +487,11 @@ class WindowActions {
     _resizeReopened(window, reopened) {
         if (isMaximizedAtAll(window))
             window.unmaximize();
+        const area = workAreaOf(window);
+        if (!area)
+            return;
         const frame = window.get_frame_rect();
-        const {x, y} = keepInside({x: frame.x, y: frame.y, ...reopened.rect},
-            window.get_work_area_current_monitor());
+        const {x, y} = keepInside({x: frame.x, y: frame.y, ...reopened.rect}, area);
         window.move_resize_frame(true, x, y, reopened.rect.width, reopened.rect.height);
     }
 
@@ -616,8 +624,8 @@ class WindowActions {
     _restoreOriginal(window) {
         const original = this._originals.get(window);
         if (original?.rect && !original.closing) {
-            const {x, y, width, height} =
-                keepInside(original.rect, window.get_work_area_current_monitor());
+            const area = workAreaOf(window);
+            const {x, y, width, height} = area ? keepInside(original.rect, area) : original.rect;
             window.move_resize_frame(true, x, y, width, height);
             this._forgetGiven(original);
         }
@@ -637,8 +645,9 @@ class WindowActions {
             return;
         }
         // No bigger than the screen, as that's the most it can take, so it's not waited for longer.
-        const area = window.get_work_area_current_monitor();
-        const rect = keepInside({...original.rect, ...fitSize(original.rect, area)}, area);
+        const area = workAreaOf(window);
+        const rect = area ? keepInside({...original.rect, ...fitSize(original.rect, area)}, area)
+            : copyRect(original.rect);
         const finish = () => {
             this._stopResizeWait(window, original);
             done();
@@ -1196,6 +1205,9 @@ class WindowActions {
         const monitors = new Map();
         for (const window of windows) {
             const monitor = window.get_monitor();
+            // One on no monitor is tiled once it's on one again.
+            if (monitor < 0)
+                continue;
             monitors.set(monitor, [...monitors.get(monitor) ?? [], window]);
         }
         return [...monitors.values()];
@@ -1360,6 +1372,10 @@ class WindowActions {
             };
             const frame = window.get_frame_rect();
             const monitor = window.get_monitor();
+            if (monitor < 0) {
+                makeRoom();
+                return;
+            }
             const full = window.is_fullscreen()
                 ? global.display.get_monitor_geometry(monitor)
                 : window.get_work_area_for_monitor(monitor);
@@ -1456,13 +1472,13 @@ class WindowActions {
             plan.windows.forEach(window => {
                 const state = tiling.windows.get(window);
                 const original = this._originals.get(window);
+                const area = workAreaOf(window);
                 if (!state?.tile || !original || original.closing || this._grabbed === window ||
-                    isSnapped(window) || (early && original.asked))
+                    isSnapped(window) || (early && original.asked) || !area)
                     return;
                 original.asked = null;
                 const frame = window.get_frame_rect();
                 const tile = state.tile;
-                const area = window.get_work_area_current_monitor();
                 // A bit smaller where it was put fills its tile as well as it can, as a terminal
                 // does with whole lines and columns.
                 if (Math.abs(frame.x - tile.x) <= 1 && Math.abs(frame.y - tile.y) <= 1 &&
@@ -1707,10 +1723,13 @@ class WindowActions {
         if (!middle?.window?.allows_resize())
             return;
         const window = middle.window;
+        const area = workAreaOf(window);
+        if (!area)
+            return;
         const from = middle.rect ?? copyRect(window.get_frame_rect());
         if (isMaximizedAtAll(window))
             window.unmaximize();
-        middle.rect = steppedRect(from, notches, window.get_work_area_current_monitor());
+        middle.rect = steppedRect(from, notches, area);
         const {x, y, width, height} = middle.rect;
         window.move_resize_frame(true, x, y, width, height);
     }
