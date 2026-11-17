@@ -11,7 +11,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - New actions for the files selected in a file manager, on its page in "Apps", above its keyboard shortcuts: "Convert to PDF", "Merge PDFs", "Compress PDFs", "Split PDF into Pages", "Convert PDF to Images", "Make a Dated Copy", "Convert Images to PNG", "Convert Images to JPG", "Make Images Half the Size", "Compress to ZIP", "Extract ZIP Files" and "Show Checksums".
-- New actions for the selected text: "Search the Web", "Translate", "Open Link", "Read Aloud", "Calculate", "Count Words" and "Show QR Code", which shows the text or link as a QR code to scan with a phone.
+- New actions for the selected text: "Search the Web", "Translate", "Open Link", "Read Aloud", "Calculate", "Count Words" and "Show QR Code", which shows the text or link as a QR code to scan with a phone. These actions copy the selected text, so it replaces what was in the clipboard.
 - New action "Copy Text from Screen": you select an area of the screen, and Gestos copies the text in it, including text in images and videos.
 - These actions show their result, like "Converted 3 images". When they can't do anything, they say why, like "The selected images are PNGs already" or "Select at least two PDFs to merge".
 - An action that needs a program you don't have says which package to install.

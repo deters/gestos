@@ -5,11 +5,12 @@ needs:
   - program: python3
     package: Python
 steps:
+  - copy: text
   - run: |
       fail() { echo "$*" >&2; exit 1; }
       show() { echo "$*"; }
 
-      [ -n "$GESTOS_SELECTION" ] || fail "Select some text first"
+      [ -n "$GESTOS_CLIPBOARD" ] || fail "Select some text first"
 
-      text=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$GESTOS_SELECTION")
+      text=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$GESTOS_CLIPBOARD")
       xdg-open "https://duckduckgo.com/?q=$text"

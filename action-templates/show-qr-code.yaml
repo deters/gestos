@@ -5,15 +5,16 @@ needs:
   - program: qrencode
     package: qrencode
 steps:
+  - copy: text
   - run: |
       fail() { echo "$*" >&2; exit 1; }
       show() { echo "$*"; }
 
-      [ -n "$GESTOS_SELECTION" ] || fail "Select some text first"
+      [ -n "$GESTOS_CLIPBOARD" ] || fail "Select some text first"
 
       image="${XDG_RUNTIME_DIR:-/tmp}/gestos-qr-code.png"
       # A QR code holds up to 2953 bytes, at the lowest error correction qrencode uses by default.
-      [ "$(printf %s "$GESTOS_SELECTION" | wc -c)" -le 2953 ] || fail "The selected text is too long for a QR code"
-      printf %s "$GESTOS_SELECTION" | qrencode -s 12 -m 2 -o "$image" || fail "Couldn't make the QR code"
+      [ "$(printf %s "$GESTOS_CLIPBOARD" | wc -c)" -le 2953 ] || fail "The selected text is too long for a QR code"
+      printf %s "$GESTOS_CLIPBOARD" | qrencode -s 12 -m 2 -o "$image" || fail "Couldn't make the QR code"
       # A viewer that stays open mustn't keep what Gestos reads from this open.
       xdg-open "$image" >/dev/null 2>&1 || fail "No app is set to open PNG images"

@@ -477,14 +477,14 @@ steps:
             .unwrap()
     }
 
-    /// Runs a command as Gestos does, with the files as its arguments, and the selection.
-    fn run(command: &str, files: &[&Path], selection: &str) -> std::process::Output {
+    /// Runs a command as Gestos does, with the files as its arguments, and the text copied.
+    fn run(command: &str, files: &[&Path], copied: &str) -> std::process::Output {
         std::process::Command::new("sh")
             .arg("-c")
             .arg(command)
             .arg("gestos")
             .args(files)
-            .env("GESTOS_SELECTION", selection)
+            .env("GESTOS_CLIPBOARD", copied)
             .output()
             .unwrap()
     }
@@ -523,8 +523,8 @@ steps:
     }
 
     /// What an installed template's command shows: what it printed if it worked, or why it didn't.
-    fn shown(id: &str, files: &[&Path], selection: &str) -> Result<String, String> {
-        let output = run(&installed_command(id), files, selection);
+    fn shown(id: &str, files: &[&Path], copied: &str) -> Result<String, String> {
+        let output = run(&installed_command(id), files, copied);
         let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).trim().to_string();
         if output.status.success() { Ok(text(&output.stdout)) } else { Err(text(&output.stderr)) }
     }
@@ -677,7 +677,7 @@ steps:
         let output = std::process::Command::new("sh")
             .arg("-c")
             .arg(&command)
-            .env("GESTOS_SELECTION", "https://example.com")
+            .env("GESTOS_CLIPBOARD", "https://example.com")
             .env("XDG_RUNTIME_DIR", &dir.0)
             .output()
             .unwrap();
@@ -696,8 +696,13 @@ steps:
             let path = entry.path();
             let id = path.file_stem().unwrap().to_string_lossy().into_owned();
             let template = parse(&std::fs::read_to_string(&path).unwrap(), &id).unwrap();
-            for step in &template.steps {
+            for (i, step) in template.steps.iter().enumerate() {
                 if let KeyStep::Run(command) = step {
+                    // The selected text is copied first, as not every app reports what's selected.
+                    assert!(!command.text.contains("GESTOS_SELECTION"), "{id}");
+                    if command.text.contains("GESTOS_CLIPBOARD") {
+                        assert!(template.steps[..i].contains(&KeyStep::Copy(CopyKind::Text)), "{id}");
+                    }
                     assert_eq!(unquoted_variable(command), None, "{id}");
                     let status = std::process::Command::new("sh").arg("-n").arg("-c").arg(&command.text).status().unwrap();
                     assert!(status.success(), "{id}");

@@ -2,11 +2,12 @@ gestos-action-template: 1
 name: Count Words
 description: Shows how many words the selected text has
 steps:
+  - copy: text
   - run: |
       fail() { echo "$*" >&2; exit 1; }
       show() { echo "$*"; }
 
-      [ -n "$GESTOS_SELECTION" ] || fail "Select some text first"
+      [ -n "$GESTOS_CLIPBOARD" ] || fail "Select some text first"
 
-      words=$(echo "$GESTOS_SELECTION" | wc -w)
+      words=$(echo "$GESTOS_CLIPBOARD" | wc -w)
       [ "$words" -eq 1 ] && show "1 word" || show "$words words"

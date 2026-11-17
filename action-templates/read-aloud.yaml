@@ -5,10 +5,11 @@ needs:
   - program: spd-say
     package: speech-dispatcher
 steps:
+  - copy: text
   - run: |
       fail() { echo "$*" >&2; exit 1; }
       show() { echo "$*"; }
 
-      [ -n "$GESTOS_SELECTION" ] || fail "Select some text first"
+      [ -n "$GESTOS_CLIPBOARD" ] || fail "Select some text first"
 
-      spd-say "$GESTOS_SELECTION"
+      spd-say "$GESTOS_CLIPBOARD"

@@ -5,14 +5,15 @@ needs:
   - program: xdg-open
     package: xdg-utils
 steps:
+  - copy: text
   - run: |
       fail() { echo "$*" >&2; exit 1; }
       show() { echo "$*"; }
 
-      [ -n "$GESTOS_SELECTION" ] || fail "Select some text first"
+      [ -n "$GESTOS_CLIPBOARD" ] || fail "Select some text first"
 
-      case "$GESTOS_SELECTION" in
-          http://*|https://*) xdg-open "$GESTOS_SELECTION" ;;
-          www.*) xdg-open "https://$GESTOS_SELECTION" ;;
+      case "$GESTOS_CLIPBOARD" in
+          http://*|https://*) xdg-open "$GESTOS_CLIPBOARD" ;;
+          www.*) xdg-open "https://$GESTOS_CLIPBOARD" ;;
           *) fail "The selected text isn't a link" ;;
       esac
