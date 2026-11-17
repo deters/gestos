@@ -1,3 +1,4 @@
+pub mod action_templates;
 pub mod active_app;
 pub mod app_cache;
 pub mod app_shortcuts;

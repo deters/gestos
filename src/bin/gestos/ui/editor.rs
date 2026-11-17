@@ -30,6 +30,17 @@ fn is_custom_action(option: &EditorActionOption) -> bool {
     matches!(&option.action_type, ActionType::Keyboard(steps) if steps.is_empty())
 }
 
+/// The steps an action has that can be customized: an app's own action's one step, or a
+/// template's steps as installed now. Customizing copies them, so the gesture no longer follows
+/// the template.
+fn customizable_steps(action: &ActionType) -> Option<Vec<KeyStep>> {
+    match action {
+        ActionType::Keyboard(steps) if crate::actions::only_opens_an_app(action) => Some(steps.clone()),
+        ActionType::Template(id) => crate::action_templates::find(id).map(|template| template.steps),
+        _ => None,
+    }
+}
+
 /// Whether a gesture with this action is named by the user, as a custom action or a custom
 /// keyboard shortcut are, since the action alone doesn't say what they're for.
 fn has_own_name(option: &EditorActionOption) -> bool {
@@ -124,7 +135,13 @@ fn option_for_gesture(
             return Some(option);
         }
     }
+    // A template offered only on its apps' pages isn't among the options.
+    let template = || match action {
+        ActionType::Template(id) => crate::action_templates::find(id).map(|t| crate::action_templates::option(&t)),
+        _ => None,
+    };
     found
+        .or_else(template)
         .or_else(custom)
         .or_else(|| {
             Some(EditorActionOption {
@@ -877,8 +894,13 @@ fn open_editor(
         extension_label.set_text(note.unwrap_or_default());
         extension_label.set_visible(note.is_some());
         // Most actions have nothing to fill in, which leaves this section empty. An app's own
-        // action can become a custom action, to do more once the app is open.
-        customize_btn.set_visible(crate::actions::only_opens_an_app(&opt.action_type));
+        // action can become a custom action, to do more once the app is open, and so can a
+        // template's, to change its steps.
+        customize_btn.set_visible(customizable_steps(&opt.action_type).is_some());
+        customize_btn.set_tooltip_text(
+            matches!(opt.action_type, ActionType::Template(_))
+                .then_some("Change its steps. The gesture will no longer get updates to this action."),
+        );
         let has_details =
             action_needs_parameter(&opt) && !matches!(opt.action_type, ActionType::Keypress(_));
         settings_section_label.set_visible(has_details);
@@ -911,10 +933,8 @@ fn open_editor(
         let check = check.clone();
         customize_btn.connect_clicked(move |_| {
             let Some(custom) = custom.clone() else { return };
-            let steps = match selected_action.borrow().as_ref().map(|opt| &opt.action_type) {
-                Some(ActionType::Keyboard(steps)) => steps.clone(),
-                _ => return,
-            };
+            let steps = selected_action.borrow().as_ref().and_then(|opt| customizable_steps(&opt.action_type));
+            let Some(steps) = steps else { return };
             *selected_action.borrow_mut() = Some(custom.clone());
             action_details_entry.set_text(&format_steps(&steps));
             load_steps();

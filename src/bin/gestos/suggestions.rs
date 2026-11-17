@@ -351,7 +351,9 @@ pub fn category_of(option: &EditorActionOption) -> Category {
         ActionType::Click(_) => Category::Other,
         _ if crate::ui::app_picker::opened_app(&option.action_type).is_some() => Category::Apps,
         ActionType::Keypress(_) => Category::KeyboardShortcuts,
-        // Action templates, which are steps written out.
+        // Action templates, which are steps written out, and actions made from them before they
+        // were linked.
+        ActionType::Template(_) => Category::Advanced,
         ActionType::Keyboard(steps) if !steps.is_empty() => Category::Advanced,
         // GNOME's own custom shortcuts, which run commands.
         ActionType::Execute(command) if !command.is_empty() => Category::CustomShortcuts,

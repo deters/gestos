@@ -416,6 +416,7 @@ fn spawn_gesture_actions(
     wait_for_release: bool,
 ) {
     std::thread::spawn(move || {
+        let actions: Vec<ActionType> = actions.into_iter().filter_map(template_steps).collect();
         // The app is only looked up for a gesture when some are only for some apps.
         if context.app.is_none() && actions.iter().any(runs_a_command) {
             context.app = ask_focused_app(&wayland_ctx).flatten();
@@ -450,6 +451,19 @@ fn spawn_gesture_actions(
             }
         }
     });
+}
+
+/// An action template's steps as they are installed now, so that an updated template is followed.
+/// One that's gone, or can't be read, does nothing and says so. Other actions are as they are.
+fn template_steps(action: ActionType) -> Option<ActionType> {
+    let ActionType::Template(id) = action else { return Some(action) };
+    match gestos::action_templates::find(&id) {
+        Some(template) => Some(ActionType::Keyboard(template.steps)),
+        None => {
+            gestos::wayland::action_failed(format!("The action template \"{id}\" isn't installed or can't be read"));
+            None
+        }
+    }
 }
 
 /// Whether an action runs a command, which is told the app in use.

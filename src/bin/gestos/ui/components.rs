@@ -286,6 +286,7 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
                 )
             }
         }
+        ActionType::Template(id) => crate::action_templates::find(id).map_or_else(|| id.clone(), |t| t.name),
         ActionType::Execute(cmd) => {
             if cmd.is_empty() {
                 "Run Command in Shell".to_string()

@@ -324,7 +324,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorAct
         .app_templates
         .iter()
         .filter(|template| template.is_for(app, &categories))
-        .map(|template| template.option())
+        .map(crate::action_templates::option)
         .collect();
     if !templates.is_empty() {
         let rows = list();
@@ -1242,7 +1242,7 @@ fn load_action_options(state: &Rc<RefCell<AppState>>) {
         // pages only.
         let (for_some_apps, for_any): (Vec<_>, Vec<_>) =
             crate::action_templates::load().into_iter().partition(|template| !template.apps.is_empty());
-        options.extend(for_any.iter().map(|template| template.option()));
+        options.extend(for_any.iter().map(crate::action_templates::option));
         (options, for_some_apps)
     });
     let state_options = Rc::clone(state);

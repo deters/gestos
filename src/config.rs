@@ -18,6 +18,9 @@ pub enum ActionType {
     Keypress(String),
     /// Shortcuts, text and pauses, in order. With no steps, it's the generic action to fill in.
     Keyboard(Vec<KeyStep>),
+    /// An action template's steps, by the template's ID, read each time it runs so that an updated
+    /// template is followed.
+    Template(String),
     Execute(crate::command_variables::ShellCommand),
     WorkspaceLeft,
     WorkspaceRight,
@@ -79,6 +82,7 @@ impl ActionType {
                 Some(ActionType::Keypress(normalized))
             }
             "keyboard" => Some(ActionType::Keyboard(parse_steps(&arg))),
+            "template" if !arg.is_empty() => Some(ActionType::Template(arg)),
             "exec" => Some(ActionType::Execute(ShellCommand::new(arg, false))),
             "exec-with-variables" => Some(ActionType::Execute(ShellCommand::new(arg, true))),
             "workspace-left" => Some(ActionType::WorkspaceLeft),
@@ -187,7 +191,7 @@ impl ActionType {
     pub fn get_icon_name(&self) -> &'static str {
         match self {
             ActionType::Execute(_) => "utilities-terminal-symbolic",
-            ActionType::Keypress(_) | ActionType::Keyboard(_) => "input-keyboard-symbolic",
+            ActionType::Keypress(_) | ActionType::Keyboard(_) | ActionType::Template(_) => "input-keyboard-symbolic",
             ActionType::Gnome(key) => gnome_icon_name(key),
             ActionType::Kde(_, _) => "preferences-system-symbolic",
             ActionType::Lookup => "edit-find-symbolic",
@@ -237,6 +241,7 @@ impl ActionType {
             ActionType::ToggleMaximized => "Toggle Maximize".to_string(),
             ActionType::Keypress(keys) => format!("Press keys: {}", keys),
             ActionType::Keyboard(steps) => format!("Custom action: {}", describe_steps(steps)),
+            ActionType::Template(id) => crate::action_templates::find(id).map_or_else(|| id.clone(), |t| t.name),
             ActionType::Execute(cmd) => format!("Run: {}", short_command(cmd)),
             ActionType::WorkspaceLeft => "Workspace Left".to_string(),
             ActionType::WorkspaceRight => "Workspace Right".to_string(),
@@ -338,6 +343,7 @@ impl std::fmt::Display for ActionType {
             ActionType::ToggleMaximized => write!(f, "toggle-maximized"),
             ActionType::Keypress(arg) => write!(f, "keypress {}", arg),
             ActionType::Keyboard(steps) => write!(f, "keyboard {}", format_steps(steps)),
+            ActionType::Template(id) => write!(f, "template {}", id),
             ActionType::Execute(command) if command.variables => write!(f, "exec-with-variables {}", command),
             ActionType::Execute(command) => write!(f, "exec {}", command),
             ActionType::WorkspaceLeft => write!(f, "workspace-left"),
@@ -1398,6 +1404,14 @@ mod tests {
             KeyStep::Wait(150),
         ]);
         assert_eq!(ActionType::from_string(&action.to_string()), Some(action));
+    }
+
+    #[test]
+    fn a_template_action_is_saved_as_its_id() {
+        let action = ActionType::Template("convert-to-pdf".to_string());
+        assert_eq!(action.to_string(), "template convert-to-pdf");
+        assert_eq!(ActionType::from_string("template convert-to-pdf"), Some(action));
+        assert_eq!(ActionType::from_string("template"), None);
     }
 
     #[test]
