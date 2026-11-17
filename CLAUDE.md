@@ -30,7 +30,9 @@ Each release's page on GitHub is its section there.
   now …', 'New option "Allow Middle Click Paste" in Settings …'. When a change hides something,
   say how to get it back: 'Actions are now grouped in categories. You can still see all your
   gestures together by turning on "Show Gestures in the Main Page" in Settings.'
-- Where something only works on some desktops goes last, in parentheses: "(GNOME, KDE)".
+- When something doesn't work everywhere, the entry ends by saying where it does: "Works on
+  GNOME." or "Works on GNOME, KDE and X11." A change to how it works on one desktop starts with
+  it: "On GNOME, …".
 - Before committing any text for users, reread it for what makes text read as AI-written:
   claims and slogans, vague comparatives like "smoother" or "better" with nothing behind them,
   marketing phrases like "in one click" or "no more", and fragments used for punch.

@@ -16,17 +16,17 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New option "Control Windows With the Middle Button" in Settings: dragging with the middle button moves the window under the pointer, and scrolling resizes it (GNOME).
+- New option "Control Windows With the Middle Button" in Settings: dragging with the middle button moves the window under the pointer, and scrolling resizes it. Works on GNOME.
 - The action "Advanced Action" can now run a command as one of its steps.
 - Each app's page can now create an "Advanced Action" that works only in that app.
 - The actions "Run Command in Shell" and "Advanced Action" can now give their commands the copied text, the selected text and the copied files, with the new option "Use Variables".
-- New option "Allow Middle Click Paste" in Settings, to turn off pasting with the middle button.
-- New action "Toggle Middle Click Paste": turns middle click paste on or off.
-- New action "Toggle Middle Button Window Control": turns "Control Windows With the Middle Button" on or off.
+- New option "Allow Middle Click Paste" in Settings, to turn off pasting with the middle button. Works on GNOME.
+- New action "Toggle Middle Click Paste": turns middle click paste on or off. Works on GNOME.
+- New action "Toggle Middle Button Window Control": turns "Control Windows With the Middle Button" on or off. Works on GNOME.
 
 ### Changed
 
-- While a window is dragged, only the tiled windows in its way move now, instead of all of them.
+- While a window is dragged, only the tiled windows in its way move now, instead of all of them. Works on GNOME.
 - "Import Configuration" in Settings now lists the commands the imported gestures run, before you confirm.
 
 ## [8.0.1] - 2026-11-15
@@ -41,7 +41,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Actions are now grouped in categories, such as Windows, Navigation and Sound and Media. You can still see all your gestures together by turning on "Show Gestures in the Main Page" in Settings.
 - A page for each app, with its gestures and the shortcuts it offers.
-- A panel that shows what a gesture ran, or why nothing ran (GNOME, KDE, X11).
+- A panel that shows what a gesture ran, or why nothing ran. Works on GNOME, KDE and X11.
 - Now Gestos will also show the gesture path on KDE and X11.
 - New action "Look Up Selection": opens the selected text as a link, works out a sum, or searches the web for it.
 - Now Gestos will also detect the app in use on Sway and Hyprland, and allow gestures per app there.
@@ -63,18 +63,18 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Windows snapped to half the screen now stay there, and tiling fits the other windows beside them.
+- Windows snapped to half the screen now stay there, and tiling fits the other windows beside them. Works on GNOME.
 
 ## [7.0.0] - 2026-11-10
 
 ### Added
 
-- Tiling now also works on other monitors. Dialogs and videos stay on top instead of taking a tile.
-- New option "Show Overview With Both Buttons" in Settings: holding right and clicking left shows all windows (GNOME, KDE).
+- Tiling now also works on other monitors. Dialogs and videos stay on top instead of taking a tile. Works on GNOME.
+- New option "Show Overview With Both Buttons" in Settings: holding right and clicking left shows all windows. Works on GNOME and KDE.
 
 ### Changed
 
-- Windows now get back the size you gave them after tiling or maximizing, even after the app is reopened.
+- Windows now get back the size you gave them after tiling or maximizing, even after the app is reopened. Works on GNOME.
 
 ### Fixed
 
@@ -86,7 +86,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New actions "View Split on Left" and "View Split on Right": put a window on half the screen.
+- New actions "View Split on Left" and "View Split on Right": put a window on half the screen. Works on GNOME.
 
 ### Fixed
 
@@ -150,7 +150,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - New "Open" action for every installed app, which also brings the app to the front if it's open.
-- New option "Show Gesture Path" in Preferences: draws each gesture on screen as you draw it.
+- New option "Show Gesture Path" in Preferences: draws each gesture on screen as you draw it. Works on GNOME.
 - New option "Draw With" in Preferences: draws gestures with the right, middle, back or forward button. Left-handed mice use the other side.
 - New option "Debugging Information" in Preferences: creates a report to attach to a bug report.
 
@@ -178,7 +178,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Gestures limited to some apps (GNOME).
+- Gestures limited to some apps. Works on GNOME.
 - The action "Custom Action" can now open an app, or bring it to the front, before its other steps.
 - Each "Custom Action" now has a name, and a new one is named after what was searched for.
 
@@ -193,14 +193,14 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - New action "Custom Keyboard Action", which replaces "Custom Keyboard Shortcut": presses shortcuts, types text and waits, in the order you set. The text can have several lines and accented letters.
-- New option "Tile Automatically" in Preferences: tiles every workspace, new ones too.
+- New option "Tile Automatically" in Preferences: tiles every workspace, new ones too. Works on GNOME.
 - Gestos now says when its GNOME extension is out of date, and how to update it.
 
 ### Changed
 
-- Tiling now keeps windows at their own sizes, moving them just enough not to overlap.
-- Tiling now stays on until turned off, also after logging out.
-- The card that asks which gesture was meant now appears at the pointer, and the window keeps its focus (GNOME).
+- Tiling now keeps windows at their own sizes, moving them just enough not to overlap. Works on GNOME.
+- Tiling now stays on until turned off, also after logging out. Works on GNOME.
+- On GNOME, the card that asks which gesture was meant now appears at the pointer, and the window keeps its focus.
 - The actions "Run Command" and "Custom Keyboard Action" are now offered in every search.
 - The shortcut recorder now also records Escape, Backspace, Tab and Enter.
 
@@ -220,7 +220,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Moving a tiled window puts all windows back at their own sizes again, as before 6.2.0.
+- Moving a tiled window puts all windows back at their own sizes again, as before 6.2.0. Works on GNOME.
 
 ### Fixed
 
@@ -230,7 +230,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Moving a tiled window now keeps the workspace tiled: the window takes a tile where it's left.
+- Moving a tiled window now keeps the workspace tiled: the window takes a tile where it's left. Works on GNOME.
 
 ## [6.1.3] - 2026-11-03
 
@@ -243,8 +243,8 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- The action "Close Window" now closes windows like their close button does (GNOME).
-- Shortcuts pressed by gestures now start sooner (GNOME).
+- On GNOME, the action "Close Window" now closes windows like their close button does.
+- On GNOME, shortcuts pressed by gestures now start sooner.
 - The pointer could stutter on a busy desktop.
 
 ## [6.1.1] - 2026-11-02
@@ -260,9 +260,9 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New action "Toggle Tile Windows": fits a workspace's windows together without overlaps, and puts them back when used again (GNOME).
+- New action "Toggle Tile Windows": fits a workspace's windows together without overlaps, and puts them back when used again. Works on GNOME.
 - The Gestos GNOME extension, which tiling needs. It comes with Gestos: log out and back in, then turn it on (Preferences).
-- Tiled windows get their own size back before they're closed, so apps don't remember the tile's size.
+- Tiled windows get their own size back before they're closed, so apps don't remember the tile's size. Works on GNOME.
 
 ### Changed
 
