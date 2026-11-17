@@ -164,10 +164,15 @@ function isSnapped(window) {
     return flags !== 0 && flags !== Meta.MaximizeFlags.BOTH && !window.is_fullscreen();
 }
 
-// The work area of the monitor a window is on, or null while it's on none, as it is for a moment
-// after a monitor is unplugged. Asking Mutter for that one crashes the Shell.
+// A window is on no monitor for a moment after one is unplugged, and maybe as it closes. Asking
+// Mutter for its work area then crashes the Shell, and so does unmaximizing it, which asks for that.
+function isOnMonitor(window) {
+    return window.get_monitor() >= 0;
+}
+
+// The work area of the monitor a window is on, or null while it's on none.
 function workAreaOf(window) {
-    return window.get_monitor() >= 0 ? window.get_work_area_current_monitor() : null;
+    return isOnMonitor(window) ? window.get_work_area_current_monitor() : null;
 }
 
 // With workspaces only on the primary monitor, as GNOME has by default, windows on the others are
@@ -485,11 +490,11 @@ class WindowActions {
     }
 
     _resizeReopened(window, reopened) {
-        if (isMaximizedAtAll(window))
-            window.unmaximize();
         const area = workAreaOf(window);
         if (!area)
             return;
+        if (isMaximizedAtAll(window))
+            window.unmaximize();
         const frame = window.get_frame_rect();
         const {x, y} = keepInside({x: frame.x, y: frame.y, ...reopened.rect}, area);
         window.move_resize_frame(true, x, y, reopened.rect.width, reopened.rect.height);
@@ -635,6 +640,10 @@ class WindowActions {
     // Gives a window its original size back, and calls done once the app has taken it, or after a
     // while if it doesn't.
     _restoreOriginalThen(window, original, done) {
+        if (!isOnMonitor(window)) {
+            done();
+            return;
+        }
         original.fixing = true;
         if (isMaximizedAtAll(window))
             window.unmaximize();
@@ -645,9 +654,8 @@ class WindowActions {
             return;
         }
         // No bigger than the screen, as that's the most it can take, so it's not waited for longer.
-        const area = workAreaOf(window);
-        const rect = area ? keepInside({...original.rect, ...fitSize(original.rect, area)}, area)
-            : copyRect(original.rect);
+        const area = window.get_work_area_current_monitor();
+        const rect = keepInside({...original.rect, ...fitSize(original.rect, area)}, area);
         const finish = () => {
             this._stopResizeWait(window, original);
             done();
@@ -1087,7 +1095,8 @@ class WindowActions {
         this._joinTiling(tiling, window, {tile: null});
         // A window that joins is the one the user touched last, as it's just been opened or shown.
         tiling.order.unshift(window);
-        if (maximized) {
+        // One on no monitor stays maximized, as it can't be unmaximized then.
+        if (maximized && isOnMonitor(window)) {
             window.unmaximize();
             // An X11 window takes its normal size at once, so there's nothing to wait for.
             if (window.get_client_type() === Meta.WindowClientType.X11)
@@ -1690,7 +1699,7 @@ class WindowActions {
 
     _onMiddleDragStarted() {
         const middle = this._middleWindow(Meta.GrabOp.MOVING);
-        if (!middle?.window?.allows_move())
+        if (!middle?.window?.allows_move() || !isOnMonitor(middle.window))
             return;
         // It's held where the pointer took it, as a part of its size, so one that changes size as
         // it's restored stays under the pointer.
