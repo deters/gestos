@@ -777,11 +777,10 @@ fn open_editor(
     });
 
     // Drawing again clears what's drawn, and the keys held with it, so the next one is recorded.
-    // A record button, as the shortcut steps have, quiet over the drawing, as replacing a gesture
-    // is occasional.
-    let draw_again = gtk::Button::from_icon_name("media-record-symbolic");
-    draw_again.set_tooltip_text(Some("Redraw"));
-    draw_again.update_property(&[gtk::accessible::Property::Label("Redraw")]);
+    // The clear button entries have, quiet over the drawing, as replacing a gesture is occasional.
+    let draw_again = gtk::Button::from_icon_name("edit-clear-symbolic");
+    draw_again.set_tooltip_text(Some("Clear"));
+    draw_again.update_property(&[gtk::accessible::Property::Label("Clear")]);
     draw_again.add_css_class("flat");
     draw_again.set_halign(gtk::Align::End);
     draw_again.set_valign(gtk::Align::Start);
