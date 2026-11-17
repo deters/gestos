@@ -1,7 +1,7 @@
 //! The daemon's end of the connection to the `gestos-input` service.
 
 use crate::input_protocol::Request;
-use crate::key_steps::KeyStep;
+use crate::key_steps::{CopyWait, KeyStep};
 use crate::modifiers::HeldKeys;
 use crate::keys::{name_to_keycode, parse_key_combo_on};
 use crate::uinput::trigger_button_code;
@@ -149,17 +149,19 @@ impl InputClient {
     /// which only the desktop can do, and says whether it then has focus. If it doesn't, the steps
     /// after it would go to some other window, so they're left out. `run` runs a command and says
     /// whether it worked, as the steps after one that failed may count on what it does. It's also
-    /// told whether a copy was just made for it, which it then waits for. `clear_copied` clears
-    /// what was copied before such a copy, and says whether it could.
+    /// told what a copy just made for it copies, which it then waits for. `clear_copied` clears
+    /// what was copied before such a copy, and says whether it could. `copy_keys` are the keys that
+    /// copy in the app in use, if they're known: a copy step stops the steps where they aren't.
     pub fn run_steps(
         &self,
         steps: &[KeyStep],
         open_app: &dyn Fn(&str) -> bool,
-        run: &dyn Fn(&crate::command_variables::ShellCommand, bool) -> bool,
+        run: &dyn Fn(&crate::command_variables::ShellCommand, CopyWait) -> bool,
         clear_copied: &dyn Fn() -> bool,
+        copy_keys: &dyn Fn() -> Option<String>,
     ) {
         let copies = crate::key_steps::copies_for_commands(steps);
-        let mut just_copied = false;
+        let mut just_copied = CopyWait::Nothing;
         for (i, step) in steps.iter().enumerate() {
             match step {
                 KeyStep::Press(keys) if copies.contains(&i) => {
@@ -167,9 +169,17 @@ impl InputClient {
                         return;
                     }
                     self.keypress_string(keys);
-                    just_copied = true;
+                    just_copied = CopyWait::Anything;
                 }
                 KeyStep::Press(keys) => self.keypress_string(keys),
+                KeyStep::Copy(kind) => {
+                    let Some(keys) = copy_keys() else { return };
+                    if !clear_copied() {
+                        return;
+                    }
+                    self.keypress_string(&keys);
+                    just_copied = CopyWait::Kind(*kind);
+                }
                 KeyStep::Type(text) => self.type_text(text),
                 KeyStep::Wait(millis) => {
                     std::thread::sleep(Duration::from_millis(u64::from(*millis)));
@@ -180,7 +190,7 @@ impl InputClient {
                     }
                 }
                 KeyStep::Run(command) => {
-                    if !run(command, std::mem::take(&mut just_copied)) {
+                    if !run(command, std::mem::replace(&mut just_copied, CopyWait::Nothing)) {
                         return;
                     }
                 }
@@ -264,6 +274,7 @@ mod tests {
             &|_| true,
             &|_, _| true,
             &|| true,
+            &|| Some("Control+C".to_string()),
         );
         assert!(started.elapsed() >= Duration::from_millis(30));
         let requests = received(&mut service, 6);
@@ -293,6 +304,7 @@ mod tests {
             },
             &|_, _| true,
             &|| true,
+            &|| Some("Control+C".to_string()),
         );
         assert_eq!(*opened.borrow(), ["org.example.Missing"]);
         client.send(&Request::QueryHeld);
@@ -311,6 +323,7 @@ mod tests {
                 false
             },
             &|| true,
+            &|| Some("Control+C".to_string()),
         );
         assert_eq!(*ran.borrow(), ["false"]);
         client.send(&Request::QueryHeld);
@@ -337,9 +350,10 @@ mod tests {
                 cleared.set(cleared.get() + 1);
                 true
             },
+            &|| Some("Control+C".to_string()),
         );
         assert_eq!(cleared.get(), 1);
-        assert_eq!(*ran.borrow(), [true, false]);
+        assert_eq!(*ran.borrow(), [CopyWait::Anything, CopyWait::Nothing]);
         // The copy shortcut was pressed.
         assert!(matches!(received(&mut service, 1)[0], Request::Key { pressed: true, .. }));
     }
@@ -356,6 +370,7 @@ mod tests {
                 true
             },
             &|| false,
+            &|| Some("Control+C".to_string()),
         );
         assert!(!ran.get());
         client.send(&Request::QueryHeld);

@@ -78,8 +78,6 @@ pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> Strin
         ActionType::Execute(_) if opt.category == 7 => {
             if detail.trim().is_empty() {
                 opt.name.clone()
-            } else if let Some(name) = crate::command_library::name_of(detail) {
-                name.to_string()
             } else {
                 format!("{} ({})", opt.name, gestos::config::short_command(detail))
             }
@@ -314,7 +312,7 @@ fn draw_new_gesture(
     // Named as the editor will name it: as the app names its shortcut, or after the action.
     let detail = keys.as_deref().unwrap_or_default();
     let name = match apps.as_slice() {
-        [app] if !detail.is_empty() => crate::app_shortcuts::title_for(app, detail),
+        [app] if !detail.is_empty() => gestos::app_shortcuts::title_for(app, detail),
         _ => None,
     }
     .unwrap_or_else(|| get_default_gesture_name(&action, detail));
@@ -690,7 +688,7 @@ fn open_editor(
                 // A shortcut for one app is named as that app names it, if it lists those keys.
                 let app_title = match apps.borrow().as_slice() {
                     [app] if crate::suggestions::is_custom_shortcut(opt) && !detail.trim().is_empty() => {
-                        crate::app_shortcuts::title_for(app, detail.trim())
+                        gestos::app_shortcuts::title_for(app, detail.trim())
                     }
                     _ => None,
                 };

@@ -1,0 +1,11 @@
+gestos-action-template: 1
+name: Compress to ZIP
+description: Puts the selected files in one ZIP archive, next to them
+apps: [FileManager]
+needs:
+  - program: zip
+    package: zip
+steps:
+  - copy: files
+  - run: |
+      cd "$(dirname "$1")" && n=$# && for f; do set -- "$@" "${f##*/}"; done && shift $n && zip -r "Archive $(date '+%F %H-%M-%S').zip" "$@"

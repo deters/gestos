@@ -1,0 +1,9 @@
+gestos-action-template: 1
+name: Open Link
+description: Opens the selected text as a link
+needs:
+  - program: xdg-open
+    package: xdg-utils
+steps:
+  - run: |
+      xdg-open "$GESTOS_SELECTION"

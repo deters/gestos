@@ -577,7 +577,7 @@ impl WaylandContext {
                 let cmd_clone = cmd.clone();
                 let context = context.clone();
                 std::thread::spawn(move || {
-                    self_clone.run_shell_cmd(&cmd_clone, &context, false);
+                    self_clone.run_shell_cmd(&cmd_clone, &context, crate::key_steps::CopyWait::Nothing);
                 });
             }
             ActionType::Keypress(keys) => {
@@ -1064,9 +1064,14 @@ impl WaylandContext {
     /// Runs a command as the user would type it in a shell, and says whether it worked. The one
     /// place a shell belongs: Run Command and an advanced action's commands take whatever the user
     /// would type in one. One given the variables doesn't run without what's copied, as it would
-    /// run with nothing in its place. `after_copy` says it comes right after a copy made for it,
+    /// run with nothing in its place. `after_copy` says what a copy made right before it copies,
     /// which it waits for.
-    pub fn run_shell_cmd(&self, shell_command: &ShellCommand, context: &CommandContext, after_copy: bool) -> bool {
+    pub fn run_shell_cmd(
+        &self,
+        shell_command: &ShellCommand,
+        context: &CommandContext,
+        after_copy: crate::key_steps::CopyWait,
+    ) -> bool {
         use crate::command_variables::{file_paths, too_big, uris, variables};
         let cmd = shell_command.text.as_str();
         let mut command = Command::new("sh");
@@ -1107,19 +1112,27 @@ impl WaylandContext {
     }
 
     /// What's copied, for a command that uses it, or why it can't be had. Right after a copy, it's
-    /// what that copy put there, once it's there: what was copied before was cleared.
-    fn copied_for_command(&self, after_copy: bool) -> Result<Copied, String> {
+    /// what that copy put there, once it's there: what was copied before was cleared. A copy of
+    /// the selected files only counts once there are files.
+    fn copied_for_command(&self, after_copy: crate::key_steps::CopyWait) -> Result<Copied, String> {
+        use crate::key_steps::{CopyKind, CopyWait};
         if let Some(package) = crate::command_variables::missing_clipboard_reader() {
             return Err(format!("{package} isn't installed, which commands need to get what's copied"));
         }
         let deadline = std::time::Instant::now() + COPY_TIMEOUT;
         loop {
             let copied = self.copied()?;
-            if !after_copy || !copied.clipboard.is_empty() || !copied.uri_list.is_empty() {
+            let (arrived, missing) = match after_copy {
+                CopyWait::Nothing => (true, ""),
+                CopyWait::Anything => (!copied.clipboard.is_empty() || !copied.uri_list.is_empty(), "Nothing was copied"),
+                CopyWait::Kind(CopyKind::Files) => (!copied.uri_list.is_empty(), "No files were selected"),
+                CopyWait::Kind(CopyKind::Text) => (!copied.clipboard.is_empty(), "No text was selected"),
+            };
+            if arrived {
                 return Ok(copied);
             }
             if std::time::Instant::now() >= deadline {
-                return Err("Nothing was copied".to_string());
+                return Err(missing.to_string());
             }
             std::thread::sleep(COPY_POLL);
         }

@@ -1,0 +1,9 @@
+gestos-action-template: 1
+name: Count Words
+description: Shows how many words the selected text has
+needs:
+  - program: notify-send
+    package: libnotify
+steps:
+  - run: |
+      notify-send "$(printf %s "$GESTOS_SELECTION" | wc -w) words"

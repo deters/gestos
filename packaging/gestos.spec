@@ -69,6 +69,7 @@ getent group input >/dev/null || groupadd -r input
 %{_datadir}/icons/hicolor/scalable/apps/gestos.svg
 %{_datadir}/icons/hicolor/*/apps/gestos.png
 %{_datadir}/gestos/gestos.yaml
+%{_datadir}/gestos/action-templates/
 %{_datadir}/gnome-shell/extensions/gestos@deters.github.io/
 /usr/lib/systemd/user/gestosd.service
 %{_unitdir}/gestos-input.socket

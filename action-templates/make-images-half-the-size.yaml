@@ -1,0 +1,11 @@
+gestos-action-template: 1
+name: Make Images Half the Size
+description: Saves a copy of each selected image at half its size, next to it
+apps: [FileManager]
+needs:
+  - program: convert
+    package: ImageMagick
+steps:
+  - copy: files
+  - run: |
+      for f in "$@"; do [ -e "${f%.*} (small).${f##*.}" ] || convert "$f" -resize 50% "${f%.*} (small).${f##*.}"; done

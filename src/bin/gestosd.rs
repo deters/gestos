@@ -437,6 +437,13 @@ fn spawn_gesture_actions(
                     &|app| gestos::wayland::open_app_for_steps(app, is_gnome),
                     &|command, after_copy| wayland_ctx.run_shell_cmd(command, &context, after_copy),
                     &|| wayland_ctx.clear_copied(),
+                    &|| {
+                        let keys = gestos::app_shortcuts::copy_keys(context.app.as_deref());
+                        if keys.is_none() {
+                            gestos::wayland::action_failed("Couldn't tell how to copy in this window".to_string());
+                        }
+                        keys
+                    },
                 );
             } else {
                 wayland_ctx.execute_action(action, &context, &|keys_str| input.keypress_string(keys_str));
@@ -449,7 +456,10 @@ fn spawn_gesture_actions(
 fn runs_a_command(action: &ActionType) -> bool {
     match action {
         ActionType::Execute(_) => true,
-        ActionType::Keyboard(steps) => steps.iter().any(|step| matches!(step, gestos::key_steps::KeyStep::Run(_))),
+        // A copy needs it too, for the keys that copy in it.
+        ActionType::Keyboard(steps) => steps
+            .iter()
+            .any(|step| matches!(step, gestos::key_steps::KeyStep::Run(_) | gestos::key_steps::KeyStep::Copy(_))),
         _ => false,
     }
 }

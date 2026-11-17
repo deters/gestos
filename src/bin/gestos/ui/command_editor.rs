@@ -51,11 +51,8 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
     content.append(&entry);
 
     let (variables, check) = crate::ui::variables_menu::variables_controls(&entry, command.variables);
-    variables.set_hexpand(true);
-    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    controls.append(&variables);
-    controls.append(&library_button(&entry, &check));
-    content.append(&controls);
+    variables.set_halign(gtk::Align::Start);
+    content.append(&variables);
 
     // Only once there's a command to run.
     set_btn.set_sensitive(!command.trim().is_empty());
@@ -75,59 +72,6 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
     dialog.set_default_widget(Some(&set_btn));
     dialog.present();
     entry.grab_focus();
-}
-
-/// A button whose menu has the ready-made commands, by what they work on. Picking one writes it in
-/// the entry, in place of what's there, with the variables it needs.
-fn library_button(entry: &gtk::Entry, check: &gtk::CheckButton) -> gtk::MenuButton {
-    let items = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    let popover = gtk::Popover::new();
-    popover.set_child(Some(&items));
-    let mut group = "";
-    for command in crate::command_library::LIBRARY {
-        if command.group != group {
-            group = command.group;
-            let title = gtk::Label::new(Some(group));
-            title.add_css_class("heading");
-            title.set_xalign(0.0);
-            title.set_margin_start(12);
-            title.set_margin_top(if items.first_child().is_some() { 12 } else { 6 });
-            title.set_margin_bottom(6);
-            items.append(&title);
-        }
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        let name = gtk::Label::new(Some(command.name));
-        name.set_xalign(0.0);
-        name.set_hexpand(true);
-        content.append(&name);
-        // It can be picked anyway, to install what it needs later.
-        if gtk::glib::find_program_in_path(command.program).is_none() {
-            let needs = gtk::Label::new(Some(&format!("Install {}", command.package)));
-            needs.add_css_class("dim-label");
-            content.append(&needs);
-        }
-        let item = gtk::Button::new();
-        item.set_child(Some(&content));
-        item.add_css_class("flat");
-        let entry = entry.clone();
-        let check = check.clone();
-        let popover = popover.clone();
-        let text = command.command;
-        item.connect_clicked(move |_| {
-            check.set_active(true);
-            entry.set_text(text);
-            popover.popdown();
-            entry.grab_focus_without_selecting();
-            entry.set_position(-1);
-        });
-        items.append(&item);
-    }
-    let button = gtk::MenuButton::new();
-    button.set_label("Ready-Made");
-    button.set_tooltip_text(Some("Ready-Made Commands"));
-    button.set_valign(gtk::Align::Center);
-    button.set_popover(Some(&popover));
-    button
 }
 
 /// A command as a row shows it: on one line, cut short at the end, or a dimmed "None" before

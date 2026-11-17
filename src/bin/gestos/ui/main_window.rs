@@ -229,7 +229,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorAct
     if let Some(previous) = previous {
         previous.window.destroy();
     }
-    let shortcuts = crate::app_shortcuts::shortcuts_of(app);
+    let shortcuts = gestos::app_shortcuts::shortcuts_of(app);
     let parent = dialog_parent(&state_rc.borrow());
     let window = gtk::Window::new();
     window.set_transient_for(Some(&parent));
@@ -314,7 +314,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorAct
     inside.set_margin_top(12);
     content.append(&inside);
 
-    let mut sections: Vec<(&str, Vec<&crate::app_shortcuts::AppShortcut>)> = Vec::new();
+    let mut sections: Vec<(&str, Vec<&gestos::app_shortcuts::AppShortcut>)> = Vec::new();
     for shortcut in shortcuts.iter() {
         match sections.iter_mut().find(|(section, _)| *section == shortcut.section) {
             Some((_, in_it)) => in_it.push(shortcut),
@@ -372,7 +372,22 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorAct
         };
         (shown, option)
     });
-    let (shown, own_options): (Vec<_>, Vec<_>) = [custom_shortcut, advanced].into_iter().flatten().unzip();
+    // The action templates for this app, by its ID or its kind, like a file manager's.
+    let categories = gtk::gio::DesktopAppInfo::new(&format!("{}.desktop", app.trim_end_matches(".desktop")))
+        .and_then(|info| info.categories().map(|categories| categories.to_string()))
+        .unwrap_or_default();
+    let templates: Vec<_> = state_rc
+        .borrow()
+        .app_templates
+        .iter()
+        .filter(|template| template.is_for(app, &categories))
+        .map(|template| {
+            let option = template.option();
+            (option.clone(), option)
+        })
+        .collect();
+    let (shown, own_options): (Vec<_>, Vec<_>) =
+        [custom_shortcut, advanced].into_iter().flatten().chain(templates).unzip();
     if !own_options.is_empty() {
         let own = list();
         for option in &shown {
@@ -438,7 +453,7 @@ fn app_row(app: &str, count: usize) -> gtk::ListBoxRow {
 }
 
 /// One of an app's shortcuts: its name, and its keys as shortcuts' names write them.
-fn app_shortcut_row(shortcut: &crate::app_shortcuts::AppShortcut) -> gtk::ListBoxRow {
+fn app_shortcut_row(shortcut: &gestos::app_shortcuts::AppShortcut) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row_box.set_margin_start(16);
@@ -1209,12 +1224,20 @@ fn load_action_options(state: &Rc<RefCell<AppState>>) {
         options.extend(fetch_gnome_action_options());
         options.extend(fetch_kde_action_options());
         options.extend(app_action_options());
-        options
+        // Templates for any app are offered as other actions are, and the others on their apps'
+        // pages only.
+        let (for_some_apps, for_any): (Vec<_>, Vec<_>) =
+            crate::action_templates::load().into_iter().partition(|template| !template.apps.is_empty());
+        options.extend(for_any.iter().map(|template| template.option()));
+        (options, for_some_apps)
     });
     let state_options = Rc::clone(state);
     glib::spawn_future_local(async move {
-        if let Ok(options) = load_options.await {
-            state_options.borrow_mut().action_options = options;
+        if let Ok((options, app_templates)) = load_options.await {
+            let mut state = state_options.borrow_mut();
+            state.action_options = options;
+            state.app_templates = app_templates;
+            drop(state);
             refresh_gesture_list(&state_options, None);
         }
     });
@@ -1335,6 +1358,7 @@ pub fn build_ui(app: &gtk::Application) {
         dbus_conn,
         empty_state_box,
         action_options: Vec::new(),
+        app_templates: Vec::new(),
         visible_suggestions: Vec::new(),
         apart_list,
         visible_apart: Vec::new(),

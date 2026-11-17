@@ -1,5 +1,6 @@
 pub mod active_app;
 pub mod app_cache;
+pub mod app_shortcuts;
 pub mod chooser;
 pub mod command_variables;
 pub mod config;

@@ -35,16 +35,7 @@ pub fn action_matches(a: &ActionType, opt: &EditorActionOption) -> bool {
     }
 }
 
-/// Whether two shortcuts are the same keys, whatever order their modifiers are written in:
-/// Shift+Control+S is Control+Shift+S.
-pub fn same_keys(a: &str, b: &str) -> bool {
-    let keys = |shortcut: &str| {
-        let mut keys: Vec<String> = shortcut.split('+').map(str::to_lowercase).collect();
-        keys.sort();
-        keys
-    };
-    keys(a) == keys(b)
-}
+pub use gestos::app_shortcuts::same_keys;
 
 /// Whether an action does nothing but open an app, which is that app's own action.
 pub fn only_opens_an_app(action: &ActionType) -> bool {

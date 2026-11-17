@@ -18,6 +18,28 @@ pub enum KeyStep {
     Open(String),
     /// A command run in a shell, as Run Command runs one, finished before the steps after it.
     Run(crate::command_variables::ShellCommand),
+    /// What's selected, copied with the keys that copy in the app in use, for the command after
+    /// it. It's never pressed where those keys aren't known, as Control+C stops a terminal's
+    /// program.
+    Copy(CopyKind),
+}
+
+/// What a copy step copies for the command after it: the selected files, as a file manager copies
+/// them, or the selected text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum CopyKind {
+    Files,
+    Text,
+}
+
+/// What a command waits to find copied before it runs, after a copy made for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyWait {
+    /// No copy was made for it, so it runs with whatever is copied.
+    Nothing,
+    /// A shortcut that copies, which may copy text or files.
+    Anything,
+    Kind(CopyKind),
 }
 
 /// The most a single pause can be, so that a typo can't leave a gesture running for hours.
@@ -62,6 +84,11 @@ fn parse_step(step: &str) -> Option<KeyStep> {
         "type" => unquote(rest).map(KeyStep::Type),
         "run" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, false))),
         "run-with-variables" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, true))),
+        "copy" => match rest {
+            "files" => Some(KeyStep::Copy(CopyKind::Files)),
+            "text" => Some(KeyStep::Copy(CopyKind::Text)),
+            _ => None,
+        },
         "wait" => {
             let millis = rest.parse::<u32>().ok()?;
             Some(KeyStep::Wait(millis.min(MAX_WAIT_MILLIS)))
@@ -113,6 +140,8 @@ pub fn format_steps(steps: &[KeyStep]) -> String {
             KeyStep::Open(app) => format!("open {app}"),
             KeyStep::Run(command) if command.variables => format!("run-with-variables {}", quote(command)),
             KeyStep::Run(command) => format!("run {}", quote(command)),
+            KeyStep::Copy(CopyKind::Files) => "copy files".to_string(),
+            KeyStep::Copy(CopyKind::Text) => "copy text".to_string(),
         })
         .collect::<Vec<_>>()
         .join("; ")
@@ -128,6 +157,8 @@ pub fn describe_steps(steps: &[KeyStep]) -> String {
             KeyStep::Wait(millis) => format!("wait {millis} ms"),
             KeyStep::Open(app) => format!("open {}", app_name(app)),
             KeyStep::Run(command) => format!("run {}", crate::config::short_command(command)),
+            KeyStep::Copy(CopyKind::Files) => "copy the selected files".to_string(),
+            KeyStep::Copy(CopyKind::Text) => "copy the selected text".to_string(),
         })
         .collect::<Vec<_>>()
         .join(", ")

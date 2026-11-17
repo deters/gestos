@@ -1,0 +1,10 @@
+gestos-action-template: 1
+name: Translate
+description: Opens the selected text in Google Translate
+needs:
+  - program: python3
+    package: Python
+steps:
+  - run: |
+      text=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$GESTOS_SELECTION")
+      xdg-open "https://translate.google.com/?op=translate&sl=auto&text=$text"

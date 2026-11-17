@@ -6,7 +6,7 @@
 
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
 use gestos::command_variables::ShellCommand;
-use gestos::key_steps::{format_steps, parse_steps, KeyStep, MAX_WAIT_MILLIS};
+use gestos::key_steps::{format_steps, parse_steps, CopyKind, KeyStep, MAX_WAIT_MILLIS};
 use gtk::prelude::*;
 use gtk4 as gtk;
 use std::cell::{Cell, RefCell};
@@ -27,6 +27,7 @@ const PRESS_ICON: &str = "input-keyboard-symbolic";
 const TYPE_ICON: &str = "insert-text-symbolic";
 const WAIT_ICON: &str = "alarm-symbolic";
 const RUN_ICON: &str = "utilities-terminal-symbolic";
+const COPY_ICON: &str = "edit-copy-symbolic";
 
 // How many characters wide the name of each step is, to fit the longest.
 const STEP_NAME_CHARS: i32 = 9;
@@ -38,6 +39,7 @@ fn step_name(step: &KeyStep) -> &'static str {
         KeyStep::Type(_) => "Type",
         KeyStep::Wait(_) => "Pause",
         KeyStep::Run(_) => "Command",
+        KeyStep::Copy(_) => "Copy",
     }
 }
 
@@ -50,6 +52,7 @@ pub fn step_icon(step: &KeyStep) -> &'static str {
         KeyStep::Type(_) => TYPE_ICON,
         KeyStep::Wait(_) => WAIT_ICON,
         KeyStep::Run(_) => RUN_ICON,
+        KeyStep::Copy(_) => COPY_ICON,
     }
 }
 
@@ -133,6 +136,10 @@ pub fn append_steps_rows(
     add_button("Command", "Run a Command").connect_clicked(move |_| {
         // Written in a window of its own, and only added once there's one.
         running.edit_command(None);
+    });
+    let copying = Rc::clone(&editor);
+    add_button("Copy", "Copy the Selection").connect_clicked(move |_| {
+        copying.add(KeyStep::Copy(CopyKind::Files));
     });
     let waiting = Rc::clone(&editor);
     add_button("Pause", "Add a Pause").connect_clicked(move |_| {
@@ -262,6 +269,27 @@ impl StepsEditor {
                 let editor = Rc::clone(self);
                 edit.connect_clicked(move |_| editor.edit_command(Some(i)));
                 content.append(&edit);
+            }
+            // The selected files or text, as two buttons, for the command after it.
+            KeyStep::Copy(kind) => {
+                let choices = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                choices.add_css_class("linked");
+                let files = gtk::ToggleButton::with_label("Selected Files");
+                let text = gtk::ToggleButton::with_label("Selected Text");
+                text.set_group(Some(&files));
+                files.set_active(*kind == CopyKind::Files);
+                text.set_active(*kind == CopyKind::Text);
+                for (button, chosen) in [(&files, CopyKind::Files), (&text, CopyKind::Text)] {
+                    let editor = Rc::clone(self);
+                    button.connect_toggled(move |button| {
+                        if button.is_active() {
+                            editor.steps.borrow_mut()[i] = KeyStep::Copy(chosen);
+                            editor.changed();
+                        }
+                    });
+                    choices.append(button);
+                }
+                content.append(&choices);
             }
             KeyStep::Wait(millis) => {
                 let spin =

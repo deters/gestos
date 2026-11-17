@@ -1,0 +1,11 @@
+gestos-action-template: 1
+name: Convert to PDF
+description: Converts the selected documents to PDF, next to them
+apps: [FileManager]
+needs:
+  - program: libreoffice
+    package: LibreOffice
+steps:
+  - copy: files
+  - run: |
+      for f in "$@"; do libreoffice --headless --convert-to pdf --outdir "$(dirname "$f")" "$f"; done

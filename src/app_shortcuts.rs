@@ -5,11 +5,10 @@
 //! instead, and its keys are then only known while it runs. An app whose shortcuts can be changed,
 //! like Ptyxis, keeps them in settings of their own, with the keys set now.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use gio::{glib, prelude::*};
 
@@ -23,28 +22,79 @@ pub struct AppShortcut {
     pub keys: String,
 }
 
-thread_local! {
-    // Read once each, as reading means going through the app's program.
-    static FOUND: RefCell<HashMap<String, Rc<Vec<AppShortcut>>>> = RefCell::new(HashMap::new());
-}
+// Read once each, as reading means going through the app's program. Kept for the daemon's threads
+// too, which ask for an app's copy keys.
+static FOUND: Mutex<Option<HashMap<String, Arc<Vec<AppShortcut>>>>> = Mutex::new(None);
 
 /// The shortcuts an app lists, by its desktop file ID, with or without `.desktop` as Gestos keeps
 /// it, or none for an app without the list.
-pub fn shortcuts_of(app_id: &str) -> Rc<Vec<AppShortcut>> {
-    if let Some(found) = FOUND.with(|found| found.borrow().get(app_id).cloned()) {
+pub fn shortcuts_of(app_id: &str) -> Arc<Vec<AppShortcut>> {
+    let kept = |found: &mut Option<HashMap<_, _>>| found.get_or_insert_with(HashMap::new).get(app_id).cloned();
+    if let Some(found) = kept(&mut FOUND.lock().unwrap_or_else(|e| e.into_inner())) {
         return found;
     }
-    let found = Rc::new(read_shortcuts(app_id));
-    FOUND.with(|cache| cache.borrow_mut().insert(app_id.to_string(), Rc::clone(&found)));
+    let found = Arc::new(read_shortcuts(app_id));
+    FOUND
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(HashMap::new)
+        .insert(app_id.to_string(), Arc::clone(&found));
     found
+}
+
+/// Whether two shortcuts are the same keys, whatever order their modifiers are written in:
+/// Shift+Control+S is Control+Shift+S.
+pub fn same_keys(a: &str, b: &str) -> bool {
+    let keys = |shortcut: &str| {
+        let mut keys: Vec<String> = shortcut.split('+').map(str::to_lowercase).collect();
+        keys.sort();
+        keys
+    };
+    keys(a) == keys(b)
 }
 
 /// What an app calls a shortcut, if it lists those keys.
 pub fn title_for(app_id: &str, keys: &str) -> Option<String> {
     shortcuts_of(app_id)
         .iter()
-        .find(|shortcut| crate::actions::same_keys(&shortcut.keys, keys))
+        .find(|shortcut| same_keys(&shortcut.keys, keys))
         .map(|shortcut| shortcut.title.clone())
+}
+
+/// Terminals whose desktop files don't say they're one. Control+C stops their program.
+const TERMINALS: &[&str] = &[
+    "org.gnome.Terminal", "org.gnome.Console", "org.gnome.Ptyxis", "org.kde.konsole",
+    "com.gexperts.Tilix", "kitty", "Alacritty", "org.wezfurlong.wezterm", "foot", "footclient",
+    "xterm", "uxterm", "io.elementary.terminal", "xfce4-terminal", "org.xfce.terminal",
+    "terminator", "com.mitchellh.ghostty", "qterminal", "lxterminal", "mate-terminal",
+];
+
+/// Apps that copy with keys of their own without listing them, where Control+C does something else.
+const OWN_COPY_KEYS: &[&str] = &["emacs", "emacsclient", "org.gnu.emacs", "gvim", "org.vim.Vim"];
+
+/// The keys that copy in an app, by its desktop file ID, if they're known: the ones it lists for
+/// Copy, Control+Shift+C in a terminal, or Control+C in other apps, as GTK's and Qt's have it.
+/// None for a window that isn't an installed app, or an app that copies some other way.
+pub fn copy_keys(app_id: Option<&str>) -> Option<String> {
+    let id = app_id?.trim_end_matches(".desktop");
+    let info = gio::DesktopAppInfo::new(&format!("{id}.desktop"))?;
+    let categories = info.categories().map(|categories| categories.to_string()).unwrap_or_default();
+    copy_keys_of(id, &shortcuts_of(id), &categories)
+}
+
+fn copy_keys_of(id: &str, shortcuts: &[AppShortcut], categories: &str) -> Option<String> {
+    let is_copy = |title: &str| {
+        matches!(title.trim().to_lowercase().as_str(), "copy" | "copy to clipboard" | "copy selection" | "copy selected text")
+    };
+    if let Some(listed) = shortcuts.iter().find(|shortcut| is_copy(&shortcut.title)) {
+        return Some(listed.keys.clone());
+    }
+    let is = |list: &[&str]| list.iter().any(|known| known.eq_ignore_ascii_case(id));
+    if is(OWN_COPY_KEYS) {
+        return None;
+    }
+    let terminal = categories.split(';').any(|category| category == "TerminalEmulator") || is(TERMINALS);
+    Some(if terminal { "Control+Shift+C" } else { "Control+C" }.to_string())
 }
 
 fn read_shortcuts(app_id: &str) -> Vec<AppShortcut> {
@@ -70,7 +120,7 @@ fn read_shortcuts(app_id: &str) -> Vec<AppShortcut> {
         for layout in shortcut_layouts(&resource, "/") {
             for shortcut in parse_layout(&layout) {
                 // Some are listed twice, as for writing in either direction.
-                if !shortcuts.iter().any(|known| crate::actions::same_keys(&known.keys, &shortcut.keys)) {
+                if !shortcuts.iter().any(|known| same_keys(&known.keys, &shortcut.keys)) {
                     shortcuts.push(shortcut);
                 }
             }
@@ -308,6 +358,18 @@ mod tests {
         let mut titles = ["Focus Tab 10", "Focus Tab 2", "Close Tab", "Focus Tab 1"];
         titles.sort_by_cached_key(|title| in_order(title));
         assert_eq!(titles, ["Close Tab", "Focus Tab 1", "Focus Tab 2", "Focus Tab 10"]);
+    }
+
+    #[test]
+    fn copy_keys_are_the_apps_own_then_a_terminals_then_control_c() {
+        let listed = [AppShortcut { section: String::new(), title: "Copy to Clipboard".into(), keys: "Control+Shift+C".into() }];
+        assert_eq!(copy_keys_of("org.gnome.Ptyxis", &listed, "").as_deref(), Some("Control+Shift+C"));
+        assert_eq!(copy_keys_of("some.Terminal", &[], "System;TerminalEmulator;").as_deref(), Some("Control+Shift+C"));
+        assert_eq!(copy_keys_of("kitty", &[], "").as_deref(), Some("Control+Shift+C"));
+        assert_eq!(copy_keys_of("org.gnome.Nautilus", &[], "GTK;Utility;Core;FileManager;").as_deref(), Some("Control+C"));
+        assert_eq!(copy_keys_of("emacs", &[], "Development;TextEditor;"), None);
+        assert_eq!(copy_keys(None), None);
+        assert_eq!(copy_keys(Some("no.such.App")), None);
     }
 
     #[test]

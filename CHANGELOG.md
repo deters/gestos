@@ -10,7 +10,11 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New menu "Ready-Made" in the window to edit a command. It has commands for copied files (convert to PDF, merge PDFs, convert or shrink images, make or extract ZIP files, show checksums) and for selected text (search the web, translate, open as a link, read aloud, calculate, count words). A gesture that runs one is named after it.
+- New actions for the files selected in a file manager, on its page in "Apps": "Convert to PDF", "Merge PDFs", "Convert Images to PNG", "Convert Images to JPG", "Make Images Half the Size", "Compress to ZIP", "Extract ZIP Files" and "Show Checksums".
+- New actions for the selected text: "Search the Web", "Translate", "Open Link", "Read Aloud", "Calculate" and "Count Words".
+- An action that needs a program you don't have says which package to install.
+- New step "Copy" in an "Advanced Action": it copies the selected files or text for the command after it. It uses the copy shortcut the app lists, Ctrl+Shift+C in terminals, and Ctrl+C in other apps. In a window Gestos can't recognise, it copies nothing and the action stops.
+- You can add your own actions as files in `~/.local/share/gestos/action-templates`.
 
 ### Changed
 

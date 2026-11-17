@@ -34,6 +34,8 @@ override_dh_auto_install:
 		install -D -m 644 icons/gestos-$$size.png debian/gestos/usr/share/icons/hicolor/$${size}x$$size/apps/gestos.png; \
 	done
 	install -D -m 644 gestos.yaml debian/gestos/usr/share/gestos/gestos.yaml
+	install -d debian/gestos/usr/share/gestos/action-templates
+	install -m 644 action-templates/*.yaml debian/gestos/usr/share/gestos/action-templates/
 
 	# Install the GNOME Shell extension
 	install -D -m 644 extension/extension.js debian/gestos/usr/share/gnome-shell/extensions/gestos@deters.github.io/extension.js

@@ -1,0 +1,9 @@
+gestos-action-template: 1
+name: Read Aloud
+description: Reads the selected text aloud
+needs:
+  - program: spd-say
+    package: speech-dispatcher
+steps:
+  - run: |
+      spd-say "$GESTOS_SELECTION"

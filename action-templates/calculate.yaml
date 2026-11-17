@@ -1,0 +1,9 @@
+gestos-action-template: 1
+name: Calculate
+description: Shows the result of the selected calculation
+needs:
+  - program: bc
+    package: bc
+steps:
+  - run: |
+      notify-send "$GESTOS_SELECTION" "= $(printf '%s\n' "$GESTOS_SELECTION" | bc -l)"

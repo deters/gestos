@@ -68,6 +68,8 @@ foreach size : ['16', '24', '32', '48', '64', '128', '256', '512']
     install_dir: datadir / 'icons/hicolor' / (size + 'x' + size) / 'apps')
 endforeach
 install_data('gestos.yaml', install_dir: datadir / 'gestos')
+# The action templates Gestos offers among its actions.
+install_subdir('action-templates', install_dir: datadir / 'gestos')
 
 # D-Bus Activation Service
 dbus_service_dir = get_option('dbusservicedir')
