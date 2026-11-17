@@ -95,7 +95,8 @@ impl DaemonDbus {
 
     #[zbus(property)]
     fn version(&self) -> String {
-        env!("CARGO_PKG_VERSION").to_string()
+        // As the app shows it, a beta's number included, so that the two can be told apart.
+        env!("GESTOS_SHOWN_VERSION").to_string()
     }
 
     fn stop(&self) {
@@ -1282,16 +1283,76 @@ fn physical_button(button: i32, left_handed: bool) -> i32 {
 /// mice that have it are only found at the start. Watched here, rather than by a program of its
 /// own, which would be one more process running for as long as Gestos does.
 fn restart_when_hand_changes(started_left_handed: bool) {
-    when_hand_changes(started_left_handed, || {
-        println!("gestosd: The mouse buttons were swapped. Restarting...");
-        kill_children();
-        // Started as it was started the first time, as the binary may have been replaced.
-        let mut args = std::env::args_os();
-        let program = args.next().unwrap_or_else(|| "gestosd".into());
-        let error = std::os::unix::process::CommandExt::exec(Command::new(program).args(args));
-        eprintln!("gestosd: Could not restart: {error}");
-        std::process::exit(1);
+    when_hand_changes(started_left_handed, || restart("The mouse buttons were swapped"));
+}
+
+/// Starts over as it was started the first time, in place of this process, so whatever started
+/// it still has it.
+fn restart(why: &str) -> ! {
+    println!("gestosd: {why}. Restarting...");
+    kill_children();
+    let mut args = std::env::args_os();
+    let program = args.next().unwrap_or_else(|| "gestosd".into());
+    let error = std::os::unix::process::CommandExt::exec(Command::new(program).args(args));
+    eprintln!("gestosd: Could not restart: {error}");
+    std::process::exit(1);
+}
+
+/// How long the program file must stay unchanged before the new one is run, as an update replaces
+/// many files, and this one may be written in parts.
+const UPDATE_SETTLE: Duration = Duration::from_secs(3);
+
+/// Starts over once this program's file is replaced, as updating Gestos does, whether by a
+/// package or a build. The version that was running would otherwise run until the user logs out,
+/// ignoring what it doesn't know, like steps added since.
+fn restart_when_updated() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    when_replaced(exe, UPDATE_SETTLE, || restart("Gestos was updated"));
+}
+
+/// Calls `replaced` once a file has been written or replaced and then left alone for `settle`,
+/// and is a program that can be run. Watched in a thread of its own.
+fn when_replaced(path: std::path::PathBuf, settle: Duration, replaced: impl Fn() + Send + Sync + 'static) {
+    std::thread::spawn(move || {
+        use gio::prelude::*;
+        let context = gio::glib::MainContext::new();
+        let _ = context.with_thread_default(|| {
+            let file = gio::File::for_path(&path);
+            let Ok(monitor) = file.monitor_file(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE) else {
+                return;
+            };
+            let replaced = std::sync::Arc::new(replaced);
+            // Each change puts off the call, until the file has settled.
+            let pending: std::rc::Rc<std::cell::RefCell<Option<gio::glib::Source>>> = Default::default();
+            monitor.connect_changed(move |_, _, _, event| {
+                use gio::FileMonitorEvent::*;
+                if !matches!(event, Created | ChangesDoneHint | Changed | MovedIn | Renamed | Deleted) {
+                    return;
+                }
+                if let Some(source) = pending.borrow_mut().take() {
+                    source.destroy();
+                }
+                let path = path.clone();
+                let replaced = std::sync::Arc::clone(&replaced);
+                let source = gio::glib::timeout_source_new(settle, None, gio::glib::Priority::DEFAULT, move || {
+                    // Only once there's a whole program there again to run.
+                    if is_executable(&path) {
+                        replaced();
+                    }
+                    gio::glib::ControlFlow::Break
+                });
+                source.attach(Some(&gio::glib::MainContext::ref_thread_default()));
+                *pending.borrow_mut() = Some(source);
+            });
+            gio::glib::MainLoop::new(Some(&context), false).run();
+            drop(monitor);
+        });
     });
+}
+
+fn is_executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
 }
 
 /// Calls `changed` whenever the buttons stop being as they were at the start.
@@ -1404,6 +1465,10 @@ fn main() {
     if let Some(left_handed) = left_handed {
         restart_when_hand_changes(left_handed);
     }
+    // Only the process that started the others, which start over with it.
+    if std::env::var("GESTOS_CHILD").is_err() {
+        restart_when_updated();
+    }
 
     let _ = CONFIG_PATH.set(config_path.clone());
 
@@ -1480,6 +1545,31 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_program_replaced_as_an_update_does_is_noticed_once_it_settles() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("gestosd-replaced-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("gestosd");
+        fs::write(&program, "old").unwrap();
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        let (sender, noticed) = std::sync::mpsc::channel();
+        when_replaced(program.clone(), Duration::from_millis(300), move || {
+            let _ = sender.send(());
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        // As a package manager does: written beside it, then moved over it.
+        let new = dir.join("gestosd.new");
+        fs::write(&new, "new").unwrap();
+        fs::set_permissions(&new, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::rename(&new, &program).unwrap();
+        assert!(noticed.recv_timeout(Duration::from_secs(5)).is_ok());
+        // Once for the whole update, not for each change it made.
+        assert!(noticed.recv_timeout(Duration::from_millis(800)).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn moves_are_passed_on_at_most_once_an_interval_and_the_last_one_at_the_end() {

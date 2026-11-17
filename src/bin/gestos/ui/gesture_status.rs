@@ -190,7 +190,17 @@ impl GestureStatus {
         }
         self.polling.set(true);
         let conn = self.dbus_conn.clone();
-        let check = gio::spawn_blocking(move || is_daemon_running(conn.as_ref()));
+        let opening = self.just_opened.get();
+        let check = gio::spawn_blocking(move || {
+            // Updating Gestos leaves the old daemon running, which ignores what it doesn't know,
+            // like steps added since. Opening the app is the first chance to replace it.
+            if opening {
+                if let Err(why) = crate::daemon::restart_if_outdated(conn.as_ref()) {
+                    eprintln!("gestos: Couldn't restart the gestures of an older version: {why}");
+                }
+            }
+            is_daemon_running(conn.as_ref())
+        });
         let status = self.clone();
         glib::spawn_future_local(async move {
             let running = check.await.unwrap_or(false);
