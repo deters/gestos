@@ -286,6 +286,16 @@ fn held_modifiers(state: gtk::gdk::ModifierType) -> Modifiers {
     }
 }
 
+/// Where and with what a gesture is drawn, under the mouse that shows how: the button as
+/// Settings names it.
+fn draw_hint(button: i32) -> String {
+    let name = crate::ui::settings::DRAW_BUTTONS
+        .iter()
+        .find(|(_, number)| *number == button)
+        .map_or_else(|| format!("{button}"), |(name, _)| name.to_lowercase());
+    format!("Draw anywhere on the screen.\nUse the {name} button.")
+}
+
 /// Whether a gesture is drawn, which then stays until the user asks to draw it again.
 fn has_drawing(points: &[Point2D]) -> bool {
     points.len() >= 2
@@ -566,7 +576,8 @@ fn open_editor(
         }
     });
     // Under the mouse while it shows how, as gestures aren't drawn in the window but anywhere.
-    let draw_anywhere = gtk::Label::new(Some("Draw anywhere on the screen"));
+    let draw_anywhere = gtk::Label::new(Some(&draw_hint(draw_button)));
+    draw_anywhere.set_justify(gtk::Justification::Center);
     draw_anywhere.add_css_class("dim-label");
     draw_anywhere.set_valign(gtk::Align::End);
     draw_anywhere.set_margin_bottom(16);
@@ -1588,6 +1599,12 @@ fn open_editor(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_hint_names_the_button_gestures_are_drawn_with() {
+        assert_eq!(super::draw_hint(3), "Draw anywhere on the screen.\nUse the right button.");
+        assert_eq!(super::draw_hint(8), "Draw anywhere on the screen.\nUse the back button.");
+    }
 
     #[test]
     fn alt_and_super_are_found_however_x11_reports_them() {
