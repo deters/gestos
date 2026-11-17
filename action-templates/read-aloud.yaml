@@ -6,4 +6,9 @@ needs:
     package: speech-dispatcher
 steps:
   - run: |
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+
+      [ -n "$GESTOS_SELECTION" ] || fail "Select some text first"
+
       spd-say "$GESTOS_SELECTION"

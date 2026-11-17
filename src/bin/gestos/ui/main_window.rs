@@ -314,6 +314,35 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorAct
     inside.set_margin_top(12);
     content.append(&inside);
 
+    // First, the action templates for this app, by its ID or its kind, like a file manager's, as
+    // they do more than one of its shortcuts.
+    let categories = gtk::gio::DesktopAppInfo::new(&format!("{}.desktop", app.trim_end_matches(".desktop")))
+        .and_then(|info| info.categories().map(|categories| categories.to_string()))
+        .unwrap_or_default();
+    let templates: Vec<_> = state_rc
+        .borrow()
+        .app_templates
+        .iter()
+        .filter(|template| template.is_for(app, &categories))
+        .map(|template| template.option())
+        .collect();
+    if !templates.is_empty() {
+        let rows = list();
+        for option in &templates {
+            rows.append(&suggestion_row(option, &state_rc.borrow().extension_status, ""));
+        }
+        let state_template = Rc::downgrade(state_rc);
+        let app_template = app.to_string();
+        rows.connect_row_activated(move |_, row| {
+            let (Some(state_rc), Some(option)) = (state_template.upgrade(), templates.get(row.index() as usize))
+            else {
+                return;
+            };
+            crate::ui::editor::open_gesture_editor_in_apps(&state_rc, option.clone(), &[app_template.clone()]);
+        });
+        content.append(&rows);
+    }
+
     let mut sections: Vec<(&str, Vec<&gestos::app_shortcuts::AppShortcut>)> = Vec::new();
     for shortcut in shortcuts.iter() {
         match sections.iter_mut().find(|(section, _)| *section == shortcut.section) {
@@ -372,22 +401,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorAct
         };
         (shown, option)
     });
-    // The action templates for this app, by its ID or its kind, like a file manager's.
-    let categories = gtk::gio::DesktopAppInfo::new(&format!("{}.desktop", app.trim_end_matches(".desktop")))
-        .and_then(|info| info.categories().map(|categories| categories.to_string()))
-        .unwrap_or_default();
-    let templates: Vec<_> = state_rc
-        .borrow()
-        .app_templates
-        .iter()
-        .filter(|template| template.is_for(app, &categories))
-        .map(|template| {
-            let option = template.option();
-            (option.clone(), option)
-        })
-        .collect();
-    let (shown, own_options): (Vec<_>, Vec<_>) =
-        [custom_shortcut, advanced].into_iter().flatten().chain(templates).unzip();
+    let (shown, own_options): (Vec<_>, Vec<_>) = [custom_shortcut, advanced].into_iter().flatten().unzip();
     if !own_options.is_empty() {
         let own = list();
         for option in &shown {

@@ -8,4 +8,14 @@ needs:
 steps:
   - copy: files
   - run: |
-      for f in "$@"; do unzip -n "$f" -d "${f%.*}"; done
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+
+      for f in "$@"; do
+          case $f in *.zip|*.ZIP) ;; *) fail "${f##*/} isn't a ZIP file" ;; esac
+      done
+
+      for f in "$@"; do
+          unzip -qn "$f" -d "${f%.*}" || fail "Couldn't extract ${f##*/}"
+      done
+      show "Extracted $# files"

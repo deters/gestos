@@ -8,4 +8,16 @@ needs:
 steps:
   - copy: files
   - run: |
-      for f in "$@"; do libreoffice --headless --convert-to pdf --outdir "$(dirname "$f")" "$f"; done
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+
+      converted=0
+      for f in "$@"; do
+          case $f in *.pdf|*.PDF) continue ;; esac
+          libreoffice --headless --convert-to pdf --outdir "$(dirname "$f")" "$f" >/dev/null
+          [ -e "${f%.*}.pdf" ] || fail "Couldn't convert ${f##*/}"
+          converted=$((converted + 1))
+      done
+
+      [ "$converted" -gt 0 ] || fail "The selected files are PDFs already"
+      show "Converted $converted files"

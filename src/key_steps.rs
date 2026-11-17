@@ -84,6 +84,7 @@ fn parse_step(step: &str) -> Option<KeyStep> {
         "type" => unquote(rest).map(KeyStep::Type),
         "run" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, false))),
         "run-with-variables" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, true))),
+        "run-showing-output" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, true).showing_output())),
         "copy" => match rest {
             "files" => Some(KeyStep::Copy(CopyKind::Files)),
             "text" => Some(KeyStep::Copy(CopyKind::Text)),
@@ -138,6 +139,7 @@ pub fn format_steps(steps: &[KeyStep]) -> String {
             KeyStep::Type(text) => format!("type {}", quote(text)),
             KeyStep::Wait(millis) => format!("wait {millis}"),
             KeyStep::Open(app) => format!("open {app}"),
+            KeyStep::Run(command) if command.shows_output => format!("run-showing-output {}", quote(command)),
             KeyStep::Run(command) if command.variables => format!("run-with-variables {}", quote(command)),
             KeyStep::Run(command) => format!("run {}", quote(command)),
             KeyStep::Copy(CopyKind::Files) => "copy files".to_string(),
@@ -317,6 +319,19 @@ mod tests {
         assert_eq!(text, "open org.mozilla.firefox; press Control+T");
         assert_eq!(parse_steps(&text), steps);
         assert_eq!(parse_steps("open "), []);
+    }
+
+    #[test]
+    fn copy_steps_and_commands_that_show_their_output_survive_saving() {
+        let steps = vec![
+            KeyStep::Copy(CopyKind::Files),
+            KeyStep::Run(ShellCommand::new(r#"echo "$#""#, true).showing_output()),
+            KeyStep::Copy(CopyKind::Text),
+        ];
+        let text = format_steps(&steps);
+        assert_eq!(text, r#"copy files; run-showing-output "echo \"$#\""; copy text"#);
+        assert_eq!(parse_steps(&text), steps);
+        assert_eq!(parse_steps("copy images"), []);
     }
 
     #[test]

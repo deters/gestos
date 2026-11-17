@@ -10,8 +10,9 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New actions for the files selected in a file manager, on its page in "Apps": "Convert to PDF", "Merge PDFs", "Convert Images to PNG", "Convert Images to JPG", "Make Images Half the Size", "Compress to ZIP", "Extract ZIP Files" and "Show Checksums".
+- New actions for the files selected in a file manager, on its page in "Apps", above its keyboard shortcuts: "Convert to PDF", "Merge PDFs", "Convert Images to PNG", "Convert Images to JPG", "Make Images Half the Size", "Compress to ZIP", "Extract ZIP Files" and "Show Checksums".
 - New actions for the selected text: "Search the Web", "Translate", "Open Link", "Read Aloud", "Calculate" and "Count Words".
+- These actions show their result, like "Converted 3 images". When they can't do anything, they say why, like "The selected images are PNGs already" or "Select at least two PDFs to merge".
 - An action that needs a program you don't have says which package to install.
 - New step "Copy" in an "Advanced Action": it copies the selected files or text for the command after it. It uses the copy shortcut the app lists, Ctrl+Shift+C in terminals, and Ctrl+C in other apps. In a window Gestos can't recognise, it copies nothing and the action stops.
 - You can add your own actions as files in `~/.local/share/gestos/action-templates`.
@@ -24,6 +25,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Gestures now work while the gesture editor is open. They stop only while you draw a gesture.
 - Commands in "Run Command in Shell" and in the "Command" steps of an "Advanced Action" are now edited in a window of their own, with the option "Use Variables". Open it with the edit button on the command's row.
 - A new "Command" step is now added only after you click "Set" in that window.
+- When a command fails, its notification now shows the last lines of the command's error message, in place of its exit code.
 
 ### Fixed
 

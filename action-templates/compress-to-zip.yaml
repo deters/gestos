@@ -8,4 +8,14 @@ needs:
 steps:
   - copy: files
   - run: |
-      cd "$(dirname "$1")" && n=$# && for f; do set -- "$@" "${f##*/}"; done && shift $n && zip -r "Archive $(date '+%F %H-%M-%S').zip" "$@"
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+
+      cd "$(dirname "$1")" || fail "Couldn't open the folder of the selected files"
+      archive="Archive $(date '+%F %H-%M-%S').zip"
+      n=$#
+      for f; do set -- "$@" "${f##*/}"; done
+      shift $n
+
+      zip -qr "$archive" "$@" || fail "Couldn't make the ZIP file"
+      show "Saved $archive"

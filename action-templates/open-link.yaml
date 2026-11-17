@@ -6,4 +6,13 @@ needs:
     package: xdg-utils
 steps:
   - run: |
-      xdg-open "$GESTOS_SELECTION"
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+
+      [ -n "$GESTOS_SELECTION" ] || fail "Select some text first"
+
+      case "$GESTOS_SELECTION" in
+          http://*|https://*) xdg-open "$GESTOS_SELECTION" ;;
+          www.*) xdg-open "https://$GESTOS_SELECTION" ;;
+          *) fail "The selected text isn't a link" ;;
+      esac

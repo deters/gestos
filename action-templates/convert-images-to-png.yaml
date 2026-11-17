@@ -8,4 +8,17 @@ needs:
 steps:
   - copy: files
   - run: |
-      for f in "$@"; do [ -e "${f%.*}.png" ] || convert "$f" "${f%.*}.png"; done
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+
+      converted=0
+      for f in "$@"; do
+          case $f in *.png|*.PNG) continue ;; esac
+          png="${f%.*}.png"
+          [ -e "$png" ] && continue
+          convert "$f" "$png" || fail "Couldn't convert ${f##*/}"
+          converted=$((converted + 1))
+      done
+
+      [ "$converted" -gt 0 ] || fail "The selected images are PNGs already"
+      show "Converted $converted images"

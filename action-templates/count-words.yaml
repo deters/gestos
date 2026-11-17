@@ -1,9 +1,12 @@
 gestos-action-template: 1
 name: Count Words
 description: Shows how many words the selected text has
-needs:
-  - program: notify-send
-    package: libnotify
 steps:
   - run: |
-      notify-send "$(printf %s "$GESTOS_SELECTION" | wc -w) words"
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+
+      [ -n "$GESTOS_SELECTION" ] || fail "Select some text first"
+
+      words=$(echo "$GESTOS_SELECTION" | wc -w)
+      [ "$words" -eq 1 ] && show "1 word" || show "$words words"

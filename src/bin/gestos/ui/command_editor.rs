@@ -58,6 +58,8 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
     set_btn.set_sensitive(!command.trim().is_empty());
     let set_shown = set_btn.clone();
     entry.connect_changed(move |entry| set_shown.set_sensitive(!entry.text().trim().is_empty()));
+    // Whether it shows what it prints isn't edited here, and stays as it was.
+    let shows_output = command.shows_output;
     let dialog_set = dialog.clone();
     let entry_set = entry.clone();
     set_btn.connect_clicked(move |_| {
@@ -66,7 +68,7 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
             return;
         }
         dialog_set.destroy();
-        on_set(ShellCommand::new(text, check.is_active()));
+        on_set(ShellCommand { text, variables: check.is_active(), shows_output });
     });
 
     dialog.set_default_widget(Some(&set_btn));

@@ -6,5 +6,10 @@ needs:
     package: Python
 steps:
   - run: |
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+
+      [ -n "$GESTOS_SELECTION" ] || fail "Select some text first"
+
       text=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$GESTOS_SELECTION")
       xdg-open "https://translate.google.com/?op=translate&sl=auto&text=$text"

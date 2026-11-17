@@ -8,4 +8,14 @@ needs:
 steps:
   - copy: files
   - run: |
-      pdfunite "$@" "$(dirname "$1")/Merged $(date '+%F %H-%M-%S').pdf"
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+
+      [ $# -ge 2 ] || fail "Select at least two PDFs to merge"
+      for f in "$@"; do
+          case $f in *.pdf|*.PDF) ;; *) fail "${f##*/} isn't a PDF" ;; esac
+      done
+
+      merged="$(dirname "$1")/Merged $(date '+%F %H-%M-%S').pdf"
+      pdfunite "$@" "$merged" || fail "Couldn't merge the PDFs"
+      show "Saved ${merged##*/}"

@@ -250,6 +250,90 @@ pub fn action_failed(why: String) {
     }
 }
 
+// How many of the last lines a command printed, or wrote as errors, are shown, and how much of them.
+const SHOWN_OUTPUT_LINES: usize = 10;
+const SHOWN_ERROR_LINES: usize = 3;
+const SHOWN_OUTPUT_CHARS: usize = 300;
+// How long the last of a command's output is waited for once it ended. An app it started can keep
+// writing to it for as long as it runs, and is then read on its own.
+const OUTPUT_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// The last lines read from a command's output, as it writes them, each passed on to the journal.
+struct KeptOutput {
+    lines: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
+    ended: std::sync::mpsc::Receiver<()>,
+}
+
+impl KeptOutput {
+    fn read(pipe: impl std::io::Read + Send + 'static, keep: usize, errors: bool) -> Self {
+        use std::io::BufRead;
+        let lines: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<String>>> = Default::default();
+        let (ended_tx, ended) = std::sync::mpsc::channel();
+        let kept = std::sync::Arc::clone(&lines);
+        std::thread::spawn(move || {
+            let mut reader = std::io::BufReader::new(pipe);
+            let mut bytes = Vec::new();
+            while reader.read_until(b'\n', &mut bytes).is_ok_and(|read| read > 0) {
+                let line = without_colors(String::from_utf8_lossy(&bytes).trim_end());
+                bytes.clear();
+                if errors {
+                    eprintln!("{line}");
+                } else {
+                    println!("{line}");
+                }
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let mut kept = kept.lock().unwrap_or_else(|e| e.into_inner());
+                kept.push_back(line);
+                if kept.len() > keep {
+                    kept.pop_front();
+                }
+            }
+            let _ = ended_tx.send(());
+        });
+        KeptOutput { lines, ended }
+    }
+
+    /// The lines kept, once the output ended or a moment after the command did.
+    fn finish(self) -> Vec<String> {
+        let _ = self.ended.recv_timeout(OUTPUT_WAIT);
+        self.lines.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect()
+    }
+}
+
+/// Lines as a notification shows them: together, cut short at the end if they're long.
+fn shown_lines(lines: &[String]) -> Option<String> {
+    let text = lines.join("\n");
+    if text.trim().is_empty() {
+        return None;
+    }
+    let mut shown: String = text.chars().take(SHOWN_OUTPUT_CHARS).collect();
+    if shown.len() < text.len() {
+        shown.push('…');
+    }
+    Some(shown)
+}
+
+/// A line without the codes terminals color text with.
+fn without_colors(line: &str) -> String {
+    let mut plain = String::new();
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            plain.push(c);
+        }
+    }
+    plain
+}
+
 /// What a command that ended badly says about it, or None if it went well.
 fn command_failure(program: &str, status: std::io::Result<std::process::ExitStatus>) -> Option<String> {
     match status {
@@ -1097,16 +1181,33 @@ impl WaylandContext {
                 command.env(name, value);
             }
         }
-        let status = command.status();
+        // What it writes still reaches the journal, and the last of it is kept to show: why it
+        // failed, or what a command that shows its output printed.
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(e) => {
+                action_failed(format!("{} couldn't start: {e}", crate::config::short_command(cmd)));
+                return false;
+            }
+        };
+        let printed = child.stdout.take().map(|pipe| KeptOutput::read(pipe, SHOWN_OUTPUT_LINES, false));
+        let errors = child.stderr.take().map(|pipe| KeptOutput::read(pipe, SHOWN_ERROR_LINES, true));
+        let status = child.wait();
+        let last = |kept: Option<KeptOutput>| kept.map(KeptOutput::finish).and_then(|lines| shown_lines(&lines));
+        let (printed, errors) = (last(printed), last(errors));
         // The shell says 127 when it can't find the program.
         let failure = match status {
             Ok(status) if status.code() == Some(127) => {
                 Some(format!("{} isn't installed", crate::config::short_command(cmd)))
             }
+            Ok(status) if !status.success() && errors.is_some() => errors,
             status => command_failure(&crate::config::short_command(cmd), status),
         };
         if let Some(failure) = &failure {
             action_failed(failure.clone());
+        } else if let (true, Some(printed)) = (shell_command.shows_output, printed) {
+            action_result(printed, "utilities-terminal-symbolic");
         }
         failure.is_none()
     }
@@ -1261,6 +1362,43 @@ impl WaylandContext {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_last_lines_a_command_wrote_are_kept_without_colors() {
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg(r#"printf 'one\n\ntwo\n\033[31mthree\033[0m\nfour' >&2"#)
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let kept = KeptOutput::read(child.stderr.take().unwrap(), 3, true);
+        child.wait().unwrap();
+        assert_eq!(kept.finish(), ["two", "three", "four"]);
+    }
+
+    #[test]
+    fn an_app_left_running_doesnt_keep_its_command_waiting() {
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("echo started; sleep 5 &")
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let kept = KeptOutput::read(child.stdout.take().unwrap(), 3, false);
+        child.wait().unwrap();
+        let started = std::time::Instant::now();
+        assert_eq!(kept.finish(), ["started"]);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[test]
+    fn long_output_is_cut_short() {
+        let long = "x".repeat(SHOWN_OUTPUT_CHARS + 10);
+        let shown = shown_lines(&[long]).unwrap();
+        assert_eq!(shown.chars().count(), SHOWN_OUTPUT_CHARS + 1);
+        assert!(shown.ends_with('…'));
+        assert_eq!(shown_lines(&[]), None);
+    }
+
     use super::*;
     use std::sync::atomic::{AtomicI32, AtomicUsize};
     use std::sync::{Arc, Mutex};

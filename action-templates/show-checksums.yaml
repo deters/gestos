@@ -2,10 +2,17 @@ gestos-action-template: 1
 name: Show Checksums
 description: Shows the SHA-256 checksum of each selected file
 apps: [FileManager]
-needs:
-  - program: notify-send
-    package: libnotify
 steps:
   - copy: files
   - run: |
-      notify-send "SHA-256" "$(for f in "$@"; do printf '%s  %s\n' "$(sha256sum < "$f" | cut -d' ' -f1)" "${f##*/}"; done)"
+      fail() { echo "$*" >&2; exit 1; }
+      show() { echo "$*"; }
+
+      for f in "$@"; do
+          [ -f "$f" ] || fail "${f##*/} is a folder, and only files have a checksum"
+      done
+
+      for f in "$@"; do
+          sum=$(sha256sum "$f") || fail "Couldn't read ${f##*/}"
+          show "${sum%% *}  ${f##*/}"
+      done

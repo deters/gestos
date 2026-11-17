@@ -102,7 +102,8 @@ impl From<StepFile> for KeyStep {
             StepFile::Copy(CopyFile::Files) => KeyStep::Copy(CopyKind::Files),
             StepFile::Copy(CopyFile::Text) => KeyStep::Copy(CopyKind::Text),
             // A template's commands are given what's copied and selected, as that's what they're for.
-            StepFile::Run(command) => KeyStep::Run(ShellCommand::new(command.trim(), true)),
+            // and what they print is their result.
+            StepFile::Run(command) => KeyStep::Run(ShellCommand::new(command.trim(), true).showing_output()),
             StepFile::Press(keys) => KeyStep::Press(keys),
             StepFile::Type(text) => KeyStep::Type(text),
             StepFile::Wait(millis) => KeyStep::Wait(millis.min(MAX_WAIT_MILLIS)),
@@ -314,10 +315,13 @@ steps:
             template.steps,
             [
                 KeyStep::Copy(CopyKind::Files),
-                KeyStep::Run(ShellCommand::new(
-                    r#"for f in "$@"; do libreoffice --headless --convert-to pdf "$f"; done"#,
-                    true
-                )),
+                KeyStep::Run(
+                    ShellCommand::new(
+                        r#"for f in "$@"; do libreoffice --headless --convert-to pdf "$f"; done"#,
+                        true
+                    )
+                    .showing_output()
+                ),
             ]
         );
     }
@@ -480,6 +484,56 @@ steps:
         assert_eq!(String::from_utf8_lossy(&output.stdout), "https://duckduckgo.com/?q=a%20%26%20b%3F");
     }
 
+    /// What an installed template's command shows: what it printed if it worked, or why it didn't.
+    fn shown(id: &str, files: &[&Path], selection: &str) -> Result<String, String> {
+        let output = run(&installed_command(id), files, selection);
+        let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).trim().to_string();
+        if output.status.success() { Ok(text(&output.stdout)) } else { Err(text(&output.stderr)) }
+    }
+
+    #[test]
+    fn templates_say_why_they_did_nothing() {
+        let dir = TempDir::new("messages");
+        for name in ["photo.png", "only.pdf", "notes.txt"] {
+            dir.write(name, "", 0o644);
+        }
+        let file = |name: &str| dir.0.join(name);
+        assert_eq!(
+            shown("convert-images-to-png", &[&file("photo.png")], ""),
+            Err("The selected images are PNGs already".into())
+        );
+        assert_eq!(shown("merge-pdfs", &[&file("only.pdf")], ""), Err("Select at least two PDFs to merge".into()));
+        assert_eq!(
+            shown("merge-pdfs", &[&file("only.pdf"), &file("notes.txt")], ""),
+            Err("notes.txt isn't a PDF".into())
+        );
+        assert_eq!(shown("extract-zip-files", &[&file("notes.txt")], ""), Err("notes.txt isn't a ZIP file".into()));
+        assert_eq!(
+            shown("show-checksums", &[&dir.0], ""),
+            Err(format!("{} is a folder, and only files have a checksum", dir.0.file_name().unwrap().to_string_lossy()))
+        );
+        for id in ["search-the-web", "translate", "open-link", "read-aloud", "calculate", "count-words"] {
+            assert_eq!(shown(id, &[], ""), Err("Select some text first".into()), "{id}");
+        }
+        assert_eq!(shown("open-link", &[], "/etc/passwd"), Err("The selected text isn't a link".into()));
+    }
+
+    #[test]
+    fn templates_show_their_results() {
+        let dir = TempDir::new("results");
+        dir.write("a.txt", "", 0o644);
+        assert_eq!(
+            shown("show-checksums", &[&dir.0.join("a.txt")], ""),
+            Ok("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  a.txt".into())
+        );
+        assert_eq!(shown("count-words", &[], "one"), Ok("1 word".into()));
+        assert_eq!(shown("count-words", &[], "one two three"), Ok("3 words".into()));
+        if std::process::Command::new("bc").arg("-v").output().is_ok() {
+            assert_eq!(shown("calculate", &[], "2*(3+4)"), Ok("2*(3+4) = 14".into()));
+            assert_eq!(shown("calculate", &[], "hello"), Err("The selected text isn't a calculation".into()));
+        }
+    }
+
     #[test]
     fn the_templates_gestos_installs_are_all_read() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("action-templates");
@@ -496,7 +550,6 @@ steps:
                     assert!(status.success(), "{id}");
                 }
             }
-            assert!(!template.needs.is_empty(), "{id}");
             read += 1;
         }
         assert_eq!(read, installed);
