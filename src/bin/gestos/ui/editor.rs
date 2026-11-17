@@ -788,12 +788,26 @@ fn open_editor(
     draw_again.set_margin_top(12);
     draw_again.set_visible(has_drawing(&recorded_points.borrow()));
     *draw_again_tick.borrow_mut() = Some(draw_again.clone());
+
+    // While Gestos runs, the button it draws with doesn't reach any window: the gesture is drawn
+    // on screen. Its path then comes from the daemon as it's drawn. While the editor is ready to
+    // record one, it holds this, and the daemon doesn't run what's drawn. Otherwise gestures work
+    // as anywhere else, this window included. Only one editor records at a time.
+    let editor_lock: Rc<RefCell<Option<gestos::ipc::EditorLock>>> = Rc::new(RefCell::new(
+        (!has_drawing(&recorded_points.borrow()))
+            .then(|| gestos::ipc::EditorLock::acquire().ok())
+            .flatten(),
+    ));
+    let lock_clear = Rc::clone(&editor_lock);
     let pts_clear = Rc::clone(&recorded_points);
     let toggles_clear = modifier_toggles.clone();
     let conflict_clear = conflict_box.clone();
     let check_cleared = check.clone();
     let canvas_clear = canvas.clone();
     draw_again.connect_clicked(move |_| {
+        if lock_clear.borrow().is_none() {
+            *lock_clear.borrow_mut() = gestos::ipc::EditorLock::acquire().ok();
+        }
         pts_clear.borrow_mut().clear();
         toggles_clear.set(Modifiers::default());
         conflict_clear.set_visible(false);
@@ -801,12 +815,7 @@ fn open_editor(
         check_cleared();
     });
 
-    // While Gestos runs, the button it draws with doesn't reach any window: the gesture is drawn
-    // on screen. Its path then comes from the daemon as it's drawn, and isn't run meanwhile.
-    let editor_lock = gestos::ipc::EditorLock::acquire().ok();
-    let bus = editor_lock
-        .as_ref()
-        .and_then(|_| gtk::gio::bus_get_sync(gtk::gio::BusType::Session, gtk::gio::Cancellable::NONE).ok());
+    let bus = gtk::gio::bus_get_sync(gtk::gio::BusType::Session, gtk::gio::Cancellable::NONE).ok();
     let mut subscriptions = Vec::new();
     if let Some(bus) = &bus {
         let subscribe = |signal: &str, handler: Box<dyn Fn(&glib::Variant)>| {
@@ -827,8 +836,17 @@ fn open_editor(
         let path = Rc::clone(&new_path);
         let held = Rc::clone(&held_at_start);
         let canvas_started = canvas.clone();
+        let pts_started = Rc::clone(&recorded_points);
+        let recording_started = Rc::clone(&is_recording);
+        let lock_started = Rc::clone(&editor_lock);
         subscriptions.push(subscribe("GestureStarted", Box::new(move |parameters| {
             let Some((x, y)) = parameters.get::<(f64, f64)>() else { return };
+            // With a gesture drawn, the next one runs as anywhere else. It's let go only now, as
+            // the daemon asks once a gesture ends whether to run it, which would run the one just
+            // recorded too.
+            if has_drawing(&pts_started.borrow()) && !*recording_started.borrow() {
+                lock_started.borrow_mut().take();
+            }
             *path.borrow_mut() = vec![Point2D { x, y }];
             // On X11, GTK only follows the keys for the window with focus, which this one may not
             // be, so the X server is asked.
@@ -850,6 +868,7 @@ fn open_editor(
         let recording = Rc::clone(&is_recording);
         let on_screen = Rc::clone(&drawn_on_screen);
         let shown_recording = recording_label.clone();
+        let lock_updated = Rc::clone(&editor_lock);
         let conflict = conflict_box.clone();
         let toggles = modifier_toggles.clone();
         let canvas_updated = canvas.clone();
@@ -861,8 +880,9 @@ fn open_editor(
             }
             path.push(Point2D { x, y });
             if !*recording.borrow() {
-                // As in the window, one already drawn stays until the user asks to draw again.
-                if has_drawing(&pts.borrow()) {
+                // As in the window, one already drawn stays until the user clears it, and one
+                // drawn while another editor records is that one's.
+                if has_drawing(&pts.borrow()) || lock_updated.borrow().is_none() {
                     path.clear();
                     return;
                 }
@@ -898,7 +918,7 @@ fn open_editor(
                     bus.signal_unsubscribe(id);
                 }
             }
-            drop(lock);
+            lock.borrow_mut().take();
         }
     });
 
