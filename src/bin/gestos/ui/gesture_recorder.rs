@@ -199,31 +199,23 @@ pub fn open_gesture_recorder(
     dialog.set_resizable(false);
     dialog.set_title(Some("Draw Gesture"));
     crate::ui::components::close_with_keys(&dialog);
-
-    let header = gtk::HeaderBar::new();
-    header.set_show_title_buttons(false);
-    let title_label = gtk::Label::new(Some("Draw Gesture"));
-    title_label.add_css_class("title");
-    header.set_title_widget(Some(&title_label));
-    dialog.set_titlebar(Some(&header));
+    // Without a frame, and see-through, so that what the gesture is for stays in sight. The window
+    // itself is clear, and the card in it rounded, as a window's corners would be.
+    dialog.set_decorated(false);
+    dialog.remove_css_class("background");
+    dialog.add_css_class("gesture-recorder");
 
     let cancel_btn = gtk::Button::with_mnemonic("_Cancel");
     let dialog_cancel = dialog.clone();
     cancel_btn.connect_clicked(move |_| dialog_cancel.destroy());
-    header.pack_start(&cancel_btn);
 
     // Only once there's a drawing to set.
     let set_btn = gtk::Button::with_mnemonic("_Set");
     set_btn.add_css_class("suggested-action");
     set_btn.set_sensitive(false);
-    header.pack_end(&set_btn);
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    content.add_css_class("dialog-content");
-    content.set_margin_start(24);
-    content.set_margin_end(24);
-    content.set_margin_top(24);
-    content.set_margin_bottom(24);
+    content.add_css_class("recorder-card");
     dialog.set_child(Some(&content));
 
     let canvas = crate::ui::gesture_canvas::GestureCanvas::new();
@@ -545,6 +537,12 @@ pub fn open_gesture_recorder(
     gesture_list.append(&canvas_row);
     content.append(&gesture_list);
     content.append(&conflict_box);
+    // Where a dialog's header bar would have them, below the drawing as there's no header bar.
+    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    buttons.set_homogeneous(true);
+    buttons.append(&cancel_btn);
+    buttons.append(&set_btn);
+    content.append(&buttons);
 
     dialog.set_default_widget(Some(&set_btn));
     dialog.present();
