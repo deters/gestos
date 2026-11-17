@@ -25,6 +25,9 @@ Each release's page on GitHub is its section there.
   "… now also works on X11", "Renamed X to Y", and under Fixed, what was wrong: "Closing some
   windows could crash GNOME." No bold headings, no selling: it's a record of changes, not an
   announcement. Nothing on how it's built: no extensions, D-Bus or threads.
+- Describe a feature by what a user would want to do with it, not by what it is: 'Gestures can
+  now run a command on the files or text you copied, or the text you selected (option "Use
+  Variables", in the actions "Run Command in Shell" and "Advanced Action").'
 - An entry about an action or an option names it in quotes, as the app shows it: 'New action
   "Toggle Middle Click Paste": turns middle click paste on or off.', 'The action "Close Window"
   now …', 'New option "Allow Middle Click Paste" in Settings …'. When a change hides something,
