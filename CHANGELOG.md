@@ -19,7 +19,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - New option "Control Windows With the Middle Button" in Settings: dragging with the middle button moves the window under the pointer, and scrolling resizes it (GNOME).
 - The action "Advanced Action" can now run a command as one of its steps.
 - Each app's page can now create an "Advanced Action" that works only in that app.
-- The actions "Run Command in Shell" and "Advanced Action" can now give their commands the copied text, the selected text and the copied files, with the new option "Use Variables".
+- New option "Use Variables" in the actions "Run Command in Shell" and "Advanced Action": allows commands to use the copied text, the selected text and the copied files.
 - New option "Allow Middle Click Paste" in Settings, to turn off pasting with the middle button (GNOME).
 - New action "Toggle Middle Click Paste": turns middle click paste on or off (GNOME).
 - New action "Toggle Middle Button Window Control": turns "Control Windows With the Middle Button" on or off (GNOME).
