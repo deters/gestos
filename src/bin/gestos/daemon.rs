@@ -163,6 +163,48 @@ pub fn stop_daemon(conn: Option<&zbus::blocking::Connection>) {
     }
 }
 
+/// The version of the daemon running, as it says it. Asked only once it's known to run, as the
+/// name is D-Bus activatable and asking would start one.
+pub fn running_version(conn: Option<&zbus::blocking::Connection>) -> Option<String> {
+    if !is_daemon_running(conn) {
+        return None;
+    }
+    let ask = |conn: &zbus::blocking::Connection| {
+        zbus::blocking::Proxy::new(
+            conn,
+            gestos::config::get_dbus_name(),
+            "/io/github/deters/Gestos/Daemon",
+            "io.github.deters.Gestos.Daemon",
+        )
+        .ok()?
+        .get_property::<String>("Version")
+        .ok()
+    };
+    match conn {
+        Some(conn) => ask(conn),
+        None => ask(&zbus::blocking::Connection::session().ok()?),
+    }
+}
+
+/// Whether a daemon of this version would be one of another version than this app: one still
+/// running from before Gestos was updated, which doesn't know what this version saves.
+pub fn is_outdated(version: &str) -> bool {
+    version != env!("GESTOS_SHOWN_VERSION")
+}
+
+/// Restarts a daemon still running from another version, as updating Gestos replaces its files
+/// but not what's running. Says whether it did.
+pub fn restart_if_outdated(conn: Option<&zbus::blocking::Connection>) -> Result<bool, String> {
+    let Some(version) = running_version(conn) else { return Ok(false) };
+    if !is_outdated(&version) {
+        return Ok(false);
+    }
+    println!("Restarting the gestures, which were still running version {version}");
+    stop_daemon(conn);
+    start_daemon(conn)?;
+    Ok(true)
+}
+
 /// Starts gestures, including the overlay if the user has it enabled.
 pub fn turn_on(conn: Option<&zbus::blocking::Connection>) -> Result<(), String> {
     set_stopped_by_user(false);

@@ -31,6 +31,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- After Gestos was updated, the gestures went on running the old version until you logged out. That version ignored what it didn't know, like the step "Copy", and showed no message. The gestures now restart on their own when Gestos is updated.
 - In an "Advanced Action", cancelling the keys of a new "Shortcut" step left a step that pressed nothing. Clearing the keys of a step now removes it.
 
 ## [8.1.0] - 2026-11-16

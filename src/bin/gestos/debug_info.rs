@@ -219,21 +219,9 @@ fn daemon_state() -> String {
     if !crate::daemon::is_daemon_running(conn.as_ref()) {
         return format!("not running{stopped}");
     }
-    // Asked only once it's known to run, so that asking doesn't start it.
-    let version = conn
-        .and_then(|conn| {
-            zbus::blocking::Proxy::new(
-                &conn,
-                gestos::config::get_dbus_name(),
-                "/io/github/deters/Gestos/Daemon",
-                "io.github.deters.Gestos.Daemon",
-            )
-            .ok()?
-            .get_property::<String>("Version")
-            .ok()
-        })
-        .unwrap_or_default();
-    format!("running, version {version}{stopped}")
+    let version = crate::daemon::running_version(conn.as_ref()).unwrap_or_default();
+    let outdated = if crate::daemon::is_outdated(&version) { ", not this app's version" } else { "" };
+    format!("running, version {version}{outdated}{stopped}")
 }
 
 fn access_rules() -> String {
