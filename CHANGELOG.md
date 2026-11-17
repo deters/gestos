@@ -21,7 +21,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Each app's page can now create an "Advanced Action" that works only in that app.
 - Gestures can now run a command on the files or text you copied, or the text you selected (option "Use Variables", in the actions "Run Command in Shell" and "Advanced Action").
 - New option "Allow Middle Click Paste" in Settings, to stop the middle button from pasting, and new action "Toggle Middle Click Paste" to switch it with a gesture (GNOME).
-- New action "Toggle Middle Button Window Control": switches "Control Windows With the Middle Button" on and off, for apps where you drag with the middle button yourself (GNOME).
+- New action "Toggle Middle Button Window Control": turns moving and resizing windows with the middle button on or off (GNOME).
 
 ### Changed
 
