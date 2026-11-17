@@ -1,6 +1,6 @@
 #!/bin/sh
 # Writes a release page: the release notes, then which package to install on each system.
-# Usage: release-body.sh RELEASE_NOTES.md <folder with the packages>
+# Usage: release-body.sh <notes, as changelog.sh writes them> <folder with the packages>
 set -eu
 
 notes=$1

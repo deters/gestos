@@ -11,3 +11,19 @@
 - Don't copy a shortcut because the code around it takes one. Fix that code too, or say why not.
 - When running a program really is the best choice, such as a user's own command or a tool that
   has no library, say so while discussing the change's edge cases, so the user decides.
+
+## Changelog
+
+[CHANGELOG.md](CHANGELOG.md) follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Each release's page on GitHub is its section there.
+
+- Every change a user would notice adds an entry under `## [Unreleased]`, in the same commit as
+  the change. A fix to something not released yet changes that entry instead of adding one.
+- Entries go under `### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed` or
+  `### Security`, in that order.
+- Each entry is a plain bold name and a short sentence on what the user gets, with a concrete
+  example where it helps. Nothing on how it's built: no extensions, D-Bus or threads.
+- To release, run `packaging/bump-version.sh <major|minor|patch>`. It moves what's under
+  Unreleased to the new version, dated, and refuses to release with nothing there. Pushing the
+  tag publishes that section.
+- A beta's page shows what's under Unreleased.

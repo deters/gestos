@@ -253,13 +253,16 @@ jobs:
             {
               echo "A preview of Gestos $VERSION, built from $(git -C source rev-parse --short HEAD)."
               echo
-              echo "## Changes since ${last#v}"
-              echo
-              git -C source log --no-merges --format='- %s' "$last..HEAD" |
-                grep -v -E '^- (Bump version|Write the release notes)' || true
+              # What the changelog says is coming, or every change, if it says nothing yet.
+              if ! sh source/packaging/changelog.sh notes Unreleased source/CHANGELOG.md; then
+                echo "## Changes since ${last#v}"
+                echo
+                git -C source log --no-merges --format='- %s' "$last..HEAD" |
+                  grep -v -E '^- (Bump version|Write the release notes)' || true
+              fi
             } > notes.md
           else
-            cp source/RELEASE_NOTES.md notes.md
+            sh source/packaging/changelog.sh notes "${GITHUB_REF_NAME#v}" source/CHANGELOG.md > notes.md
           fi
           sh source/packaging/release-body.sh notes.md packages > release-body.md
 

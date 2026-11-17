@@ -58,6 +58,9 @@ fi
 
 echo "Bumping version from $CURRENT_VERSION to $NEW_VERSION..."
 
+# 0. CHANGELOG.md, whose Unreleased changes become this version's
+sh "$(dirname "$0")/changelog.sh" release "$NEW_VERSION"
+
 # 1. Cargo.toml
 perl -i -pe "s/^(version\s*=\s*\")[^\"]+/\${1}$NEW_VERSION/ if \$. < 10" Cargo.toml
 
@@ -99,7 +102,7 @@ cargo check >/dev/null 2>&1 || true
 
 # Commit and tag
 echo "Staging version changes in Git..."
-git add Cargo.toml Cargo.lock meson.build packaging/gestos.spec packaging/APKBUILD extension/metadata.json \
+git add CHANGELOG.md Cargo.toml Cargo.lock meson.build packaging/gestos.spec packaging/APKBUILD extension/metadata.json \
     debian/changelog
 
 git commit -m "Bump version to $NEW_VERSION"

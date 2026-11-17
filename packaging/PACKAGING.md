@@ -18,17 +18,18 @@ The compiled packages are uploaded to the Action run page as downloadable artifa
 
 ### Creating a Release
 To automatically compile and publish a new release:
-1. Run one of the Makefile targets to automatically bump the version in all descriptors (Cargo.toml, meson.build, RPM spec, APKBUILD, changelogs, GUI), commit the changes, and create the git tag:
+1. Make sure `CHANGELOG.md` lists what changed under `## [Unreleased]`, as [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) has it, and commit it. The release page shows that section.
+2. Run one of the Makefile targets to automatically bump the version in all descriptors (Cargo.toml, meson.build, RPM spec, APKBUILD, changelogs, GUI), move the Unreleased changes under the new version in `CHANGELOG.md`, commit the changes, and create the git tag. It stops if Unreleased lists nothing:
    ```bash
    make patch   # Bumps patch version (e.g. 4.0.0 -> 4.0.1)
    make minor   # Bumps minor version (e.g. 4.0.0 -> 4.1.0)
    # Or for a specific version: make version VERSION=4.1.0
    ```
-2. Push the commit and the tag to GitHub. Push only the new tag: every `v*` tag starts a release, so `--tags` would publish old versions too:
+3. Push the commit and the tag to GitHub. Push only the new tag: every `v*` tag starts a release, so `--tags` would publish old versions too:
    ```bash
    git push origin master vX.Y.Z
    ```
-3. The workflow will trigger, compile the `.rpm`, `.deb`, and `.apk` packages, create a new GitHub Release page, and attach all the package binaries as downloadable release assets automatically.
+4. The workflow will trigger, compile the `.rpm`, `.deb`, and `.apk` packages, create a new GitHub Release page with the version's section of `CHANGELOG.md`, and attach all the package binaries as downloadable release assets automatically.
 
 ---
 
