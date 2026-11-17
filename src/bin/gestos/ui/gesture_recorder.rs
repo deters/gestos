@@ -281,14 +281,14 @@ pub fn open_gesture_recorder(
 
     // The window records for as long as it's open, each drawing taking the place of the last, so
     // it says so from the start, above the drawing.
-    let recording = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    recording.set_halign(gtk::Align::Center);
+    let recording_note = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    recording_note.set_halign(gtk::Align::Center);
     let recording_dot = gtk::Image::from_icon_name("media-record-symbolic");
     recording_dot.add_css_class("error");
-    recording.append(&recording_dot);
+    recording_note.append(&recording_dot);
     let recording_label = gtk::Label::new(Some("Recording"));
     recording_label.add_css_class("heading");
-    recording.append(&recording_label);
+    recording_note.append(&recording_label);
 
     let conflict_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     conflict_box.add_css_class("warning-box");
@@ -523,7 +523,7 @@ pub fn open_gesture_recorder(
         });
     }
 
-    content.append(&recording);
+    content.append(&recording_note);
     let gesture_list = gtk::ListBox::new();
     gesture_list.add_css_class("boxed-list");
     gesture_list.set_selection_mode(gtk::SelectionMode::None);
