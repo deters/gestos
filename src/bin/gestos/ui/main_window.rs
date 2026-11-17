@@ -1469,8 +1469,7 @@ pub fn build_ui(app: &gtk::Application) {
          .build-your-own label { font-weight: bold; }\n\
          togglebutton.key-held, button.key-held { box-shadow: 0 0 0 3px alpha(@accent_bg_color, 0.6); }\n\
          window.gesture-recorder { background: transparent; }\n\
-         .recorder-card { margin: 16px; padding: 24px; border-radius: 12px; background-color: alpha(@window_bg_color, 0.8); border: 1px solid alpha(currentColor, 0.15); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); }\n\
-         .recorder-card list.boxed-list, .recorder-card list.boxed-list > row { background-color: alpha(@card_bg_color, 0.4); }\n\
+         .recorder-card { margin: 16px; padding: 24px; border-radius: 12px; background-color: @window_bg_color; border: 1px solid alpha(currentColor, 0.15); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); }\n\
          .dialog-content scrolledwindow > undershoot.bottom { box-shadow: inset 0 -12px 12px -12px alpha(black, 0.25); }\n\
          .dialog-content scrolledwindow > undershoot.top { box-shadow: inset 0 12px 12px -12px alpha(black, 0.25); }\n"
     );

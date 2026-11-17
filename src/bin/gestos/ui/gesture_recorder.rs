@@ -199,8 +199,8 @@ pub fn open_gesture_recorder(
     dialog.set_resizable(false);
     dialog.set_title(Some("Draw Gesture"));
     crate::ui::components::close_with_keys(&dialog);
-    // Without a frame, and see-through, so that what the gesture is for stays in sight. The window
-    // itself is clear, and the card in it rounded, as a window's corners would be.
+    // Without a frame. The window itself is clear, around a card rounded as a window's corners
+    // would be, with room for its shadow.
     dialog.set_decorated(false);
     dialog.remove_css_class("background");
     dialog.add_css_class("gesture-recorder");
@@ -279,12 +279,16 @@ pub fn open_gesture_recorder(
         });
     }
 
-    // All the drawing shows while a gesture is drawn, which is then shown once it's done.
+    // The window records for as long as it's open, each drawing taking the place of the last, so
+    // it says so from the start, above the drawing.
+    let recording = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    recording.set_halign(gtk::Align::Center);
+    let recording_dot = gtk::Image::from_icon_name("media-record-symbolic");
+    recording_dot.add_css_class("error");
+    recording.append(&recording_dot);
     let recording_label = gtk::Label::new(Some("Recording"));
-    recording_label.add_css_class("title-2");
-    recording_label.add_css_class("dim-label");
-    recording_label.set_can_target(false);
-    recording_label.set_visible(false);
+    recording_label.add_css_class("heading");
+    recording.append(&recording_label);
 
     let conflict_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     conflict_box.add_css_class("warning-box");
@@ -342,7 +346,6 @@ pub fn open_gesture_recorder(
         let points = Rc::clone(&points);
         let is_recording = Rc::clone(&is_recording);
         let drawn_on_screen = Rc::clone(&drawn_on_screen);
-        let recording_label = recording_label.clone();
         let conflict_box = conflict_box.clone();
         let keys = modifier_keys.clone();
         let canvas = canvas.clone();
@@ -350,7 +353,6 @@ pub fn open_gesture_recorder(
         Rc::new(move |start: Vec<Point2D>, held: Modifiers, on_screen: bool| {
             is_recording.set(true);
             drawn_on_screen.set(on_screen);
-            recording_label.set_visible(true);
             conflict_box.set_visible(false);
             set_btn.set_sensitive(false);
             keys.set(held);
@@ -361,12 +363,10 @@ pub fn open_gesture_recorder(
     let finish_drawing = {
         let points = Rc::clone(&points);
         let is_recording = Rc::clone(&is_recording);
-        let recording_label = recording_label.clone();
         let canvas = canvas.clone();
         let set_btn = set_btn.clone();
         Rc::new(move || {
             is_recording.set(false);
-            recording_label.set_visible(false);
             canvas.queue_draw();
             set_btn.set_sensitive(has_drawing(&points.borrow()));
             check_conflict();
@@ -523,6 +523,7 @@ pub fn open_gesture_recorder(
         });
     }
 
+    content.append(&recording);
     let gesture_list = gtk::ListBox::new();
     gesture_list.add_css_class("boxed-list");
     gesture_list.set_selection_mode(gtk::SelectionMode::None);
@@ -530,7 +531,6 @@ pub fn open_gesture_recorder(
     canvas_row.set_activatable(false);
     let canvas_overlay = gtk::Overlay::new();
     canvas_overlay.set_child(Some(&canvas));
-    canvas_overlay.add_overlay(&recording_label);
     canvas_overlay.add_overlay(&hint);
     canvas_overlay.add_overlay(&drawing_corner(apps, &modifier_keys));
     canvas_row.set_child(Some(&canvas_overlay));
