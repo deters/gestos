@@ -20,8 +20,9 @@ row() {
 	return 0
 }
 
-# The release has its own title, so the notes' title is left out.
-sed '1{/^# /d}' "$notes" | sed '/./,$!d'
+# The release has its own title, so the notes' title is left out, and the changelog's kinds of
+# change are headings as big as Install.
+sed '1{/^# /d}' "$notes" | sed '/./,$!d' | sed 's/^### /## /'
 echo
 echo "## Install"
 echo
