@@ -16,17 +16,18 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Moving and resizing windows with the middle button: drag to move the window under the pointer, scroll to resize it (Control Windows With the Middle Button, in Settings; GNOME).
-- A Command step for advanced actions.
-- Advanced actions limited to one app, from the app's page.
-- Commands can now use the copied text, the selected text and the copied files (Use Variables, in Run Command in Shell and Advanced Action).
-- A setting to turn off middle click paste (Allow Middle Click Paste, in Settings), and an action that toggles it (Toggle Middle Click Paste).
-- An action that toggles middle button window control (Toggle Middle Button Window Control).
+- New option "Control Windows With the Middle Button" in Settings: dragging with the middle button moves the window under the pointer, and scrolling resizes it (GNOME).
+- The action "Advanced Action" can now run a command as one of its steps.
+- Each app's page can now create an "Advanced Action" that works only in that app.
+- The actions "Run Command in Shell" and "Advanced Action" can now give their commands the copied text, the selected text and the copied files, with the new option "Use Variables".
+- New option "Allow Middle Click Paste" in Settings, to turn off pasting with the middle button.
+- New action "Toggle Middle Click Paste": turns middle click paste on or off.
+- New action "Toggle Middle Button Window Control": turns "Control Windows With the Middle Button" on or off.
 
 ### Changed
 
 - While a window is dragged, only the tiled windows in its way move now, instead of all of them.
-- Importing a configuration now lists the commands its gestures run before you confirm.
+- "Import Configuration" in Settings now lists the commands the imported gestures run, before you confirm.
 
 ## [8.0.1] - 2026-11-15
 
@@ -38,11 +39,11 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Categories for actions, such as Windows, Navigation and Sound and Media.
+- Actions are now grouped in categories, such as Windows, Navigation and Sound and Media. You can still see all your gestures together by turning on "Show Gestures in the Main Page" in Settings.
 - A page for each app, with its gestures and the shortcuts it offers.
 - A panel that shows what a gesture ran, or why nothing ran (GNOME, KDE, X11).
 - The gesture path is now also shown on KDE and X11.
-- Look Up Selection: opens selected text as a link, works out a sum, or searches the web for it.
+- New action "Look Up Selection": opens the selected text as a link, works out a sum, or searches the web for it.
 - Gestures per app now also work on Sway and Hyprland.
 
 ### Changed
@@ -69,7 +70,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Tiling now also works on other monitors. Dialogs and videos stay on top instead of taking a tile.
-- Show Overview With Both Buttons: holding right and clicking left shows all windows (Settings; GNOME, KDE).
+- New option "Show Overview With Both Buttons" in Settings: holding right and clicking left shows all windows (GNOME, KDE).
 
 ### Changed
 
@@ -85,7 +86,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- View Split on Left and View Split on Right are now actions.
+- New actions "View Split on Left" and "View Split on Right": put a window on half the screen.
 
 ### Fixed
 
@@ -148,10 +149,10 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- An Open action for every installed app, which also brings it to the front if it's open.
-- The gesture path: a line that follows the pointer while you draw (Preferences).
-- A choice of the button that draws gestures: right, middle, back or forward. Left-handed mice use the other side (Preferences).
-- A button that creates a bug report (Preferences).
+- New "Open" action for every installed app, which also brings the app to the front if it's open.
+- New option "Show Gesture Path" in Preferences: draws each gesture on screen as you draw it.
+- New option "Draw With" in Preferences: draws gestures with the right, middle, back or forward button. Left-handed mice use the other side.
+- New option "Debugging Information" in Preferences: creates a report to attach to a bug report.
 
 ### Changed
 
@@ -178,12 +179,12 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Gestures limited to some apps (GNOME).
-- Custom actions can now open an app, or bring it to the front, before their other steps.
-- Custom actions now have names, and a new one is named after what was searched for.
+- The action "Custom Action" can now open an app, or bring it to the front, before its other steps.
+- Each "Custom Action" now has a name, and a new one is named after what was searched for.
 
 ### Changed
 
-- Renamed Custom Keyboard Action to Custom Action, and Run Command to Run Command in Shell.
+- Renamed the action "Custom Keyboard Action" to "Custom Action", and "Run Command" to "Run Command in Shell".
 - The gesture editor now shows the action first, then what triggers it.
 - Starting and stopping gestures no longer shows a notification, unless it fails.
 
@@ -191,8 +192,8 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Custom Keyboard Action, which replaces Custom Keyboard Shortcut: it presses shortcuts, types text and waits, in the order you set. The text can have several lines and accented letters.
-- Tile Automatically, which tiles every workspace (Preferences).
+- New action "Custom Keyboard Action", which replaces "Custom Keyboard Shortcut": presses shortcuts, types text and waits, in the order you set. The text can have several lines and accented letters.
+- New option "Tile Automatically" in Preferences: tiles every workspace, new ones too.
 - Gestos now says when its GNOME extension is out of date, and how to update it.
 
 ### Changed
@@ -200,7 +201,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Tiling now keeps windows at their own sizes, moving them just enough not to overlap.
 - Tiling now stays on until turned off, also after logging out.
 - The card that asks which gesture was meant now appears at the pointer, and the window keeps its focus (GNOME).
-- Run Command and Custom Keyboard Action are now offered in every search.
+- The actions "Run Command" and "Custom Keyboard Action" are now offered in every search.
 - The shortcut recorder now also records Escape, Backspace, Tab and Enter.
 
 ### Fixed
@@ -236,13 +237,13 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - GNOME crashed when a window on a second monitor closed while tiling.
-- Closing a window that doesn't respond now offers to force quit it (Close Window).
+- The action "Close Window" now offers to force quit a window that doesn't respond.
 
 ## [6.1.2] - 2026-11-03
 
 ### Fixed
 
-- Close Window now closes windows like their close button does (GNOME).
+- The action "Close Window" now closes windows like their close button does (GNOME).
 - Shortcuts pressed by gestures now start sooner (GNOME).
 - The pointer could stutter on a busy desktop.
 
@@ -259,7 +260,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Toggle Tile Windows, which fits a workspace's windows together without overlaps, and puts them back when used again (GNOME).
+- New action "Toggle Tile Windows": fits a workspace's windows together without overlaps, and puts them back when used again (GNOME).
 - The Gestos GNOME extension, which tiling needs. It comes with Gestos: log out and back in, then turn it on (Preferences).
 - Tiled windows get their own size back before they're closed, so apps don't remember the tile's size.
 
@@ -278,10 +279,10 @@ Renamed from MyGestures to Gestos. Gestures and settings carry over.
 ### Added
 
 - Gestures that require Ctrl, Alt, Shift or Super to be held.
-- Standard shortcuts, such as Copy and Zoom In, as actions.
+- New actions for standard shortcuts, such as "Copy" and "Zoom In".
 - Creating gestures from the search box.
 - A chooser for when a drawing matches several gestures.
-- Reduce Notifications, which hides the notification of which gesture ran.
+- New option "Reduce Notifications": hides the notification of which gesture ran.
 - Support for any keyboard layout.
 - Gestures are now ignored while the screen is locked.
 - A new icon and a smaller gesture editor, with Start and Stop in the header bar.
@@ -294,7 +295,7 @@ Renamed from MyGestures to Gestos. Gestures and settings carry over.
 - Each gesture now has one action. Older configurations with several use the first.
 - Opening Gestos now starts gestures, unless they were stopped.
 - GNOME actions with no shortcut assigned now run, and sooner. If one sometimes does nothing, set `GESTOS_SHORTCUT_DELAY_MS` to `300`.
-- Renamed Keypress Shortcut to Custom Keyboard Shortcut.
+- Renamed the action "Keypress Shortcut" to "Custom Keyboard Shortcut".
 
 ### Removed
 
@@ -312,8 +313,8 @@ Renamed from MyGestures to Gestos. Gestures and settings carry over.
 
 - Reordering gestures by dragging them.
 - Searching for an action in the gesture editor.
-- Support for KDE's global shortcuts.
-- Importing and exporting gestures, and loading the default ones (Settings).
+- KDE's global shortcuts are now actions.
+- New options "Import Configuration" and "Export Configuration" in Settings, and a way to load the default gestures.
 - Keyboard navigation in every part of the window.
 
 ### Changed
@@ -360,7 +361,7 @@ Rebuilt the packages, with no changes.
 
 ### Removed
 
-- The Mouse Click action.
+- The action "Mouse Click".
 
 ## [4.1.9] - 2026-06-10
 
@@ -421,7 +422,7 @@ Rebuilt the packages, with no changes.
 ### Added
 
 - A window for creating and editing gestures, with a shortcut recorder.
-- GNOME's shortcuts as actions.
+- GNOME's shortcuts are now actions.
 - Support for XFCE.
 - A warning when a gesture is too much like another.
 - Packages for Debian and Ubuntu, Fedora and Alpine.

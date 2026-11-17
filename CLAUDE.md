@@ -24,8 +24,13 @@ Each release's page on GitHub is its section there.
 - Each entry says what changed, compared with before, in one plain line: "Added …",
   "… now also works on X11", "Renamed X to Y", and under Fixed, what was wrong: "Closing some
   windows could crash GNOME." No bold headings, no selling: it's a record of changes, not an
-  announcement. Nothing on how it's built: no extensions, D-Bus or threads. Where to find it
-  goes last, in parentheses: "(Allow Middle Click Paste, in Settings)".
+  announcement. Nothing on how it's built: no extensions, D-Bus or threads.
+- An entry about an action or an option names it in quotes, as the app shows it: 'New action
+  "Toggle Middle Click Paste": turns middle click paste on or off.', 'The action "Close Window"
+  now …', 'New option "Allow Middle Click Paste" in Settings …'. When a change hides something,
+  say how to get it back: 'Actions are now grouped in categories. You can still see all your
+  gestures together by turning on "Show Gestures in the Main Page" in Settings.'
+- Where something only works on some desktops goes last, in parentheses: "(GNOME, KDE)".
 - Before committing any text for users, reread it for what makes text read as AI-written:
   claims and slogans, vague comparatives like "smoother" or "better" with nothing behind them,
   marketing phrases like "in one click" or "no more", and fragments used for punch.
