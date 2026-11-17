@@ -15,6 +15,10 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - To draw a gesture again, click "Redraw" on its drawing in the editor. Press Esc in the window that opens to keep the old drawing. Clicking the drawing no longer clears it.
 - Gestures now work while the gesture editor is open. They stop only while you draw a gesture.
 
+### Fixed
+
+- In an "Advanced Action", cancelling the keys of a new "Shortcut" step left a step that pressed nothing. Clearing the keys of a step now removes it.
+
 ## [8.1.0] - 2026-11-16
 
 ### Added
