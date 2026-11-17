@@ -1,6 +1,6 @@
-//! The window a gesture is drawn in, as a shortcut's keys are recorded in theirs: before a new
-//! gesture's editor opens, and from the editor to draw it again. Each drawing takes the place of
-//! the last one, and Set keeps it. Cancel leaves the gesture as it was.
+//! The window a gesture is drawn in, as GNOME Settings has one to type a shortcut in: before a
+//! new gesture's editor opens, and from the editor to draw it again. The first gesture drawn is the
+//! one kept, and the window closes. Escape leaves the gesture as it was.
 
 use gtk::prelude::*;
 use gtk::glib;
@@ -183,12 +183,59 @@ pub fn drawing_corner(apps: &[String], keys: &ModifierKeys) -> gtk::Box {
     corner
 }
 
-/// Opens the window to draw a gesture in, over `parent`. `own_id` is the gesture's being drawn
-/// again, which its new drawing can't be confused with, and `apps` the ones it's for.
+/// The gesture most like a drawing that could run instead of it: one with the same modifier keys,
+/// in the same apps. One for some apps and one for all of them don't conflict, as the app's own
+/// wins there. `own_id` is the gesture drawn again, which can't be confused with itself.
+pub fn similar_gesture(
+    state: &AppState,
+    drawing: &Drawing,
+    apps: &[String],
+    own_id: Option<&str>,
+) -> Option<String> {
+    if !has_drawing(&drawing.points) {
+        return None;
+    }
+    let same_apps = |other: &[String]| {
+        other.is_empty() == apps.is_empty()
+            && (apps.is_empty() || other.iter().any(|app| apps.contains(app)))
+    };
+    let templates: Vec<(String, Vec<Point2D>)> = state
+        .config
+        .gestures
+        .iter()
+        .filter(|g| !g.is_deleted && Some(g.id.as_str()) != own_id)
+        .filter(|g| g.modifiers == drawing.modifiers && same_apps(&g.apps))
+        .map(|g| (g.name.clone(), g.points.clone()))
+        .collect();
+    confused_with(&drawing.points, &templates)
+}
+
+/// A warning under a drawing, hidden until there's one to give, and the label it's written in.
+pub fn warning_box() -> (gtk::Box, gtk::Label) {
+    let warning = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    warning.add_css_class("warning-box");
+    warning.set_visible(false);
+    let icon = gtk::Image::from_icon_name("dialog-warning-symbolic");
+    icon.set_icon_size(gtk::IconSize::Normal);
+    warning.append(&icon);
+    let label = gtk::Label::new(None);
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    label.add_css_class("warning-label");
+    label.set_wrap(true);
+    // Wrapped to the box's width, rather than asking for room for all of it on one line.
+    label.set_max_width_chars(1);
+    warning.append(&label);
+    (warning, label)
+}
+
+/// Opens the window to draw a gesture in, over `parent`, as GNOME Settings opens one to type a
+/// shortcut in: the first drawing is the one kept, and Escape cancels. `name` is what the gesture
+/// is for, and `apps` the apps it's for.
 pub fn open_gesture_recorder(
     parent: &gtk::Window,
     state_rc: &Rc<RefCell<AppState>>,
-    own_id: Option<String>,
+    name: &str,
     apps: &[String],
     on_set: Rc<dyn Fn(Drawing)>,
 ) {
@@ -197,26 +244,32 @@ pub fn open_gesture_recorder(
     dialog.set_modal(true);
     dialog.set_destroy_with_parent(true);
     dialog.set_resizable(false);
+    dialog.set_default_size(480, -1);
     dialog.set_title(Some("Draw Gesture"));
     crate::ui::components::close_with_keys(&dialog);
-    // Without a frame. The window itself is clear, around a card rounded as a window's corners
-    // would be, with room for its shadow.
-    dialog.set_decorated(false);
-    dialog.remove_css_class("background");
-    dialog.add_css_class("gesture-recorder");
 
-    let cancel_btn = gtk::Button::with_mnemonic("_Cancel");
-    let dialog_cancel = dialog.clone();
-    cancel_btn.connect_clicked(move |_| dialog_cancel.destroy());
+    let header = gtk::HeaderBar::new();
+    let title_label = gtk::Label::new(Some("Draw Gesture"));
+    title_label.add_css_class("title");
+    header.set_title_widget(Some(&title_label));
+    dialog.set_titlebar(Some(&header));
 
-    // Only once there's a drawing to set.
-    let set_btn = gtk::Button::with_mnemonic("_Set");
-    set_btn.add_css_class("suggested-action");
-    set_btn.set_sensitive(false);
-
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    content.add_css_class("recorder-card");
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
+    content.add_css_class("dialog-content");
+    content.set_margin_start(24);
+    content.set_margin_end(24);
+    content.set_margin_top(18);
+    content.set_margin_bottom(24);
     dialog.set_child(Some(&content));
+
+    let prompt = gtk::Label::new(None);
+    prompt.set_markup(&format!(
+        "Draw the new gesture for <b>\u{201c}{}\u{201d}</b>",
+        glib::markup_escape_text(name)
+    ));
+    prompt.set_wrap(true);
+    prompt.set_justify(gtk::Justification::Center);
+    content.append(&prompt);
 
     let canvas = crate::ui::gesture_canvas::GestureCanvas::new();
     let points: Rc<RefCell<Vec<Point2D>>> = Rc::default();
@@ -224,7 +277,8 @@ pub fn open_gesture_recorder(
     // Drawn with Gestos's own button, anywhere on screen, rather than in the drawing area.
     let drawn_on_screen = Rc::new(Cell::new(false));
 
-    // Until there's a gesture, a mouse shows how one is drawn, with the button it's drawn with.
+    // Until a gesture is drawn, a mouse shows how, with the button it's drawn with. While it's
+    // drawn, the drawing shows as it grows.
     let draw_button = state_rc
         .borrow()
         .config
@@ -237,18 +291,17 @@ pub fn open_gesture_recorder(
         let is_recording = Rc::clone(&is_recording);
         let demo_time = Rc::clone(&demo_time);
         canvas.set_draw_func(move |canvas, cr, width, height| {
+            let points = points.borrow();
             if is_recording.get() {
+                if has_drawing(&points) {
+                    crate::ui::components::draw_gesture_path(cr, &points, width as f64, height as f64, true, true);
+                }
                 return;
             }
-            let points = points.borrow();
-            if has_drawing(&points) {
-                crate::ui::components::draw_gesture_path(cr, &points, width as f64, height as f64, true, true);
-            } else {
-                #[allow(deprecated)]
-                let fg = canvas.style_context().color();
-                let fg = (f64::from(fg.red()), f64::from(fg.green()), f64::from(fg.blue()));
-                crate::ui::gesture_demo::draw(cr, width as f64, height as f64, demo_time.get(), draw_button, fg);
-            }
+            #[allow(deprecated)]
+            let fg = canvas.style_context().color();
+            let fg = (f64::from(fg.red()), f64::from(fg.green()), f64::from(fg.blue()));
+            crate::ui::gesture_demo::draw(cr, width as f64, height as f64, demo_time.get(), draw_button, fg);
         });
     }
     // Under the mouse while it shows how, as gestures aren't drawn in the window but anywhere.
@@ -259,11 +312,10 @@ pub fn open_gesture_recorder(
     hint.set_margin_bottom(16);
     hint.set_can_target(false);
     {
-        let points = Rc::clone(&points);
         let is_recording = Rc::clone(&is_recording);
         let hint = hint.clone();
         canvas.add_tick_callback(move |canvas, clock| {
-            let showing_how = !has_drawing(&points.borrow()) && !is_recording.get();
+            let showing_how = !is_recording.get();
             hint.set_visible(showing_how);
             if showing_how {
                 let now = clock.frame_time();
@@ -279,97 +331,42 @@ pub fn open_gesture_recorder(
         });
     }
 
-    // The window records for as long as it's open, each drawing taking the place of the last, so
-    // it says so from the start, above the drawing.
-    let recording_note = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    recording_note.set_halign(gtk::Align::Center);
-    let recording_dot = gtk::Image::from_icon_name("media-record-symbolic");
-    recording_dot.add_css_class("error");
-    recording_note.append(&recording_dot);
-    let recording_label = gtk::Label::new(Some("Recording"));
-    recording_label.add_css_class("heading");
-    recording_note.append(&recording_label);
-
-    let conflict_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    conflict_box.add_css_class("warning-box");
-    conflict_box.set_visible(false);
-    let conflict_icon = gtk::Image::from_icon_name("dialog-warning-symbolic");
-    conflict_icon.set_icon_size(gtk::IconSize::Normal);
-    conflict_box.append(&conflict_icon);
-    let conflict_label = gtk::Label::new(None);
-    conflict_label.set_xalign(0.0);
-    conflict_label.set_hexpand(true);
-    conflict_label.add_css_class("warning-label");
-    conflict_label.set_wrap(true);
-    // Wrapped to the box's width, rather than asking for room for all of it on one line.
-    conflict_label.set_max_width_chars(1);
-    conflict_box.append(&conflict_label);
-
     let modifier_keys = ModifierKeys::new(Modifiers::default());
     modifier_keys.light_up_held_keys(&dialog);
 
-    // A shape close to another gesture's conflicts when both can fire at once: with the same
-    // modifier keys, in the same app. One for some apps and one for all of them don't, as the
-    // app's own wins there.
-    let check_conflict = {
-        let points = Rc::clone(&points);
-        let state_rc = Rc::clone(state_rc);
-        let conflict_box = conflict_box.clone();
-        let keys = modifier_keys.clone();
-        let apps = apps.to_vec();
-        move || {
-            let points = points.borrow();
-            let state = state_rc.borrow();
-            let modifiers = keys.get();
-            let same_apps = |other: &[String]| {
-                other.is_empty() == apps.is_empty()
-                    && (apps.is_empty() || other.iter().any(|app| apps.contains(app)))
-            };
-            let templates: Vec<(String, Vec<Point2D>)> = state
-                .config
-                .gestures
-                .iter()
-                .filter(|g| !g.is_deleted && Some(&g.id) != own_id.as_ref())
-                .filter(|g| g.modifiers == modifiers && same_apps(&g.apps))
-                .map(|g| (g.name.clone(), g.points.clone()))
-                .collect();
-            let confused = has_drawing(&points).then(|| confused_with(&points[..], &templates)).flatten();
-            if let Some(name) = &confused {
-                conflict_label.set_text(&format!("Very similar to \u{201c}{}\u{201d}", name));
-            }
-            conflict_box.set_visible(confused.is_some());
-        }
-    };
-
-    // Each drawing takes the place of the one before, and the keys held then are the ones it needs.
+    // The keys held as it's drawn are the ones it needs.
     let start_drawing = {
         let points = Rc::clone(&points);
         let is_recording = Rc::clone(&is_recording);
         let drawn_on_screen = Rc::clone(&drawn_on_screen);
-        let conflict_box = conflict_box.clone();
         let keys = modifier_keys.clone();
         let canvas = canvas.clone();
-        let set_btn = set_btn.clone();
         Rc::new(move |start: Vec<Point2D>, held: Modifiers, on_screen: bool| {
             is_recording.set(true);
             drawn_on_screen.set(on_screen);
-            conflict_box.set_visible(false);
-            set_btn.set_sensitive(false);
             keys.set(held);
             *points.borrow_mut() = start;
             canvas.queue_draw();
         })
     };
+    // A gesture drawn is the one kept, and the window closes. A click that drew nothing isn't one,
+    // and the window waits for one again.
     let finish_drawing = {
         let points = Rc::clone(&points);
         let is_recording = Rc::clone(&is_recording);
+        let keys = modifier_keys.clone();
         let canvas = canvas.clone();
-        let set_btn = set_btn.clone();
+        let dialog = dialog.clone();
         Rc::new(move || {
             is_recording.set(false);
-            canvas.queue_draw();
-            set_btn.set_sensitive(has_drawing(&points.borrow()));
-            check_conflict();
+            let drawn = std::mem::take(&mut *points.borrow_mut());
+            if has_drawing(&drawn) {
+                dialog.destroy();
+                on_set(Drawing { points: drawn, modifiers: keys.get() });
+            } else {
+                keys.set(Modifiers::default());
+                canvas.queue_draw();
+            }
         })
     };
 
@@ -498,7 +495,8 @@ pub fn open_gesture_recorder(
     }
     let recording = RefCell::new(Some((editor_lock, subscriptions)));
     // When the window goes from the screen, rather than when it's destroyed: GTK only destroys a
-    // window once nothing holds it, and the window's own handlers do.
+    // window once nothing holds it, and the window's own handlers do. The lock is let go a moment
+    // later, as the daemon asks for it once a gesture ends, which would run the one just drawn.
     dialog.connect_unrealize(move |_| {
         if let Some((lock, subscriptions)) = recording.take() {
             if let Some(bus) = &bus {
@@ -506,24 +504,10 @@ pub fn open_gesture_recorder(
                     bus.signal_unsubscribe(id);
                 }
             }
-            drop(lock);
+            glib::timeout_add_local_once(std::time::Duration::from_millis(500), move || drop(lock));
         }
     });
 
-    {
-        let points = Rc::clone(&points);
-        let keys = modifier_keys.clone();
-        let dialog = dialog.clone();
-        set_btn.connect_clicked(move |_| {
-            let points = points.borrow().clone();
-            if has_drawing(&points) {
-                dialog.destroy();
-                on_set(Drawing { points, modifiers: keys.get() });
-            }
-        });
-    }
-
-    content.append(&recording_note);
     let gesture_list = gtk::ListBox::new();
     gesture_list.add_css_class("boxed-list");
     gesture_list.set_selection_mode(gtk::SelectionMode::None);
@@ -536,15 +520,12 @@ pub fn open_gesture_recorder(
     canvas_row.set_child(Some(&canvas_overlay));
     gesture_list.append(&canvas_row);
     content.append(&gesture_list);
-    content.append(&conflict_box);
-    // Where a dialog's header bar would have them, below the drawing as there's no header bar.
-    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    buttons.set_homogeneous(true);
-    buttons.append(&cancel_btn);
-    buttons.append(&set_btn);
-    content.append(&buttons);
 
-    dialog.set_default_widget(Some(&set_btn));
+    let cancel_note = gtk::Label::new(None);
+    cancel_note.set_markup("Press <b>Esc</b> to cancel.");
+    cancel_note.add_css_class("dim-label");
+    content.append(&cancel_note);
+
     dialog.present();
 }
 

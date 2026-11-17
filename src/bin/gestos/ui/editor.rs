@@ -8,7 +8,9 @@ use gestos::config::generate_unique_id;
 use crate::state::{AppState, EditorActionOption};
 use crate::actions::{action_matches, action_needs_parameter};
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
-use crate::ui::gesture_recorder::{drawing_corner, has_drawing, open_gesture_recorder, Drawing, ModifierKeys};
+use crate::ui::gesture_recorder::{
+    drawing_corner, has_drawing, open_gesture_recorder, similar_gesture, warning_box, Drawing, ModifierKeys,
+};
 use crate::ui::keyboard_steps::append_steps_rows;
 use gestos::key_steps::{format_steps, parse_steps, KeyStep};
 use crate::ui::components::draw_gesture_path;
@@ -305,6 +307,13 @@ fn draw_new_gesture(
     apps: Vec<String>,
 ) {
     let window = crate::ui::main_window::dialog_parent(&state_rc.borrow());
+    // Named as the editor will name it: as the app names its shortcut, or after the action.
+    let detail = keys.as_deref().unwrap_or_default();
+    let name = match apps.as_slice() {
+        [app] if !detail.is_empty() => crate::app_shortcuts::title_for(app, detail),
+        _ => None,
+    }
+    .unwrap_or_else(|| get_default_gesture_name(&action, detail));
     let state_set = Rc::downgrade(state_rc);
     let apps_set = apps.clone();
     let on_set: Rc<dyn Fn(Drawing)> = Rc::new(move |drawing| {
@@ -312,7 +321,7 @@ fn draw_new_gesture(
             open_editor(&state_rc, None, Some(action.clone()), keys.as_deref(), &apps_set, Some(drawing));
         }
     });
-    open_gesture_recorder(&window, state_rc, None, &apps, on_set);
+    open_gesture_recorder(&window, state_rc, &name, &apps, on_set);
 }
 
 fn open_editor(
@@ -444,27 +453,53 @@ fn open_editor(
     redraw.set_valign(gtk::Align::Start);
     redraw.set_margin_end(12);
     redraw.set_margin_top(12);
+    // A shape close to another gesture's that can run instead of it.
+    let (similar_box, similar_label) = warning_box();
+    let show_similar: Rc<dyn Fn()> = {
+        let state_rc = Rc::clone(state_rc);
+        let own_id = target_gesture.as_ref().map(|g| g.id.clone());
+        let apps = Rc::clone(&gesture_apps);
+        let points = Rc::clone(&recorded_points);
+        let toggles = modifier_toggles.clone();
+        let similar_box = similar_box.clone();
+        Rc::new(move || {
+            let drawing = Drawing { points: points.borrow().clone(), modifiers: toggles.get() };
+            let similar =
+                similar_gesture(&state_rc.borrow(), &drawing, &apps.borrow(), own_id.as_deref());
+            if let Some(name) = &similar {
+                similar_label.set_text(&format!("Very similar to \u{201c}{}\u{201d}", name));
+            }
+            similar_box.set_visible(similar.is_some());
+        })
+    };
+    show_similar();
     {
         let state_rc = Rc::clone(state_rc);
         let dialog = dialog.clone();
-        let own_id = target_gesture.as_ref().map(|g| g.id.clone());
+        let name_entry = name_entry.clone();
         let apps = Rc::clone(&gesture_apps);
         let points = Rc::clone(&recorded_points);
         let toggles = modifier_toggles.clone();
         let canvas = canvas.clone();
         let check = check.clone();
+        let show_similar = Rc::clone(&show_similar);
         redraw.connect_clicked(move |_| {
             let points = Rc::clone(&points);
             let toggles = toggles.clone();
             let canvas = canvas.clone();
             let check = check.clone();
+            let show_similar = Rc::clone(&show_similar);
             let on_set: Rc<dyn Fn(Drawing)> = Rc::new(move |drawing| {
                 *points.borrow_mut() = drawing.points;
                 toggles.set(drawing.modifiers);
                 canvas.queue_draw();
+                show_similar();
                 check();
             });
-            open_gesture_recorder(&dialog, &state_rc, own_id.clone(), &apps.borrow(), on_set);
+            // A name being typed is only shown once there's one.
+            let name = name_entry.text();
+            let name = if name.trim().is_empty() { dialog.title().unwrap_or_default() } else { name };
+            open_gesture_recorder(&dialog, &state_rc, &name, &apps.borrow(), on_set);
         });
     }
 
@@ -481,6 +516,15 @@ fn open_editor(
     canvas_row.set_child(Some(&canvas_overlay));
     gesture_list.append(&canvas_row);
     scroll_content.append(&gesture_list);
+    scroll_content.append(&similar_box);
+    // The window fits what's in it again as the warning comes and goes, rather than the warning
+    // taking room from the rest, which would then scroll out of sight.
+    let dialog_fit = dialog.downgrade();
+    similar_box.connect_visible_notify(move |_| {
+        if let Some(dialog) = dialog_fit.upgrade() {
+            dialog.set_default_size(dialog.width(), -1);
+        }
+    });
 
     // For actions that need the GNOME extension, which isn't always there.
     let extension_label = gtk::Label::new(None);
