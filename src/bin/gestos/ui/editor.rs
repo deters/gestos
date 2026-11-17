@@ -286,6 +286,11 @@ fn held_modifiers(state: gtk::gdk::ModifierType) -> Modifiers {
     }
 }
 
+/// Whether a gesture is drawn, which then stays until the user asks to draw it again.
+fn has_drawing(points: &[Point2D]) -> bool {
+    points.len() >= 2
+}
+
 /// Shows the parameter row only for an action that takes one, in the form that action uses.
 fn show_action_parameter(
     opt: &EditorActionOption,
@@ -569,9 +574,14 @@ fn open_editor(
     let pts_tick = Rc::clone(&recorded_points);
     let rec_tick = Rc::clone(&is_recording);
     let draw_anywhere_tick = draw_anywhere.clone();
+    let draw_again_tick: Rc<RefCell<Option<gtk::Button>>> = Rc::default();
+    let draw_again_shown = Rc::clone(&draw_again_tick);
     canvas.add_tick_callback(move |canvas, clock| {
         let showing_how = pts_tick.borrow().len() < 2 && !*rec_tick.borrow();
         draw_anywhere_tick.set_visible(showing_how);
+        if let Some(button) = draw_again_shown.borrow().as_ref() {
+            button.set_visible(has_drawing(&pts_tick.borrow()) && !*rec_tick.borrow());
+        }
         if showing_how {
             let now = clock.frame_time();
             let started = demo_started.get().unwrap_or(now);
@@ -632,6 +642,10 @@ fn open_editor(
     let recording_begin = recording_label.clone();
     let on_screen_begin = Rc::clone(&drawn_on_screen);
     drag.connect_drag_begin(move |gesture, start_x, start_y| {
+        // A gesture already drawn is only replaced once the user asks to draw it again.
+        if has_drawing(&pts_drag.borrow()) {
+            return;
+        }
         *rec_drag.borrow_mut() = true;
         on_screen_begin.set(false);
         recording_begin.set_visible(true);
@@ -744,17 +758,28 @@ fn open_editor(
         check_drawn();
     });
     let finish_drag = Rc::clone(&finish_drawing);
-    drag.connect_drag_end(move |_, _, _| finish_drag());
+    let rec_end = Rc::clone(&is_recording);
+    drag.connect_drag_end(move |_, _, _| {
+        if *rec_end.borrow() {
+            finish_drag();
+        }
+    });
 
-    // A click in the area clears what's drawn there, and the keys held with it, to draw again.
-    let clear = gtk::GestureClick::new();
-    clear.set_button(gtk::gdk::BUTTON_PRIMARY);
+    // Drawing again clears what's drawn, and the keys held with it, so the next one is recorded.
+    let draw_again = gtk::Button::with_label("Draw Again");
+    draw_again.add_css_class("osd");
+    draw_again.set_halign(gtk::Align::End);
+    draw_again.set_valign(gtk::Align::Start);
+    draw_again.set_margin_end(12);
+    draw_again.set_margin_top(12);
+    draw_again.set_visible(has_drawing(&recorded_points.borrow()));
+    *draw_again_tick.borrow_mut() = Some(draw_again.clone());
     let pts_clear = Rc::clone(&recorded_points);
     let toggles_clear = modifier_toggles.clone();
     let conflict_clear = conflict_box.clone();
     let check_cleared = check.clone();
     let canvas_clear = canvas.clone();
-    clear.connect_released(move |_, _, _, _| {
+    draw_again.connect_clicked(move |_| {
         pts_clear.borrow_mut().clear();
         toggles_clear.set(Modifiers::default());
         conflict_clear.set_visible(false);
@@ -822,6 +847,11 @@ fn open_editor(
             }
             path.push(Point2D { x, y });
             if !*recording.borrow() {
+                // As in the window, one already drawn stays until the user asks to draw again.
+                if has_drawing(&pts.borrow()) {
+                    path.clear();
+                    return;
+                }
                 *recording.borrow_mut() = true;
                 on_screen.set(true);
                 shown_recording.set_visible(true);
@@ -863,13 +893,13 @@ fn open_editor(
     gesture_list.add_css_class("boxed-list");
     gesture_list.set_selection_mode(gtk::SelectionMode::None);
     canvas.add_controller(drag);
-    canvas.add_controller(clear);
     let canvas_row = gtk::ListBoxRow::new();
     canvas_row.set_activatable(false);
     let canvas_overlay = gtk::Overlay::new();
     canvas_overlay.set_child(Some(&canvas));
     canvas_overlay.add_overlay(&recording_label);
     canvas_overlay.add_overlay(&draw_anywhere);
+    canvas_overlay.add_overlay(&draw_again);
     // In the drawing's corner, with the keys to hold: the app the gesture is for, which it was
     // made in and stays in. A gesture for every app shows none.
     let corner = gtk::Box::new(gtk::Orientation::Horizontal, 8);
