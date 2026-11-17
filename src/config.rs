@@ -1433,6 +1433,18 @@ mod tests {
     }
 
     #[test]
+    fn a_script_of_several_lines_loads_back_as_it_was() {
+        let file = TempConfig::new("script", "global:\n  \"Back\":\n    move: \"100,50 0,50\"\n    do: kill\n");
+        let mut config = Configuration::load_from_file(&file.0).unwrap();
+        let script = "for f in \"$@\"; do\n    echo \"$f\"\ndone\n\techo 'done: ok' # end";
+        let action = ActionType::Execute(ShellCommand::new(script, true));
+        config.gestures[0].actions = vec![action.clone()];
+        config.save_to_file().unwrap();
+        let reloaded = Configuration::load_from_file(&file.0).unwrap();
+        assert_eq!(reloaded.gestures[0].actions, vec![action]);
+    }
+
+    #[test]
     fn saved_config_loads_back_with_the_same_gestures() {
         let file = TempConfig::new(
             "roundtrip",

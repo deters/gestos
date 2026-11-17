@@ -1,6 +1,6 @@
 //! The window a shell command is written in, for the action "Run Command in Shell" and an advanced
-//! action's command steps: room for a long command, and its variables, which the rows it's for
-//! don't have.
+//! action's command steps: room for a long command or a script of several lines, and its
+//! variables, which the rows it's for don't have.
 
 use gestos::command_variables::ShellCommand;
 use gtk::prelude::*;
@@ -42,28 +42,68 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
     content.set_margin_bottom(24);
     dialog.set_child(Some(&content));
 
-    let entry = gtk::Entry::new();
-    entry.set_text(command);
-    entry.add_css_class("monospace");
-    entry.set_hexpand(true);
-    entry.set_placeholder_text(Some("e.g. firefox"));
-    entry.set_activates_default(true);
-    content.append(&entry);
+    // Several lines, as a script has, so Enter starts a new line and Ctrl+Enter sets it. Tab
+    // moves on to the next control, as everywhere else, rather than being typed.
+    let view = gtk::TextView::new();
+    view.buffer().set_text(command);
+    view.add_css_class("monospace");
+    view.set_wrap_mode(gtk::WrapMode::WordChar);
+    view.set_accepts_tab(false);
+    view.set_top_margin(8);
+    view.set_bottom_margin(8);
+    view.set_left_margin(8);
+    view.set_right_margin(8);
+    view.update_property(&[gtk::accessible::Property::Label("Command")]);
+    let scrolled = gtk::ScrolledWindow::new();
+    scrolled.set_child(Some(&view));
+    scrolled.set_has_frame(true);
+    scrolled.set_hscrollbar_policy(gtk::PolicyType::Never);
+    scrolled.set_min_content_height(160);
+    scrolled.set_max_content_height(400);
+    scrolled.set_propagate_natural_height(true);
+    // An example while it's empty, as a text field has.
+    let placeholder = gtk::Label::new(Some("e.g. firefox"));
+    placeholder.add_css_class("monospace");
+    placeholder.add_css_class("dim-label");
+    placeholder.set_halign(gtk::Align::Start);
+    placeholder.set_valign(gtk::Align::Start);
+    placeholder.set_margin_start(9);
+    placeholder.set_margin_top(9);
+    placeholder.set_can_target(false);
+    placeholder.set_visible(command.is_empty());
+    let field = gtk::Overlay::new();
+    field.set_child(Some(&scrolled));
+    field.add_overlay(&placeholder);
+    content.append(&field);
 
-    let (variables, check) = crate::ui::variables_menu::variables_controls(&entry, command.variables);
+    let (variables, check) = crate::ui::variables_menu::variables_controls(&view, command.variables);
     variables.set_halign(gtk::Align::Start);
     content.append(&variables);
 
     // Only once there's a command to run.
     set_btn.set_sensitive(!command.trim().is_empty());
     let set_shown = set_btn.clone();
-    entry.connect_changed(move |entry| set_shown.set_sensitive(!entry.text().trim().is_empty()));
+    view.buffer().connect_changed(move |buffer| {
+        let empty = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).trim().is_empty();
+        set_shown.set_sensitive(!empty);
+        placeholder.set_visible(buffer.char_count() == 0);
+    });
+    let shortcuts = gtk::ShortcutController::new();
+    let set_with_keys = set_btn.clone();
+    shortcuts.add_shortcut(gtk::Shortcut::new(
+        gtk::ShortcutTrigger::parse_string("<Control>Return"),
+        Some(gtk::CallbackAction::new(move |_, _| {
+            set_with_keys.activate();
+            gtk::glib::Propagation::Stop
+        })),
+    ));
+    view.add_controller(shortcuts);
     // Whether it shows what it prints isn't edited here, and stays as it was.
     let shows_output = command.shows_output;
     let dialog_set = dialog.clone();
-    let entry_set = entry.clone();
+    let buffer = view.buffer();
     set_btn.connect_clicked(move |_| {
-        let text = entry_set.text().trim().to_string();
+        let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).trim().to_string();
         if text.is_empty() {
             return;
         }
@@ -73,7 +113,7 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
 
     dialog.set_default_widget(Some(&set_btn));
     dialog.present();
-    entry.grab_focus();
+    view.grab_focus();
 }
 
 /// A command as a row shows it: on one line, cut short at the end, or a dimmed "None" before

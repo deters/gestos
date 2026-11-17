@@ -7,7 +7,7 @@ use gtk4 as gtk;
 
 /// What goes by a command's entry: a check box that gives it the variables, which it doesn't get
 /// otherwise, and a menu of them, which checks it when one is picked.
-pub fn variables_controls(entry: &gtk::Entry, variables: bool) -> (gtk::Box, gtk::CheckButton) {
+pub fn variables_controls(entry: &gtk::TextView, variables: bool) -> (gtk::Box, gtk::CheckButton) {
     let check = gtk::CheckButton::with_label("Use Variables");
     check.set_active(variables);
     check.set_valign(gtk::Align::Center);
@@ -19,7 +19,7 @@ pub fn variables_controls(entry: &gtk::Entry, variables: bool) -> (gtk::Box, gtk
 }
 
 /// A button by a command's entry, whose menu lists the variables a command is given.
-fn variables_button(entry: &gtk::Entry, check: &gtk::CheckButton) -> gtk::MenuButton {
+fn variables_button(entry: &gtk::TextView, check: &gtk::CheckButton) -> gtk::MenuButton {
     let items = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let popover = gtk::Popover::new();
     popover.set_child(Some(&items));
@@ -56,7 +56,7 @@ fn variables_button(entry: &gtk::Entry, check: &gtk::CheckButton) -> gtk::MenuBu
             check.set_active(true);
             insert_at_cursor(&entry, written);
             popover.popdown();
-            entry.grab_focus_without_selecting();
+            entry.grab_focus();
         });
         items.append(&item);
     }
@@ -93,26 +93,28 @@ pub fn quoted_for(written: &str, before: &str) -> String {
 }
 
 /// Puts text where the cursor is, apart from the words around it.
-fn insert_at_cursor(entry: &gtk::Entry, written: &str) {
-    let mut position = entry.position();
-    let text = entry.text();
-    let before_cursor: String = text.chars().take(position as usize).collect();
+fn insert_at_cursor(view: &gtk::TextView, written: &str) {
+    let buffer = view.buffer();
+    let cursor = buffer.iter_at_mark(&buffer.get_insert());
+    // Quotes are open or closed by the line the cursor is on, as a script's lines are each read so.
+    let mut line_start = cursor;
+    line_start.set_line_offset(0);
+    let before_cursor = buffer.text(&line_start, &cursor, false).to_string();
     let placed = quoted_for(written, &before_cursor);
     // Inside quotes, it's part of their text, which may need no spaces.
     let quoted = placed != written;
     let written = placed;
-    let before = text.chars().nth((position as usize).wrapping_sub(1));
-    let after = text.chars().nth(position as usize);
+    let before = before_cursor.chars().last();
+    let after = cursor.char();
     let mut inserted = String::new();
     if !quoted && before.is_some_and(|c| !c.is_whitespace()) {
         inserted.push(' ');
     }
     inserted.push_str(&written);
-    if !quoted && after.is_some_and(|c| !c.is_whitespace()) {
+    if !quoted && after != '\0' && !after.is_whitespace() {
         inserted.push(' ');
     }
-    entry.insert_text(&inserted, &mut position);
-    entry.set_position(position);
+    buffer.insert_at_cursor(&inserted);
 }
 
 #[cfg(test)]
