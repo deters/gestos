@@ -16,18 +16,17 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New option "Control Windows With the Middle Button" in Settings: dragging with the middle button moves the window under the pointer, and scrolling resizes it (GNOME).
-- The action "Advanced Action" can now run a command as one of its steps.
-- Each app's page can now create an "Advanced Action" that works only in that app.
+- You can now move a window by dragging it with the middle button, and resize it by scrolling while you hold the button (option "Control Windows With the Middle Button", in Settings; GNOME).
+- One gesture can now also run commands, along with opening apps, pressing shortcuts and typing text (action "Advanced Action").
+- You can now make a gesture that runs several steps in one app only, like pressing two shortcuts in a row in your editor (action "Advanced Action", on the app's page).
 - Gestures can now run a command on the files or text you copied, or the text you selected (option "Use Variables", in the actions "Run Command in Shell" and "Advanced Action").
-- New option "Allow Middle Click Paste" in Settings, to turn off pasting with the middle button (GNOME).
-- New action "Toggle Middle Click Paste": turns middle click paste on or off (GNOME).
-- New action "Toggle Middle Button Window Control": turns "Control Windows With the Middle Button" on or off (GNOME).
+- You can now stop the middle button from pasting, or switch pasting on and off with a gesture (option "Allow Middle Click Paste", in Settings; action "Toggle Middle Click Paste"; GNOME).
+- A gesture can now switch window control with the middle button on and off, for apps where you drag with the middle button yourself, like 3D editors (action "Toggle Middle Button Window Control"; GNOME).
 
 ### Changed
 
-- While a window is dragged, only the tiled windows in its way move now, instead of all of them (GNOME).
-- "Import Configuration" in Settings now lists the commands the imported gestures run, before you confirm.
+- When you drag a tiled window, only the windows in its way move now, instead of all of them (GNOME).
+- Before importing a configuration, you now see the commands its gestures would run, so you can check a file someone sent you (option "Import Configuration", in Settings).
 
 ## [8.0.1] - 2026-11-15
 
@@ -39,19 +38,19 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Actions are now grouped in categories, such as Windows, Navigation and Sound and Media. You can still see all your gestures together by turning on "Show Gestures in the Main Page" in Settings.
-- A page for each app, with its gestures and the shortcuts it offers.
-- A panel that shows what a gesture ran, or why nothing ran (GNOME, KDE, X11).
+- To find an action faster, actions are now grouped in categories, such as Windows, Navigation and Sound and Media. To see all your gestures in one list, turn on "Show Gestures in the Main Page" in Settings.
+- You can now open an app's page to see its gestures and the shortcuts it offers, and turn any of those shortcuts into a gesture.
+- You can now see what a gesture did, or why it did nothing, in a small panel on screen (GNOME, KDE, X11).
 - Now Gestos will also show the gesture path on KDE and X11.
-- New action "Look Up Selection": opens the selected text as a link, works out a sum, or searches the web for it.
+- You can now select text and draw a gesture to open it as a link, work out a sum, or search the web for it (action "Look Up Selection").
 - Now Gestos will also detect the app in use on Sway and Hyprland, and allow gestures per app there.
 
 ### Changed
 
-- Gestures are now matched by the directions drawn, instead of the exact shape.
-- The gesture editor now shows an example of a gesture being drawn.
-- The shortcut recorder now also records shortcuts the desktop uses itself, like Ctrl+Alt+Up, and modifier keys alone.
-- Deleting a gesture no longer asks for confirmation, and can be undone instead.
+- Gestures drawn quickly or unevenly are now recognized more often, as they're matched by the directions drawn instead of the exact shape.
+- The gesture editor now shows an example of how to draw a gesture.
+- You can now record shortcuts the desktop uses itself, like Ctrl+Alt+Up, and modifier keys alone, to press them with a gesture.
+- A deleted gesture can now be undone, instead of asking for confirmation first.
 - Added keyboard shortcuts: Ctrl+W closes a window, Ctrl+Q quits, and Ctrl+? lists them all.
 
 ### Fixed
