@@ -777,7 +777,7 @@ fn open_editor(
     });
 
     // Drawing again clears what's drawn, and the keys held with it, so the next one is recorded.
-    let draw_again = gtk::Button::with_label("Draw Again");
+    let draw_again = gtk::Button::with_label("Redraw");
     draw_again.add_css_class("osd");
     draw_again.set_halign(gtk::Align::End);
     draw_again.set_valign(gtk::Align::Start);

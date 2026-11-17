@@ -11,7 +11,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Gestos now runs two background processes instead of three.
-- The gesture editor now keeps a gesture once it's drawn, instead of replacing it with every new drawing. To draw it again, click "Draw Again". Clicking the drawing no longer clears it.
+- The gesture editor now keeps a gesture once it's drawn, instead of replacing it with every new drawing. To replace it, click "Redraw". Clicking the drawing no longer clears it.
 - The gesture editor now says which button draws gestures.
 
 ## [8.1.0] - 2026-11-16
