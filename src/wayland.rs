@@ -457,7 +457,10 @@ fn temporary_shortcut_pickup_delay(setting: Option<&str>) -> std::time::Duration
 }
 
 type GnomeSchema = (gio::Settings, gio::SettingsSchema);
-type GnomeSettingRequest = (String, String, Sender<Option<String>>);
+enum GnomeSettingRequest {
+    Read { schema: String, key: String, reply: Sender<Option<String>> },
+    Write { schema: String, key: String, value: String, reply: Sender<bool> },
+}
 
 /// Without its dconf module GIO quietly reads built-in defaults instead of the user's settings.
 pub fn gio_reads_user_settings() -> bool {
@@ -474,32 +477,68 @@ fn gnome_settings_thread() -> Sender<GnomeSettingRequest> {
     let (sender, requests) = channel::<GnomeSettingRequest>();
     std::thread::spawn(move || {
         let mut schemas: HashMap<String, Option<GnomeSchema>> = HashMap::new();
-        for (schema_id, key, reply) in requests {
+        let mut open = |schema_id: String, key: &str| {
             let opened = schemas.entry(schema_id).or_insert_with_key(|schema_id| {
                 // Opening a schema that isn't installed would abort the whole program.
                 let schema = gio::SettingsSchemaSource::default()?.lookup(schema_id, true)?;
                 Some((gio::Settings::new(schema_id), schema))
             });
-            let value = opened.as_ref().and_then(|(settings, schema)| {
-                schema
-                    .has_key(&key)
-                    .then(|| settings.value(&key).print(true).to_string())
-            });
-            let _ = reply.send(value);
+            opened.as_ref().filter(|(_, schema)| schema.has_key(key)).map(|(settings, _)| settings.clone())
+        };
+        for request in requests {
+            match request {
+                GnomeSettingRequest::Read { schema, key, reply } => {
+                    let value = open(schema, &key).map(|settings| settings.value(&key).print(true).to_string());
+                    let _ = reply.send(value);
+                }
+                GnomeSettingRequest::Write { schema, key, value, reply } => {
+                    let written = open(schema, &key).is_some_and(|settings| {
+                        let kind = settings.value(&key).type_().to_owned();
+                        gio::glib::Variant::parse(Some(&kind), &value)
+                            .is_ok_and(|value| settings.set_value(&key, &value).is_ok())
+                    });
+                    // Written out before the answer, so that GNOME sees it by the time it's used.
+                    gio::Settings::sync();
+                    let _ = reply.send(written);
+                }
+            }
         }
     });
     sender
 }
 
-/// A setting as text in gsettings' format, or nothing if this schema doesn't have the key.
-pub fn read_gnome_setting(schema_id: &str, key: &str) -> Option<String> {
+fn send_gnome_setting_request(request: GnomeSettingRequest) -> bool {
     static REQUESTS: OnceLock<Sender<GnomeSettingRequest>> = OnceLock::new();
+    REQUESTS.get_or_init(gnome_settings_thread).send(request).is_ok()
+}
+
+/// A setting as text in gsettings' format, or nothing if this schema doesn't have the key, or the
+/// user's settings can't be read here.
+pub fn read_gnome_setting(schema_id: &str, key: &str) -> Option<String> {
+    if !gio_reads_user_settings() {
+        return None;
+    }
     let (reply, answer) = channel();
-    REQUESTS
-        .get_or_init(gnome_settings_thread)
-        .send((schema_id.to_string(), key.to_string(), reply))
-        .ok()?;
+    let request = GnomeSettingRequest::Read { schema: schema_id.to_string(), key: key.to_string(), reply };
+    if !send_gnome_setting_request(request) {
+        return None;
+    }
     answer.recv().ok()?
+}
+
+/// Changes a setting to a value in gsettings' format. Whether it was changed.
+pub fn write_gnome_setting(schema_id: &str, key: &str, value: &str) -> bool {
+    if !gio_reads_user_settings() {
+        return false;
+    }
+    let (reply, answer) = channel();
+    let request = GnomeSettingRequest::Write {
+        schema: schema_id.to_string(),
+        key: key.to_string(),
+        value: value.to_string(),
+        reply,
+    };
+    send_gnome_setting_request(request) && answer.recv().unwrap_or(false)
 }
 
 /// The first shortcut in a gsettings value like `['<Alt>F10', 'XF86Foo']`, as keys to press. An
@@ -1065,20 +1104,13 @@ impl WaylandContext {
     }
 
     fn gsettings_get(&self, schema: &str, key: &str) -> Option<String> {
-        if gio_reads_user_settings() {
-            return read_gnome_setting(schema, key);
-        }
-        let output = self.run_user_cmd_output("gsettings", &["get", schema, key])?;
-        let clean = output.trim().to_string();
-        if clean.is_empty() {
-            None
-        } else {
-            Some(clean)
-        }
+        read_gnome_setting(schema, key)
     }
 
     fn gsettings_set(&self, schema: &str, key: &str, value: &str) {
-        self.run_user_cmd("gsettings", &["set", schema, key, value]);
+        if !write_gnome_setting(schema, key, value) {
+            action_failed(format!("Couldn't change GNOME's shortcut \u{201c}{key}\u{201d}"));
+        }
     }
 
     /// The app of the focused window on Sway or Hyprland, as `active_app` tells it. `None` when this
@@ -1648,27 +1680,6 @@ mod tests {
         );
     }
 
-    fn gsettings_command(args: &[&str]) -> Option<String> {
-        let output = Command::new("gsettings").args(args).output().ok()?;
-        output
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-    }
-
-    #[test]
-    fn gio_reads_the_same_values_as_the_gsettings_command() {
-        let schema = "org.gnome.desktop.wm.keybindings";
-        if gsettings_command(&["list-keys", schema]).is_none() || !gio_reads_user_settings() {
-            eprintln!("skipped: no GNOME settings here");
-            return;
-        }
-        for key in ["close", "minimize", "panel-run-dialog", "switch-to-workspace-1"] {
-            let expected = gsettings_command(&["get", schema, key]);
-            assert_eq!(read_gnome_setting(schema, key), expected, "{key}");
-        }
-    }
-
     #[test]
     fn a_missing_gnome_schema_or_key_is_not_a_problem() {
         assert_eq!(read_gnome_setting("org.example.gestos.missing", "close"), None);
@@ -1680,12 +1691,11 @@ mod tests {
     #[ignore]
     fn gio_sees_a_shortcut_changed_after_the_schema_was_opened() {
         let (schema, key) = ("org.gnome.desktop.wm.keybindings", "set-spew-mark");
-        let original = gsettings_command(&["get", schema, key]).unwrap();
-        assert_eq!(read_gnome_setting(schema, key).unwrap(), original);
+        let original = read_gnome_setting(schema, key).unwrap();
 
-        gsettings_command(&["set", schema, key, "['<Super><Alt>F11']"]).unwrap();
+        assert!(write_gnome_setting(schema, key, "['<Super><Alt>F11']"));
         let changed = read_gnome_setting(schema, key);
-        gsettings_command(&["set", schema, key, &original]).unwrap();
+        assert!(write_gnome_setting(schema, key, &original));
 
         assert_eq!(changed.as_deref(), Some("['<Super><Alt>F11']"));
         assert_eq!(read_gnome_setting(schema, key).unwrap(), original);
