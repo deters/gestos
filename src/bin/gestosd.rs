@@ -458,7 +458,14 @@ fn spawn_gesture_actions(
 fn template_steps(action: ActionType) -> Option<ActionType> {
     let ActionType::Template(id) = action else { return Some(action) };
     match gestos::action_templates::find(&id) {
-        Some(template) => Some(ActionType::Keyboard(template.steps)),
+        Some(template) => match template.missing_package() {
+            // Rather than a failure the program's absence would cause later, which may not say so.
+            Some(package) => {
+                gestos::wayland::action_failed(format!("\"{}\" needs {package}, which isn't installed", template.name));
+                None
+            }
+            None => Some(ActionType::Keyboard(template.steps)),
+        },
         None => {
             gestos::wayland::action_failed(format!("The action template \"{id}\" isn't installed or can't be read"));
             None
