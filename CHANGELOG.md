@@ -16,11 +16,12 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New option "Control Windows With the Middle Button" in Settings: dragging with the middle button moves a window, and scrolling while holding it resizes the window (GNOME).
+- New option "Control Windows With the Middle Button" in Settings: drag a window with the middle button to move it, or scroll while holding the button to resize it (GNOME).
 - The action "Advanced Action" can now run commands, so one gesture can open an app, press shortcuts and run a script.
 - Each app's page can now create an "Advanced Action" that works only in that app.
 - Gestures can now run a command on the files or text you copied, or the text you selected (option "Use Variables", in the actions "Run Command in Shell" and "Advanced Action").
-- New option "Allow Middle Click Paste" in Settings, to stop the middle button from pasting, and new action "Toggle Middle Click Paste" to switch it with a gesture (GNOME).
+- New option "Allow Middle Click Paste" in Settings: turns pasting with the middle button on or off (GNOME).
+- New action "Toggle Middle Click Paste": turns pasting with the middle button on or off (GNOME).
 - New action "Toggle Middle Button Window Control": turns moving and resizing windows with the middle button on or off (GNOME).
 
 ### Changed
@@ -39,7 +40,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Actions are now grouped in categories, such as Windows, Navigation and Sound and Media. All your gestures can still be shown in one list, with the option "Show Gestures in the Main Page" in Settings.
-- New page for each app, with its gestures and the shortcuts it offers, each ready to become a gesture.
+- New page for each app, with its gestures and its shortcuts. Any of those shortcuts can be made into a gesture there.
 - New panel that shows what a gesture ran, or why nothing ran (GNOME, KDE, X11).
 - Now Gestos will also show the gesture path on KDE and X11.
 - New action "Look Up Selection": opens the selected text as a link, works out a sum, or searches the web for it.
@@ -112,7 +113,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- On systems without systemd, Gestos now shows the command that starts the input service when it isn't running.
+- On systems without systemd, when gestures can't start, Gestos now shows the command that starts them.
 - When no app can open the bug report, Gestos now shows where it was saved and can copy it.
 
 ## [6.7.0] - 2026-11-09
@@ -123,7 +124,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- Apps with the same name, like Nemo and Nautilus, which are both called Files, couldn't be told apart.
+- Apps with the same name couldn't be told apart. Nemo and Nautilus, both called Files, now show as Files (Nemo) and Files (Nautilus).
 - Newly installed apps only showed up after reopening Gestos.
 
 ## [6.6.1] - 2026-11-09
@@ -157,7 +158,8 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Gestos now only notifies when something goes wrong.
 - Preferences is now grouped into sections.
-- Each step of a custom action now says what it is, and the drawing area keeps its size.
+- The gesture editor now names each step of a custom action.
+- The drawing area in the gesture editor now keeps its size.
 
 ### Fixed
 
@@ -191,7 +193,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New action "Custom Keyboard Action", which replaces "Custom Keyboard Shortcut": presses shortcuts, types text and waits, in the order you set. The text can have several lines and accented letters.
+- New action "Custom Keyboard Action": presses shortcuts, types text and waits, in the order you set. The text can have several lines and accented letters. It replaces "Custom Keyboard Shortcut".
 - New option "Tile Automatically" in Preferences: tiles every workspace, new ones too (GNOME).
 - Gestos now says when its GNOME extension is out of date, and how to update it.
 
@@ -260,7 +262,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - New action "Toggle Tile Windows": fits a workspace's windows together without overlaps, and puts them back when used again (GNOME).
-- The Gestos GNOME extension, which tiling needs. It comes with Gestos: log out and back in, then turn it on (Preferences).
+- New Gestos GNOME extension, needed for tiling. It comes with Gestos: after installing, log out and back in, then turn it on in Preferences.
 - Tiled windows get their own size back before they're closed, so apps don't remember the tile's size (GNOME).
 
 ### Changed

@@ -39,6 +39,9 @@ Each release's page on GitHub is its section there.
 - Before committing any text for users, reread it for what makes text read as AI-written:
   claims and slogans, vague comparatives like "smoother" or "better" with nothing behind them,
   marketing phrases like "in one click" or "no more", and fragments used for punch.
+- Also reread each line for confusion: a long name quoted inside another one's description,
+  reasons tacked on at the end, several clauses in one sentence, "it" or "they" without a clear
+  subject. Say the thing directly.
 - To release, run `packaging/bump-version.sh <major|minor|patch>`. It moves what's under
   Unreleased to the new version, dated, and refuses to release with nothing there. Pushing the
   tag publishes that section.
