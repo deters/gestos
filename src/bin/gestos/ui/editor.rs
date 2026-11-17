@@ -286,14 +286,12 @@ fn held_modifiers(state: gtk::gdk::ModifierType) -> Modifiers {
     }
 }
 
-/// Where and with what a gesture is drawn, under the mouse that shows how: the button as
-/// Settings names it.
+/// What a gesture is drawn with, under the mouse that shows how: the button as Settings names it.
 fn draw_hint(button: i32) -> String {
-    let name = crate::ui::settings::DRAW_BUTTONS
-        .iter()
-        .find(|(_, number)| *number == button)
-        .map_or_else(|| format!("{button}"), |(name, _)| name.to_lowercase());
-    format!("Draw anywhere on the screen.\nUse the {name} button.")
+    match crate::ui::settings::DRAW_BUTTONS.iter().find(|(_, number)| *number == button) {
+        Some((name, _)) => format!("Use the {} button of the mouse.", name.to_lowercase()),
+        None => format!("Use button {button} of the mouse."),
+    }
 }
 
 /// Whether a gesture is drawn, which then stays until the user asks to draw it again.
@@ -1625,8 +1623,9 @@ mod tests {
 
     #[test]
     fn the_hint_names_the_button_gestures_are_drawn_with() {
-        assert_eq!(super::draw_hint(3), "Draw anywhere on the screen.\nUse the right button.");
-        assert_eq!(super::draw_hint(8), "Draw anywhere on the screen.\nUse the back button.");
+        assert_eq!(super::draw_hint(3), "Use the right button of the mouse.");
+        assert_eq!(super::draw_hint(8), "Use the back button of the mouse.");
+        assert_eq!(super::draw_hint(12), "Use button 12 of the mouse.");
     }
 
     #[test]
