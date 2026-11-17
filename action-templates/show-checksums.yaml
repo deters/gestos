@@ -1,6 +1,7 @@
 gestos-action-template: 1
 name: Show Checksums
 description: Shows the SHA-256 checksum of each selected file
+icon: security-high-symbolic
 apps: [FileManager]
 steps:
   - copy: files

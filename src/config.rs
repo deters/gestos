@@ -188,7 +188,18 @@ impl ActionType {
         }
     }
 
-    pub fn get_icon_name(&self) -> &'static str {
+    /// The icon it's shown with. A template's is the one the template names, if any.
+    pub fn get_icon_name(&self) -> std::borrow::Cow<'static, str> {
+        if let ActionType::Template(id) = self {
+            if let Some(icon) = crate::action_templates::find(id).and_then(|template| template.icon) {
+                return icon.into();
+            }
+        }
+        self.own_icon_name().into()
+    }
+
+    /// The icon of the kind of action it is, a template's being a keyboard's.
+    pub fn own_icon_name(&self) -> &'static str {
         match self {
             ActionType::Execute(_) => "utilities-terminal-symbolic",
             ActionType::Keypress(_) | ActionType::Keyboard(_) | ActionType::Template(_) => "input-keyboard-symbolic",

@@ -1,6 +1,7 @@
 gestos-action-template: 1
 name: Count Words
 description: Shows how many words the selected text has
+icon: format-text-plaintext-symbolic
 steps:
   - copy: text
   - run: |

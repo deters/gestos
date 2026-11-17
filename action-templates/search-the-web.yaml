@@ -1,6 +1,7 @@
 gestos-action-template: 1
 name: Search the Web
 description: Searches the web for the selected text
+icon: web-browser-symbolic
 needs:
   - program: python3
     package: Python

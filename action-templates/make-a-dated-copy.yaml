@@ -1,6 +1,7 @@
 gestos-action-template: 1
 name: Make a Dated Copy
 description: Copies each selected file or folder next to it, with today's date in its name
+icon: x-office-calendar-symbolic
 apps: [FileManager]
 steps:
   - copy: files

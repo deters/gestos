@@ -1,6 +1,7 @@
 gestos-action-template: 1
 name: Convert Images to JPG
 description: Saves a JPG copy of each selected image, next to it
+icon: image-x-generic-symbolic
 apps: [FileManager]
 needs:
   - program: convert

@@ -1,6 +1,7 @@
 gestos-action-template: 1
 name: Convert to PDF
 description: Converts the selected documents to PDF, next to them
+icon: x-office-document-symbolic
 apps: [FileManager]
 needs:
   - program: libreoffice

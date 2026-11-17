@@ -1,6 +1,7 @@
 gestos-action-template: 1
 name: Convert PDF to Images
 description: Saves each page of the selected PDFs as a PNG image, in a folder next to it
+icon: image-x-generic-symbolic
 apps: [FileManager]
 needs:
   - program: pdftoppm

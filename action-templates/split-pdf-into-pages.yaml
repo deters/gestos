@@ -1,6 +1,7 @@
 gestos-action-template: 1
 name: Split PDF into Pages
 description: Saves each page of the selected PDFs as a PDF of its own, in a folder next to it
+icon: view-paged-symbolic
 apps: [FileManager]
 needs:
   - program: pdfseparate

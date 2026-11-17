@@ -96,7 +96,22 @@ pub fn show_error_dialog<W: IsA<gtk::Window>>(parent: &W, message: &str) {
     dialog.set_default_widget(Some(&ok_button));
     dialog.present();
 }
-pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static str) {
+/// The icon an action is shown with, and the color behind it. A template's is the one it names, if
+/// the icon theme has it.
+pub fn get_action_category_icon(action: &ActionType) -> (std::borrow::Cow<'static, str>, &'static str) {
+    if let ActionType::Template(_) = action {
+        let icon = action.get_icon_name();
+        let in_theme = gtk::gdk::Display::default()
+            .is_some_and(|display| gtk::IconTheme::for_display(&display).has_icon(&icon));
+        if in_theme {
+            return (icon, "icon-bg-blue");
+        }
+    }
+    let (icon, background) = kind_icon(action);
+    (icon.into(), background)
+}
+
+fn kind_icon(action: &ActionType) -> (&'static str, &'static str) {
     match action {
         ActionType::Execute(_) => ("utilities-terminal-symbolic", "icon-bg-blue"),
         ActionType::Keyboard(_) => ("input-keyboard-symbolic", "icon-bg-blue"),
@@ -109,7 +124,7 @@ pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static 
             "icon-bg-orange",
         ),
         ActionType::Gnome(_) => {
-            let icon = action.get_icon_name();
+            let icon = action.own_icon_name();
             let is_media = icon.starts_with("audio-")
                 || icon.starts_with("media-")
                 || icon.starts_with("microphone-");
@@ -135,7 +150,7 @@ pub fn get_action_category_icon(action: &ActionType) -> (&'static str, &'static 
         ActionType::MediaPlay | ActionType::MediaNext | ActionType::MediaPrev => {
             ("media-playback-start-symbolic", "icon-bg-green")
         }
-        _ => (action.get_icon_name(), "icon-bg-blue"),
+        _ => (action.own_icon_name(), "icon-bg-blue"),
     }
 }
 pub fn draw_gesture_path(
@@ -403,19 +418,19 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         let (icon_name, bg_class) = if let Some(ActionType::Keypress(_)) = gesture.actions.first() {
             // Named by the user, it's a custom shortcut, whatever its keys.
             if named {
-                ("input-keyboard-symbolic", "icon-bg-blue")
+                ("input-keyboard-symbolic".into(), "icon-bg-blue")
             } else {
                 get_action_category_icon(&gesture.actions[0])
             }
         } else if let Some(ActionType::Keyboard(steps)) = gesture.actions.first() {
             // An advanced action shows the icon of its first step, as what it starts with.
             let (icon_name, bg_class) = get_action_category_icon(&gesture.actions[0]);
-            let icon_name = steps.first().map_or(icon_name, crate::ui::keyboard_steps::step_icon);
+            let icon_name = steps.first().map_or(icon_name, |step| crate::ui::keyboard_steps::step_icon(step).into());
             (icon_name, bg_class)
         } else if !gesture.actions.is_empty() {
             get_action_category_icon(&gesture.actions[0])
         } else {
-            ("system-run-symbolic", "icon-bg-blue")
+            ("system-run-symbolic".into(), "icon-bg-blue")
         };
 
         let icon_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -427,7 +442,7 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         let icon = match app {
             Some(app) => crate::ui::app_picker::app_icon(app, 32),
             None => {
-                let icon = gtk::Image::from_icon_name(icon_name);
+                let icon = gtk::Image::from_icon_name(&icon_name);
                 icon.set_icon_size(gtk::IconSize::Large);
                 icon
             }

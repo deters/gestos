@@ -13,6 +13,7 @@
 //! gestos-action-template: 1
 //! name: Convert to PDF
 //! description: Converts the selected documents to PDF, next to them
+//! icon: x-office-document-symbolic
 //! apps: [FileManager]
 //! needs:
 //!   - program: libreoffice
@@ -40,6 +41,8 @@ pub struct ActionTemplate {
     pub id: String,
     pub name: String,
     pub description: String,
+    /// The name of the icon it's shown with, from the icon theme, if it has one.
+    pub icon: Option<String>,
     /// Desktop file categories, like `FileManager`, or app IDs, it's offered for. None is any app.
     pub apps: Vec<String>,
     pub needs: Vec<Need>,
@@ -63,6 +66,8 @@ struct TemplateFile {
     name: String,
     #[serde(default)]
     description: String,
+    #[serde(default)]
+    icon: Option<String>,
     #[serde(default)]
     apps: Vec<String>,
     #[serde(default)]
@@ -228,6 +233,13 @@ fn parse(text: &str, id: &str) -> Result<ActionTemplate, String> {
     if file.steps.is_empty() {
         return Err("it has no steps".to_string());
     }
+    let icon = file.icon.map(|icon| icon.trim().to_string()).filter(|icon| !icon.is_empty());
+    if let Some(icon) = &icon {
+        // A name in the icon theme, never a path to a file.
+        if !icon.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) || icon.starts_with('.') {
+            return Err(format!("{icon} isn't the name of an icon"));
+        }
+    }
     let steps: Vec<KeyStep> = file.steps.into_iter().map(KeyStep::from).collect();
     for step in &steps {
         if let KeyStep::Run(command) = step {
@@ -240,6 +252,7 @@ fn parse(text: &str, id: &str) -> Result<ActionTemplate, String> {
         id: id.to_string(),
         name: file.name.trim().to_string(),
         description: file.description.trim().to_string(),
+        icon,
         apps: file.apps,
         needs: file.needs,
         steps,
@@ -361,6 +374,16 @@ steps:
         assert!(parse("name: Notes\nsteps: []\n", "notes").unwrap_err().contains("doesn't start"));
         let newer = PDF.replace("gestos-action-template: 1", "gestos-action-template: 2");
         assert!(parse(&newer, "pdf").unwrap_err().contains("version 2"));
+    }
+
+    #[test]
+    fn a_template_has_the_icon_it_names() {
+        let with_icon = PDF.replace("apps:", "icon: x-office-document-symbolic\napps:");
+        assert_eq!(parse(&with_icon, "pdf").unwrap().icon.as_deref(), Some("x-office-document-symbolic"));
+        assert_eq!(parse(PDF, "pdf").unwrap().icon, None);
+        for bad in ["/usr/share/icons/a.svg", "../a", "a b"] {
+            assert!(parse(&PDF.replace("apps:", &format!("icon: '{bad}'\napps:")), "pdf").is_err(), "{bad}");
+        }
     }
 
     #[test]
@@ -696,6 +719,7 @@ steps:
             let path = entry.path();
             let id = path.file_stem().unwrap().to_string_lossy().into_owned();
             let template = parse(&std::fs::read_to_string(&path).unwrap(), &id).unwrap();
+            assert!(template.icon.is_some(), "{id} has no icon");
             for (i, step) in template.steps.iter().enumerate() {
                 if let KeyStep::Run(command) = step {
                     // The selected text is copied first, as not every app reports what's selected.

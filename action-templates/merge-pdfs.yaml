@@ -1,6 +1,7 @@
 gestos-action-template: 1
 name: Merge PDFs
 description: Puts the selected PDFs together in one, next to them
+icon: view-continuous-symbolic
 apps: [FileManager]
 needs:
   - program: pdfunite

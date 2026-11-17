@@ -1,6 +1,7 @@
 gestos-action-template: 1
 name: Read Aloud
 description: Reads the selected text aloud
+icon: audio-speakers-symbolic
 needs:
   - program: spd-say
     package: speech-dispatcher

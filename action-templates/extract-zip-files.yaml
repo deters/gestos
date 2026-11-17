@@ -1,6 +1,7 @@
 gestos-action-template: 1
 name: Extract ZIP Files
 description: Extracts each selected ZIP file into a folder named after it
+icon: folder-open-symbolic
 apps: [FileManager]
 needs:
   - program: unzip

@@ -1,6 +1,7 @@
 gestos-action-template: 1
 name: Make Images Half the Size
 description: Saves a copy of each selected image at half its size, next to it
+icon: zoom-out-symbolic
 apps: [FileManager]
 needs:
   - program: convert

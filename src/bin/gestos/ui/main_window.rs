@@ -821,7 +821,7 @@ fn suggestion_row(
         Some(app) => crate::ui::app_picker::app_icon(app, 16),
         None => {
             let (icon_name, icon_class) = get_action_category_icon(&option.action_type);
-            let icon = gtk::Image::from_icon_name(icon_name);
+            let icon = gtk::Image::from_icon_name(&icon_name);
             icon.add_css_class(icon_class);
             icon
         }
