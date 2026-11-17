@@ -8,6 +8,10 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- New menu "Ready-Made" in the window to edit a command. It has commands for copied files (convert to PDF, merge PDFs, convert or shrink images, make or extract ZIP files, show checksums) and for selected text (search the web, translate, open as a link, read aloud, calculate, count words). A gesture that runs one is named after it.
+
 ### Changed
 
 - Gestos now runs two background processes instead of three.

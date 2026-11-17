@@ -78,6 +78,8 @@ pub fn get_default_gesture_name(opt: &EditorActionOption, detail: &str) -> Strin
         ActionType::Execute(_) if opt.category == 7 => {
             if detail.trim().is_empty() {
                 opt.name.clone()
+            } else if let Some(name) = crate::command_library::name_of(detail) {
+                name.to_string()
             } else {
                 format!("{} ({})", opt.name, gestos::config::short_command(detail))
             }
