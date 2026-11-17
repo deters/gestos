@@ -19,7 +19,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Control windows with the middle button.** Hold it and drag to move the window under the pointer, or scroll to make it bigger or smaller, both in the same press. On GNOME, when you draw gestures with the right button.
 - **Commands in advanced actions.** Add a step that runs a command, between opening apps, pressing shortcuts and typing text.
 - **Advanced actions inside apps.** Each app's page offers one, made for that app alone.
-- **Commands that use what you copied.** A command can work on the text you copied or selected, and on the files you copied.
+- **Commands that use what you copied.** A command (Run Command in Shell, or a step of an Advanced Action) can work on the text you copied or selected, and on the files you copied.
 - **Turn middle click paste on or off.** Allow Middle Click Paste in Settings, or flip it with a gesture.
 - **Turn window control on or off with a gesture.** Toggle Middle Button Window Control, under Windows.
 
