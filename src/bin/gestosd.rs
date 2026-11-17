@@ -194,6 +194,52 @@ fn find_pointer_devices(sys_input: &Path, trigger_code: u16) -> Vec<String> {
         .collect()
 }
 
+/// Whether udev has set up a device node for the users who may open it. The kernel makes it
+/// root's alone, and udev then gives it to a group, or to the user at the seat.
+fn is_set_up(node: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(node).is_ok_and(|meta| meta.gid() != 0 || meta.mode() & 0o077 != 0)
+}
+
+/// The devices to draw gestures with that can be opened now.
+fn usable_pointer_devices(trigger_code: u16) -> Vec<String> {
+    find_pointer_devices(Path::new("/sys/class/input"), trigger_code)
+        .into_iter()
+        .filter(|node| is_set_up(Path::new(node)))
+        .collect()
+}
+
+/// Starts over once the devices to draw gestures with aren't the ones it started with: a mouse
+/// was plugged in or taken out, came back as another device, or a touchpad is the only one left.
+/// Only once udev has set a new one up, so that it can be opened. Watched in a thread of its own.
+fn restart_when_mice_change(started: Vec<String>, trigger_code: u16) {
+    std::thread::spawn(move || {
+        use gio::prelude::*;
+        let context = gio::glib::MainContext::new();
+        let _ = context.with_thread_default(|| {
+            let devices = gio::File::for_path("/dev/input");
+            let Ok(monitor) = devices.monitor_directory(gio::FileMonitorFlags::NONE, gio::Cancellable::NONE) else {
+                return;
+            };
+            let check = move || {
+                if usable_pointer_devices(trigger_code) != started {
+                    restart("The mice changed");
+                }
+            };
+            // One may have come or gone while it was starting.
+            check();
+            monitor.connect_changed(move |_, _, _, event| {
+                use gio::FileMonitorEvent::*;
+                if matches!(event, Created | Deleted | AttributeChanged) {
+                    check();
+                }
+            });
+            gio::glib::MainLoop::new(Some(&context), false).run();
+            drop(monitor);
+        });
+    });
+}
+
 /// Everything that touches input devices happens in the gestos-input service. Its socket is
 /// there whenever it's set up: systemd starts the service for each connection, OpenRC at boot.
 fn input_service_is_set_up() -> bool {
@@ -1472,13 +1518,13 @@ fn main() {
 
     let _ = CONFIG_PATH.set(config_path.clone());
 
-    // Resolve target device list
+    // The devices found, unless they were given, change as mice come and go, which the process
+    // that started the others watches.
     if devices.is_empty() {
         let trigger_code = gestos::uinput::trigger_button_code(button).unwrap_or_default();
-        devices = find_pointer_devices(Path::new("/sys/class/input"), trigger_code);
-        if devices.is_empty() {
-            eprintln!("Could not find a mouse with button {}.", button);
-            std::process::exit(1);
+        devices = usable_pointer_devices(trigger_code);
+        if std::env::var("GESTOS_CHILD").is_err() {
+            restart_when_mice_change(devices.clone(), trigger_code);
         }
     }
 
@@ -1493,7 +1539,6 @@ fn main() {
     }
 
     // Single device execution
-    let device_path = &devices[0];
     if !input_service_is_set_up() {
         std::process::exit(1);
     }
@@ -1516,6 +1561,15 @@ fn main() {
 
     // Only now, so that a daemon that can't start doesn't take a working one down with it
     stop_legacy_instance();
+
+    // With no mouse yet, as when a Bluetooth one connects after login, it waits for one.
+    let Some(device_path) = devices.first() else {
+        println!("gestosd: Waiting for a mouse with button {button}.");
+        start_dbus_service();
+        loop {
+            std::thread::park();
+        }
+    };
 
     // Replace any instance already running on this device; the lock is held until exit
     let _instance_lock = match DaemonIpc::acquire(device_path) {

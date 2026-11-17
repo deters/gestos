@@ -32,7 +32,7 @@ pub fn is_physical_keyboard(node: &str) -> bool {
 }
 
 /// The `event*` names in a buffer of inotify events.
-pub fn created_event_nodes(buffer: &[u8]) -> Vec<String> {
+pub fn event_nodes(buffer: &[u8]) -> Vec<String> {
     let mut nodes = Vec::new();
     let mut offset = 0;
     while offset + INOTIFY_HEADER_SIZE <= buffer.len() {
@@ -184,13 +184,13 @@ H: Handlers=mouse2 event9
         let mut buffer = inotify_event("event7", 16);
         buffer.extend(inotify_event("js0", 16));
         buffer.extend(inotify_event("event12", 16));
-        assert_eq!(created_event_nodes(&buffer), ["event7", "event12"]);
+        assert_eq!(event_nodes(&buffer), ["event7", "event12"]);
     }
 
     #[test]
     fn a_truncated_inotify_buffer_is_not_a_problem() {
         let buffer = inotify_event("event7", 16);
-        assert!(created_event_nodes(&buffer[..20]).is_empty());
-        assert!(created_event_nodes(&[]).is_empty());
+        assert!(event_nodes(&buffer[..20]).is_empty());
+        assert!(event_nodes(&[]).is_empty());
     }
 }

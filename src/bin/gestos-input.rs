@@ -33,7 +33,7 @@ mod service {
         active_seat_uid, is_event_node, may_press_key, may_report_held, Event, LineBuffer, Request,
         SOCKET_PATH,
     };
-    use crate::keyboards::{created_event_nodes, is_physical_keyboard, Keyboards};
+    use crate::keyboards::{event_nodes, is_physical_keyboard, Keyboards};
     use crate::modifiers::HeldKeys;
     use crate::uinput::{trigger_button_code, UinputDevice};
     use evdev::{Device, EventType, KeyCode};
@@ -47,8 +47,6 @@ mod service {
     const SYSTEMD_FIRST_FD: i32 = 3;
     const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
     const SEAT_CHECK_INTERVAL: Duration = Duration::from_secs(1);
-    // Gives udev time to set a new device's permissions.
-    const KEYBOARD_SETTLE_DELAY: Duration = Duration::from_millis(500);
     const GRAB_ATTEMPTS: u32 = 5;
     const GRAB_RETRY_INTERVAL: Duration = Duration::from_millis(100);
     const MAX_SENSITIVITY: i32 = 100_000;
@@ -139,7 +137,7 @@ mod service {
         }
     }
 
-    /// Watches for new input devices.
+    /// Watches for new input devices, and for udev setting who may open them, which comes after.
     fn watch_input_devices() -> Option<File> {
         let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
         if fd < 0 {
@@ -147,7 +145,7 @@ mod service {
         }
         let file = unsafe { File::from_raw_fd(fd) };
         let watched = unsafe {
-            libc::inotify_add_watch(fd, c"/dev/input".as_ptr(), libc::IN_CREATE)
+            libc::inotify_add_watch(fd, c"/dev/input".as_ptr(), libc::IN_CREATE | libc::IN_ATTRIB)
         };
         (watched >= 0).then_some(file)
     }
@@ -157,7 +155,6 @@ mod service {
     struct ModifierReader {
         keyboards: Option<Keyboards>,
         watch: Option<File>,
-        reopen_at: Option<Instant>,
     }
 
     impl ModifierReader {
@@ -167,7 +164,6 @@ mod service {
             }
             self.keyboards = enabled.then(Keyboards::open);
             self.watch = enabled.then(watch_input_devices).flatten();
-            self.reopen_at = None;
         }
 
         fn held(&self) -> HeldKeys {
@@ -179,20 +175,14 @@ mod service {
                 return;
             };
             let mut buffer = [0u8; 4096];
+            // One that can't be opened yet is, once udev has set it up.
             if let Ok(length) = watch.read(&mut buffer) {
-                if created_event_nodes(&buffer[..length])
+                if event_nodes(&buffer[..length])
                     .iter()
                     .any(|node| is_physical_keyboard(node))
                 {
-                    self.reopen_at = Some(Instant::now() + KEYBOARD_SETTLE_DELAY);
+                    self.keyboards = Some(Keyboards::open());
                 }
-            }
-        }
-
-        fn reopen_if_due(&mut self) {
-            if self.reopen_at.is_some_and(|at| at <= Instant::now()) {
-                self.reopen_at = None;
-                self.keyboards = Some(Keyboards::open());
             }
         }
     }
@@ -363,10 +353,7 @@ mod service {
                     return Err(refused(false, "Another user is now active on this seat."));
                 }
             }
-            modifiers.reopen_if_due();
-
-            let wake_at = modifiers.reopen_at.map_or(next_seat_check, |at| at.min(next_seat_check));
-            let timeout = wake_at.saturating_duration_since(now).as_millis() as i32 + 1;
+            let timeout = next_seat_check.saturating_duration_since(now).as_millis() as i32 + 1;
             let mut poll_fds = [
                 libc::pollfd {
                     fd: dev.as_raw_fd(),
