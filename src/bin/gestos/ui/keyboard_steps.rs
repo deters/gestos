@@ -120,9 +120,9 @@ pub fn append_steps_rows(
     });
     let pressing = Rc::clone(&editor);
     add_button("Shortcut", "Press a Shortcut…").connect_clicked(move |_| {
-        pressing.add(KeyStep::Press(String::new()));
-        // Keys are only known once they're pressed, so a new keys step asks for them.
-        pressing.record(pressing.steps.borrow().len() - 1);
+        // Keys are only known once they're pressed, so a new keys step asks for them, and is only
+        // added once there are some.
+        pressing.record(None);
     });
     let typing = Rc::clone(&editor);
     add_button("Type", "Type a Text").connect_clicked(move |_| {
@@ -221,7 +221,7 @@ impl StepsEditor {
                 record.set_tooltip_text(Some("Record keys"));
                 record.add_css_class("flat");
                 let editor = Rc::clone(self);
-                record.connect_clicked(move |_| editor.record(i));
+                record.connect_clicked(move |_| editor.record(Some(i)));
                 content.append(&record);
             }
             // Several lines, for text like a signature. Each line break is typed as Enter.
@@ -328,17 +328,29 @@ impl StepsEditor {
         row
     }
 
-    /// Asks for the keys of a step, with the recorder the other shortcuts use.
-    fn record(self: &Rc<Self>, i: usize) {
+    /// Asks for the keys of a step, or of a new one, with the recorder the other shortcuts use. A
+    /// step without keys does nothing, so a new one is only added with keys, and clearing a
+    /// step's keys removes it.
+    fn record(self: &Rc<Self>, i: Option<usize>) {
         let entry = gtk::Entry::new();
-        if let Some(KeyStep::Press(keys)) = self.steps.borrow().get(i) {
-            entry.set_text(keys);
+        if let Some(KeyStep::Press(keys)) = i.and_then(|i| self.steps.borrow().get(i).cloned()) {
+            entry.set_text(&keys);
         }
         let editor = Rc::clone(self);
         let recorded = entry.clone();
         let done: Rc<dyn Fn()> = Rc::new(move || {
-            if let Some(step) = editor.steps.borrow_mut().get_mut(i) {
-                *step = KeyStep::Press(recorded.text().to_string());
+            let keys = recorded.text().trim().to_string();
+            {
+                let mut steps = editor.steps.borrow_mut();
+                match (i, keys.is_empty()) {
+                    (None, true) => return,
+                    (None, false) => steps.push(KeyStep::Press(keys)),
+                    (Some(i), true) if i < steps.len() => {
+                        steps.remove(i);
+                    }
+                    (Some(i), false) if i < steps.len() => steps[i] = KeyStep::Press(keys),
+                    _ => {}
+                }
             }
             editor.changed();
             editor.rebuild();
