@@ -4,6 +4,7 @@ pub mod keyboard_steps;
 pub mod app_picker;
 pub mod gesture_canvas;
 pub mod gesture_demo;
+pub mod gesture_recorder;
 pub mod editor;
 pub mod settings;
 pub mod main_window;
