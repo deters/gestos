@@ -12,6 +12,9 @@ cd "$(dirname "$0")"
 
 local_root=${XDG_DATA_HOME:-$HOME/.local/share}
 local_bin=$HOME/.local/bin
+# Where your own action templates are, which Gestos reads before the system's. The ones from this
+# checkout go there too, to test them, in place of any installed with the same names.
+local_templates=$local_root/gestos/action-templates
 
 # Where each file of the build is installed for the system, as "built file<TAB>installed file".
 installed_files() {
@@ -35,6 +38,11 @@ if [ "$1" = --remove ]; then
         copy=$(user_copy "$system")
         [ -n "$copy" ] && rm -f "$copy"
     done
+    # Only the ones from this checkout, and not any you made.
+    for template in action-templates/*.yaml; do
+        rm -f "${local_templates:?}/${template##*/}"
+    done
+    rmdir "$local_templates" 2>/dev/null || true
     rmdir -p "$local_root/gnome-shell/extensions/gestos@deters.github.io/schemas" \
         "$local_root/gnome-shell/extensions/gestos@deters.github.io/lib" 2>/dev/null || true
     systemctl --user daemon-reload 2>/dev/null || true
@@ -75,6 +83,12 @@ while IFS="$(printf '\t')" read -r built system; do
     [ -x "$built" ] && chmod 755 "$copy.new" || chmod 644 "$copy.new"
     mv -f "$copy.new" "$copy"
 done < build/installed-files.tsv
+# Gestos leaves out templates other users can change, so the folder's permissions are set too.
+mkdir -p "$local_templates"
+chmod 755 "$local_templates"
+for template in action-templates/*.yaml; do
+    install -m 644 "$template" "$local_templates/${template##*/}"
+done
 systemctl --user daemon-reload 2>/dev/null || true
 update-desktop-database -q "$local_root/applications" 2>/dev/null || true
 gtk-update-icon-cache -q -t -f "$local_root/icons/hicolor" 2>/dev/null || true
