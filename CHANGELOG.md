@@ -10,426 +10,426 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **One process fewer.** Gestos runs two processes in the background instead of three.
+- Gestos now runs two background processes instead of three.
 
 ## [8.1.0] - 2026-11-16
 
 ### Added
 
-- **Control windows with the middle button.** Drag to move a window and scroll to resize it, both in the same press (Control Windows With the Middle Button, in Settings; GNOME).
-- **Commands in advanced actions.** An advanced action can run a command between its other steps (Advanced Action).
-- **Advanced actions for one app.** Make an advanced action that works only in the app you choose (the app's page).
-- **Commands that use what you copied.** A command can work on the text you copied or selected, and on the files you copied (Run Command in Shell, Advanced Action).
-- **Turn off middle click paste.** Pasting with the middle button can be turned off, or on and off with a gesture (Allow Middle Click Paste, in Settings; Toggle Middle Click Paste).
-- **A gesture for middle button window control.** It turns window control on or off (Toggle Middle Button Window Control).
+- Moving and resizing windows with the middle button: drag to move the window under the pointer, scroll to resize it (Control Windows With the Middle Button, in Settings; GNOME).
+- A Command step for advanced actions.
+- Advanced actions limited to one app, from the app's page.
+- Commands can now use the copied text, the selected text and the copied files (Use Variables, in Run Command in Shell and Advanced Action).
+- A setting to turn off middle click paste (Allow Middle Click Paste, in Settings), and an action that toggles it (Toggle Middle Click Paste).
+- An action that toggles middle button window control (Toggle Middle Button Window Control).
 
 ### Changed
 
-- **Tiling while you drag.** Only the windows in the way of the one you drag make room for it, as it moves.
-- **Commands shown before importing.** Importing a configuration lists the commands its gestures would run (Import Configuration, in Settings).
+- While a window is dragged, only the tiled windows in its way move now, instead of all of them.
+- Importing a configuration now lists the commands its gestures run before you confirm.
 
 ## [8.0.1] - 2026-11-15
 
 ### Fixed
 
-- **Gestures with held keys on X11.** Gestures drawn while holding Ctrl, Alt, Shift or Super work on X11 too.
+- Gestures drawn while holding Ctrl, Alt, Shift or Super were saved without those keys on X11.
 
 ## [8.0.0] - 2026-11-15
 
 ### Added
 
-- **Categories.** Actions are grouped, such as Windows, Navigation and Sound and Media, each with the gestures you made for them.
-- **A page for each app.** See an app's gestures and shortcuts, and make a gesture for any of those shortcuts.
-- **See what a gesture did.** A small panel shows what ran, or why nothing did (GNOME, KDE, X11).
-- **The gesture path on KDE and X11.** See your gesture as you draw it there too.
-- **Look up what you select.** Select text and draw to open it as a link, work out a sum, or search the web for it (Look Up Selection).
-- **Gestures per app on Sway and Hyprland.** One shape can do something different in each app there too.
+- Categories for actions, such as Windows, Navigation and Sound and Media.
+- A page for each app, with its gestures and the shortcuts it offers.
+- A panel that shows what a gesture ran, or why nothing ran (GNOME, KDE, X11).
+- The gesture path is now also shown on KDE and X11.
+- Look Up Selection: opens selected text as a link, works out a sum, or searches the web for it.
+- Gestures per app now also work on Sway and Hyprland.
 
 ### Changed
 
-- **Gesture recognition.** Quick, rough drawings match their gesture more often.
-- **An example in the editor.** It shows a mouse drawing a gesture, then shows yours as you draw it.
-- **Record any shortcut.** The recorder also takes shortcuts your desktop uses itself, like Ctrl+Alt+Up, and modifier keys alone.
-- **Undo deleting a gesture.** Deleting no longer asks first, and can be undone.
-- **Keyboard shortcuts.** Ctrl+W closes a window, Ctrl+Q quits, and Ctrl+? lists them all.
+- Gestures are now matched by the directions drawn, instead of the exact shape.
+- The gesture editor now shows an example of a gesture being drawn.
+- The shortcut recorder now also records shortcuts the desktop uses itself, like Ctrl+Alt+Up, and modifier keys alone.
+- Deleting a gesture no longer asks for confirmation, and can be undone instead.
+- Added keyboard shortcuts: Ctrl+W closes a window, Ctrl+Q quits, and Ctrl+? lists them all.
 
 ### Fixed
 
-- **The right version in Extensions.** GNOME's Extensions app shows the version you have.
-- **Gestures for one app with many apps installed.** They run without delay.
+- GNOME's Extensions app showed the wrong version of the extension.
+- Gestures for one app were slow with many apps installed.
 
 ## [7.1.0] - 2026-11-10
 
 ### Changed
 
-- **Snapped windows stay where you put them.** A window snapped to half the screen stays there, and the others are tiled beside it.
+- Windows snapped to half the screen now stay there, and tiling fits the other windows beside them.
 
 ## [7.0.0] - 2026-11-10
 
 ### Added
 
-- **Tiling on every screen.** Windows on all your monitors are tiled, while dialogs and videos stay on top.
-- **Overview with both buttons.** Hold right and click left to see all your windows (Show Overview With Both Buttons, in Settings; GNOME, KDE).
+- Tiling now also works on other monitors. Dialogs and videos stay on top instead of taking a tile.
+- Show Overview With Both Buttons: holding right and clicking left shows all windows (Settings; GNOME, KDE).
 
 ### Changed
 
-- **Windows keep their size.** A window gets back the size you gave it after tiling or maximizing, even after you reopen the app.
+- Windows now get back the size you gave them after tiling or maximizing, even after the app is reopened.
 
 ### Fixed
 
-- **Tiling on Ubuntu.** It works there now.
-- **Crash when closing some windows.** Closing them no longer crashes GNOME and logs you out.
-- **Swapped keys.** Gestures and shortcuts work with keys swapped, such as Ctrl and Win.
+- Tiling didn't start on Ubuntu.
+- Closing some windows could crash GNOME and log you out.
+- Gestures and shortcuts didn't work with swapped keys, such as Ctrl and Win.
 
 ## [6.9.0] - 2026-11-09
 
 ### Added
 
-- **Snap to a side.** A gesture can put a window on half the screen (View Split on Left, View Split on Right).
+- View Split on Left and View Split on Right are now actions.
 
 ### Fixed
 
-- **Maximizing a tiled window.** It no longer lags behind the other windows.
-- **Moving tiled windows.** A tiled window you move to a side, a corner or another screen stays there, and the others make room.
-- **Windows on all workspaces.** A window shown on every workspace no longer covers the tiled ones.
-- **The icon on Ubuntu.** Gestos shows its icon in Ubuntu's app list.
+- A tiled window that was maximized lagged behind the other windows.
+- A tiled window moved to a side, a corner or another screen didn't stay there.
+- A window shown on every workspace covered the tiled windows.
+- Gestos had no icon in Ubuntu's app list.
 
 ## [6.8.1] - 2026-11-09
 
 ### Fixed
 
-- **Typed text keeps its punctuation.** Text a gesture types keeps its dots, slashes and other symbols on every system, Alpine included, so `www.google.com` is typed as written.
+- Text typed by a gesture lost its dots, slashes and other symbols on systems where the keyboard layout isn't known, such as Alpine.
 
 ## [6.8.0] - 2026-11-09
 
 ### Added
 
-- **Alpine for ARM.** A package for Alpine on ARM computers.
+- An Alpine package for ARM.
 
 ### Changed
 
-- **Only actions that work here.** You're offered the actions of your own desktop, and a gesture made for another desktop says which one it needs.
+- Only the actions of the desktop in use are offered now, and a gesture made for another desktop says which one it needs.
 
 ### Fixed
 
-- **Starting gestures without systemd.** When gestures can't start, Gestos shows the command that starts them.
-- **Reports without a text editor.** When no app can open the report, Gestos shows where it is and can copy it.
+- On systems without systemd, Gestos now shows the command that starts the input service when it isn't running.
+- When no app can open the bug report, Gestos now shows where it was saved and can copy it.
 
 ## [6.7.0] - 2026-11-09
 
 ### Added
 
-- **Gestures per app on KDE and X11.** One shape can do something different in each app there too.
+- Gestures per app now also work on KDE and X11.
 
 ### Fixed
 
-- **Apps with the same name.** Apps that share a name are told apart, like Files (Nemo) and Files (Nautilus).
-- **Newly installed apps.** They show up without reopening Gestos.
+- Apps with the same name, like Nemo and Nautilus, which are both called Files, couldn't be told apart.
+- Newly installed apps only showed up after reopening Gestos.
 
 ## [6.6.1] - 2026-11-09
 
 ### Fixed
 
-- **Closing a tiled window.** It disappears at once, without waiting for the other windows to move.
+- A closed tiled window stayed on screen while the other windows moved into its place.
 
 ## [6.6.0] - 2026-11-09
 
 ### Added
 
-- **GNOME 51.** Gestures per app, the gesture path and tiling work on the new GNOME.
-- **Why a gesture can't run.** A gesture that can't run says why, and what to do.
+- Support for GNOME 51.
+- A gesture that can't run because the GNOME extension is off or outdated now says so.
 
 ### Changed
 
-- **Looks like GNOME.** Gestos matches GNOME's own apps, follows dark style, and has new About and Preferences windows.
-- **Gestures in bug reports.** Reports include what Gestos did with your gestures.
+- Gestos now looks like GNOME's own apps, follows dark style, and has new About and Preferences windows.
+- Bug reports now always include what Gestos did with the gestures.
 
 ## [6.5.0] - 2026-11-08
 
 ### Added
 
-- **Open any app.** Every app has an action that opens it, or brings it to the front.
-- **See your gesture as you draw it.** Its path follows your pointer and fades when you let go (Preferences).
-- **Choose the button you draw with.** Right, middle, back or forward, and left-handed mice use the other side (Preferences).
-- **Bug reports.** A button makes a report of your setup to attach to a bug report (Preferences).
+- An Open action for every installed app, which also brings it to the front if it's open.
+- The gesture path: a line that follows the pointer while you draw (Preferences).
+- A choice of the button that draws gestures: right, middle, back or forward. Left-handed mice use the other side (Preferences).
+- A button that creates a bug report (Preferences).
 
 ### Changed
 
-- **Fewer notifications.** Gestos only notifies you when something goes wrong.
-- **Preferences in groups.** Settings are grouped by what they're for.
-- **Labeled steps.** In the gesture editor, each step says what it is, and the drawing area keeps its size.
+- Gestos now only notifies when something goes wrong.
+- Preferences is now grouped into sections.
+- Each step of a custom action now says what it is, and the drawing area keeps its size.
 
 ### Fixed
 
-- **Several mice.** Every mouse draws gestures, not only the first one found.
+- Only the first mouse found could draw gestures.
 
 ## [6.4.1] - 2026-11-08
 
 ### Changed
 
-- **Steps as rows.** Each step of a custom action is a row with an icon for its kind, and a button adds each kind.
+- The steps of a custom action are now a list, with a button to add each kind of step.
 
 ### Fixed
 
-- **The gesture editor keeps its width** when steps are added.
+- The buttons to add steps made the gesture editor wider.
 
 ## [6.4.0] - 2026-11-08
 
 ### Added
 
-- **Gestures for some apps.** The same shape can do something different in the apps you pick (GNOME).
-- **Open an app first.** A custom action can open an app, or bring it to the front, and its next steps go to that app (Custom Action).
-- **Named custom actions.** A new one is named after what you searched for, and you can rename it.
+- Gestures limited to some apps (GNOME).
+- Custom actions can now open an app, or bring it to the front, before their other steps.
+- Custom actions now have names, and a new one is named after what was searched for.
 
 ### Changed
 
-- **New names.** Custom Keyboard Action is now Custom Action, and Run Command is now Run Command in Shell.
-- **The action first.** The gesture editor shows what a gesture does first, then what triggers it.
-- **No notification on start and stop.** Starting and stopping gestures notifies you only when it fails.
+- Renamed Custom Keyboard Action to Custom Action, and Run Command to Run Command in Shell.
+- The gesture editor now shows the action first, then what triggers it.
+- Starting and stopping gestures no longer shows a notification, unless it fails.
 
 ## [6.3.0] - 2026-11-07
 
 ### Added
 
-- **Custom Keyboard Action.** One action can press shortcuts, type text and wait, in the order you set. The text can have several lines and accented letters.
-- **Tile automatically.** Every workspace is tiled, new ones too (Tile Automatically, in Preferences).
-- **Out-of-date extension.** Gestos says when its GNOME extension is out of date, and how to update it.
+- Custom Keyboard Action, which replaces Custom Keyboard Shortcut: it presses shortcuts, types text and waits, in the order you set. The text can have several lines and accented letters.
+- Tile Automatically, which tiles every workspace (Preferences).
+- Gestos now says when its GNOME extension is out of date, and how to update it.
 
 ### Changed
 
-- **Tiling keeps windows at their own sizes.** Windows move just enough not to overlap, and only shrink when they must.
-- **Tiling stays on** until you turn it off, even after you log in again.
-- **Pick the gesture you meant, at the pointer.** The card appears where you drew, and your window keeps its focus (GNOME).
-- **Two actions in every search.** Run Command and Custom Keyboard Action show up whatever you search for.
-- **Record any key.** The shortcut recorder takes Escape, Backspace, Tab and Enter too.
+- Tiling now keeps windows at their own sizes, moving them just enough not to overlap.
+- Tiling now stays on until turned off, also after logging out.
+- The card that asks which gesture was meant now appears at the pointer, and the window keeps its focus (GNOME).
+- Run Command and Custom Keyboard Action are now offered in every search.
+- The shortcut recorder now also records Escape, Backspace, Tab and Enter.
 
 ### Fixed
 
-- **Gestos's own windows aren't tiled.**
-- **Starting gestures from Settings.** Settings can start gestures when they weren't running.
+- Gestos's own windows were tiled.
+- Settings couldn't start gestures when they weren't running.
 
 ## [6.2.2] - 2026-11-04
 
 ### Fixed
 
-- **Overlapping windows of some apps.** They now get a tile like the others.
-- **Smallest tile size.** Tiles stay big enough to use, so up to 12 windows fit, 4 across and 3 down.
+- Windows of some apps overlapped their neighbors when tiled.
+- Tiles could get too small to use. Up to 12 windows now fit, 4 across and 3 down.
 
 ## [6.2.1] - 2026-11-04
 
 ### Changed
 
-- **Moving a tiled window puts all windows back** at their own sizes, as before 6.2.0.
+- Moving a tiled window puts all windows back at their own sizes again, as before 6.2.0.
 
 ### Fixed
 
-- **Big windows tile without overlapping.** When they can't all shrink enough, they're laid out in a grid, and the biggest get the widest tiles.
+- Big windows overlapped when tiled. They're now laid out in a grid when they can't all shrink enough.
 
 ## [6.2.0] - 2026-11-03
 
 ### Changed
 
-- **Moving a tiled window keeps tiling.** The window you move takes a tile where you leave it, and the others fit around it.
+- Moving a tiled window now keeps the workspace tiled: the window takes a tile where it's left.
 
 ## [6.1.3] - 2026-11-03
 
 ### Fixed
 
-- **Crash with several monitors.** Closing a window on another monitor while tiling no longer ends your session.
-- **Force quit hung apps.** Closing a window that doesn't respond offers to force quit it (Close Window).
+- GNOME crashed when a window on a second monitor closed while tiling.
+- Closing a window that doesn't respond now offers to force quit it (Close Window).
 
 ## [6.1.2] - 2026-11-03
 
 ### Fixed
 
-- **Close Window like its close button.** Windows close just as when you click their close button (Close Window; GNOME).
-- **Shortcuts start sooner.** Gestures press their shortcuts with less delay (GNOME).
-- **Pointer on a busy desktop.** It keeps moving smoothly when the computer is busy.
+- Close Window now closes windows like their close button does (GNOME).
+- Shortcuts pressed by gestures now start sooner (GNOME).
+- The pointer could stutter on a busy desktop.
 
 ## [6.1.1] - 2026-11-02
 
 ### Fixed
 
-- **Tiled windows don't overlap.** Even apps that won't shrink, or resize themselves, get a tile of their own.
-- **Smallest tile size.** Tiles stay at least 100 pixels wide and tall.
-- **Odd gaps.** A gap of an odd number of pixels is exact.
-- **Windows moved to a tiled workspace.** They get a tile.
+- Tiled windows covered each other when an app couldn't shrink or resized itself.
+- Tiles could get smaller than 100 pixels.
+- Gaps of an odd number of pixels were off by one.
+- Windows moved to a tiled workspace didn't get a tile.
 
 ## [6.1.0] - 2026-11-02
 
 ### Added
 
-- **Tile windows.** Fit a workspace's windows together without overlaps, and put them back with the same gesture (Toggle Tile Windows; GNOME).
-- **The Gestos GNOME extension.** It comes with Gestos and brings tiling: log out and back in, then turn it on (Preferences).
-- **Apps keep your window sizes.** They save the size you gave a window, not its tile.
+- Toggle Tile Windows, which fits a workspace's windows together without overlaps, and puts them back when used again (GNOME).
+- The Gestos GNOME extension, which tiling needs. It comes with Gestos: log out and back in, then turn it on (Preferences).
+- Tiled windows get their own size back before they're closed, so apps don't remember the tile's size.
 
 ### Changed
 
-- **For packagers.** The GNOME extension installs to `share/gnome-shell/extensions/gestos@deters.github.io`, needs `glib-compile-schemas` to build, and `-Dgnome_extension=false` leaves it out.
+- For packagers: the GNOME extension installs to `share/gnome-shell/extensions/gestos@deters.github.io` and needs `glib-compile-schemas` to build. `-Dgnome_extension=false` leaves it out.
 
 ### Fixed
 
-- **Gestos's own icon.** Gestos shows its icon in GNOME's app list and dock.
+- Gestos had no icon in GNOME's app list and dock.
 
 ## [6.0.0] - 2026-11-01
 
-The first release named Gestos, formerly MyGestures. Your gestures and settings carry over.
+Renamed from MyGestures to Gestos. Gestures and settings carry over.
 
 ### Added
 
-- **Modifier keys.** A gesture can require Ctrl, Alt, Shift or Super to be held.
-- **Standard shortcuts.** Copy, Zoom In and other common shortcuts are actions of their own.
-- **Make gestures from search.** Search for what a gesture should do, and make it from there.
-- **Similar gestures.** When a drawing matches several gestures, you pick the one you meant.
-- **Hide which gesture ran.** A setting hides that notification (Reduce Notifications).
-- **Any keyboard layout.** Shortcuts press the right keys on every layout.
-- **Locked screen.** Gestures do nothing while the screen is locked.
-- **A new look.** A new icon, a smaller gesture editor, and Start and Stop in the header bar.
+- Gestures that require Ctrl, Alt, Shift or Super to be held.
+- Standard shortcuts, such as Copy and Zoom In, as actions.
+- Creating gestures from the search box.
+- A chooser for when a drawing matches several gestures.
+- Reduce Notifications, which hides the notification of which gesture ran.
+- Support for any keyboard layout.
+- Gestures are now ignored while the screen is locked.
+- A new icon and a smaller gesture editor, with Start and Stop in the header bar.
 
 ### Changed
 
-- **Upgrading from source.** Run `sudo meson install -C build` or `sudo make install` again, or gestures won't start. Packages take care of this.
-- **Without systemd.** Gestos needs elogind. On Alpine, start it with `rc-service gestos-input start`, and at every boot with `rc-update add gestos-input`. The Alpine package is experimental.
-- **No gestures to start with.** You make the ones you want.
-- **One action per gesture.** An older configuration with several uses the first.
-- **Gestures start with Gestos.** Opening it starts them, unless you stopped them yourself.
-- **GNOME actions without a shortcut** run too, and sooner. If one sometimes does nothing, set `GESTOS_SHORTCUT_DELAY_MS` to `300`.
-- **New name.** Custom Keyboard Shortcut replaces Keypress Shortcut.
+- Gestos now reaches input devices through a system service, instead of being installed as Set-Group-ID. From source, run `sudo meson install -C build` or `sudo make install` again, or gestures won't start.
+- Without systemd, the service needs elogind. On Alpine, start it with `rc-service gestos-input start`, and at every boot with `rc-update add gestos-input`. The Alpine package is experimental.
+- Gestos no longer comes with gestures.
+- Each gesture now has one action. Older configurations with several use the first.
+- Opening Gestos now starts gestures, unless they were stopped.
+- GNOME actions with no shortcut assigned now run, and sooner. If one sometimes does nothing, set `GESTOS_SHORTCUT_DELAY_MS` to `300`.
+- Renamed Keypress Shortcut to Custom Keyboard Shortcut.
 
 ### Removed
 
-- **Running as root.** Gestos runs as your own user, so `sudo gestosd` no longer works.
-- **The `input` group.** You can leave it if you only joined it for Gestos.
+- Running as root: `sudo gestosd` no longer works.
+- The need to be in the `input` group.
 
 ### Security
 
-- **No access to your typing.** What runs your gestures can't read what you type ([README](https://github.com/deters/gestos#security)).
-- **Configurations others can change.** They're refused, and the error says how to fix it.
+- What runs your gestures can no longer read what you type ([README](https://github.com/deters/gestos#security)).
+- A configuration that other users can change is now refused.
 
 ## [4.2.2] - 2026-10-31
 
 ### Added
 
-- **Reorder your gestures.** Drag them into the order you want.
-- **Search for an action.** The gesture editor finds actions as you type.
-- **KDE's shortcuts.** A gesture can run any of KDE's global shortcuts.
-- **Import and export.** Save your gestures to a file, load them back, or start over with the defaults (Settings).
-- **Use it from the keyboard.** Every part of the window can be reached without the mouse.
+- Reordering gestures by dragging them.
+- Searching for an action in the gesture editor.
+- Support for KDE's global shortcuts.
+- Importing and exporting gestures, and loading the default ones (Settings).
+- Keyboard navigation in every part of the window.
 
 ### Changed
 
-- **What each gesture does.** The main window shows it, with shortcuts as keycaps.
+- The main window now shows what each gesture does, with shortcuts as keycaps.
 
 ### Fixed
 
-- **Keys, clicks and saving.** Keys and clicks are passed on every time, and gestures are saved as you leave them.
+- Keys and clicks were sometimes not passed on, and gestures were sometimes not saved.
 
 ## [4.2.1] - 2026-06-11
 
 ### Fixed
 
-- **Fedora packages** build again.
+- Fedora packages didn't build.
 
 ### Security
 
-- **Rights given up stay given up.** MyGestures fully drops the input group's rights it starts with.
+- MyGestures now fully drops the input group's rights it starts with.
 
 ## [4.2.0] - 2026-06-11
 
 ### Changed
 
-- **Tidier code.** No change you'd notice.
+- Code cleanup, with no visible changes.
 
 ## [4.1.11] - 2026-06-11
 
-Released again to rebuild the packages.
+Rebuilt the packages, with no changes.
 
 ## [4.1.10] - 2026-06-11
 
 ### Added
 
-- **Dark style.** MyGestures follows your desktop's light or dark style.
-- **Rename gestures.**
-- **See which way a gesture goes.** Its drawing ends in an arrowhead.
+- Dark style, following the desktop.
+- Renaming gestures.
+- An arrowhead at the end of a gesture's drawing, showing its direction.
 
 ### Changed
 
-- **Starts without systemd.** MyGestures starts through D-Bus, with systemd or without it.
-- **Looks like GNOME.** Windows, lists and dialogs follow GNOME's layout and colors, and shortcuts show as keycaps.
-- **Delete a gesture from its editor.**
+- MyGestures now starts through D-Bus, with or without systemd.
+- The windows, lists and dialogs now follow GNOME's layout and colors, and shortcuts show as keycaps.
+- Deleting a gesture moved to its editor.
 
 ### Removed
 
-- **Mouse Click** is no longer offered as an action.
+- The Mouse Click action.
 
 ## [4.1.9] - 2026-06-10
 
 ### Added
 
-- **Errors in the window.** When gestures can't start, MyGestures says why, in text you can select and copy.
+- Errors that stop gestures from starting are now shown in the window, as text that can be copied.
 
 ### Fixed
 
-- **The uinput module loads at boot**, so gestures can press keys right after starting the computer.
+- The uinput module didn't load at boot.
 
 ## [4.1.8] - 2026-06-10
 
 ### Fixed
 
-- **Debian packages** are attached to the release.
+- Debian packages weren't attached to the release.
 
 ## [4.1.7] - 2026-06-10
 
 ### Fixed
 
-- **Debian packages** build again.
+- Debian packages didn't build.
 
 ## [4.1.6] - 2026-06-10
 
 ### Fixed
 
-- **Packages.** The Debian package creates the input group, and the Alpine package builds again.
+- The Debian package didn't create the input group, and the Alpine package didn't build.
 
 ## [4.1.5] - 2026-06-10
 
-Released again to rebuild the packages.
+Rebuilt the packages, with no changes.
 
 ## [4.1.4] - 2026-06-10
 
-Released again to rebuild the packages.
+Rebuilt the packages, with no changes.
 
 ## [4.1.3] - 2026-06-10
 
 ### Fixed
 
-- **Alpine packages** build again.
+- Alpine packages didn't build.
 
 ## [4.1.2] - 2026-06-10
 
 ### Fixed
 
-- **Packages** build again on Debian, Fedora and Alpine.
+- Packages didn't build on Debian, Fedora and Alpine.
 
 ## [4.1.1] - 2026-06-10
 
 ### Fixed
 
-- **Packages** build again on Debian and Alpine.
+- Packages didn't build on Debian and Alpine.
 
 ## [4.1.0] - 2026-06-10
 
 ### Added
 
-- **A window to set up your gestures.** Draw a gesture, pick what it does, and record the keys it presses.
-- **GNOME's actions.** Any shortcut in GNOME's settings can be a gesture's action.
-- **XFCE.** Actions for the XFCE desktop.
-- **Similar gestures.** A gesture too much like another one is pointed out as you draw it.
-- **Packages** for Debian and Ubuntu, Fedora and Alpine.
+- A window for creating and editing gestures, with a shortcut recorder.
+- GNOME's shortcuts as actions.
+- Support for XFCE.
+- A warning when a gesture is too much like another.
+- Packages for Debian and Ubuntu, Fedora and Alpine.
 
 ### Changed
 
-- **Written in Rust**, and built with Meson.
-- **Gestures of any size.** A gesture is recognized however big or small, or wide or tall, you draw it.
+- Rewritten in Rust, and built with Meson.
+- Gestures are now recognized whatever their size or proportions.
 
 [Unreleased]: https://github.com/deters/gestos/compare/v8.1.0...HEAD
 [8.1.0]: https://github.com/deters/gestos/compare/v8.0.1...v8.1.0

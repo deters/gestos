@@ -21,13 +21,14 @@ Each release's page on GitHub is its section there.
   the change. A fix to something not released yet changes that entry instead of adding one.
 - Entries go under `### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed` or
   `### Security`, in that order.
-- Each entry is a plain bold name and a short sentence on what the user gets, with a concrete
-  example where it helps. Nothing on how it's built: no extensions, D-Bus or threads. Where to
-  find it goes last, in parentheses: "(Allow Middle Click Paste, in Settings)".
+- Each entry says what changed, compared with before, in one plain line: "Added …",
+  "… now also works on X11", "Renamed X to Y", and under Fixed, what was wrong: "Closing some
+  windows could crash GNOME." No bold headings, no selling: it's a record of changes, not an
+  announcement. Nothing on how it's built: no extensions, D-Bus or threads. Where to find it
+  goes last, in parentheses: "(Allow Middle Click Paste, in Settings)".
 - Before committing any text for users, reread it for what makes text read as AI-written:
-  slogan headings, vague comparatives like "smoother" or "better" with nothing behind them,
-  marketing phrases like "in one click" or "no more", and fragments used for punch. Headings
-  name the feature, or the problem fixed.
+  claims and slogans, vague comparatives like "smoother" or "better" with nothing behind them,
+  marketing phrases like "in one click" or "no more", and fragments used for punch.
 - To release, run `packaging/bump-version.sh <major|minor|patch>`. It moves what's under
   Unreleased to the new version, dated, and refuses to release with nothing there. Pushing the
   tag publishes that section.
