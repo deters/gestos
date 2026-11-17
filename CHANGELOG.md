@@ -20,13 +20,13 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Commands in advanced actions.** An advanced action can run a command between its other steps (Advanced Action).
 - **Advanced actions for one app.** Make an advanced action that works only in the app you choose (the app's page).
 - **Commands that use what you copied.** A command can work on the text you copied or selected, and on the files you copied (Run Command in Shell, Advanced Action).
-- **Middle click paste, your choice.** Keep pasting with the middle button, or turn it off (Allow Middle Click Paste, in Settings; Toggle Middle Click Paste).
-- **Window control on demand.** A gesture turns middle button window control on or off (Toggle Middle Button Window Control).
+- **Turn off middle click paste.** Pasting with the middle button can be turned off, or on and off with a gesture (Allow Middle Click Paste, in Settings; Toggle Middle Click Paste).
+- **A gesture for middle button window control.** It turns window control on or off (Toggle Middle Button Window Control).
 
 ### Changed
 
-- **Smoother tiling.** As you drag a window, only the windows in its way make room, in step with it.
-- **Safer imports.** See the commands a configuration would run before you import it (Import Configuration, in Settings).
+- **Tiling while you drag.** Only the windows in the way of the one you drag make room for it, as it moves.
+- **Commands shown before importing.** Importing a configuration lists the commands its gestures would run (Import Configuration, in Settings).
 
 ## [8.0.1] - 2026-11-15
 
@@ -39,7 +39,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **Categories.** Actions are grouped, such as Windows, Navigation and Sound and Media, each with the gestures you made for them.
-- **A page for each app.** See an app's gestures and shortcuts, and make a gesture for any of them in one click.
+- **A page for each app.** See an app's gestures and shortcuts, and make a gesture for any of those shortcuts.
 - **See what a gesture did.** A small panel says what ran, why it couldn't, or that nothing matched (GNOME, KDE, X11).
 - **The gesture path on KDE and X11.** See your gesture as you draw it there too.
 - **Look up what you select.** Select text and draw: a link opens, a sum is worked out, anything else is searched on the web (Look Up Selection).
@@ -47,22 +47,22 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **Gestures that read your intent.** Rough shapes still count, like an L with uneven sides, and a V is still told from a U.
-- **Learn by watching.** The editor shows how to draw a gesture, then shows yours as you draw it.
+- **Rough shapes are recognized.** An L with uneven sides or a rounded corner still counts, and a V is still told from a U.
+- **An example in the editor.** It shows a mouse drawing a gesture, then shows yours as you draw it.
 - **Record any shortcut.** Even ones your desktop keeps for itself, like Ctrl+Alt+Up, and modifier keys on their own.
-- **Undo instead of asking.** Delete a gesture in one click, and undo it in another.
+- **Undo deleting a gesture.** Deleting no longer asks first, and can be undone.
 - **Keyboard shortcuts.** Ctrl+W closes a window, Ctrl+Q quits, and Ctrl+? lists them all.
 
 ### Fixed
 
 - **The right version in Extensions.** GNOME's Extensions app shows the version you have.
-- **Quicker with many apps installed.** Gestures for one app run without delay.
+- **Gestures for one app with many apps installed.** They run without delay.
 
 ## [7.1.0] - 2026-11-10
 
 ### Changed
 
-- **Snapped windows stay put.** A window you snap to half the screen stays there, and the others are tiled beside it.
+- **Snapped windows stay where you put them.** A window snapped to half the screen stays there, and the others are tiled beside it.
 
 ## [7.0.0] - 2026-11-10
 
@@ -78,7 +78,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - **Tiling on Ubuntu.** It works there now.
-- **No more logouts.** Closing some windows no longer crashes GNOME and logs you out.
+- **Crash when closing some windows.** Closing them no longer crashes GNOME and logs you out.
 - **Swapped keys.** Gestures and shortcuts work with keys swapped, such as Ctrl and Win.
 
 ## [6.9.0] - 2026-11-09
@@ -89,7 +89,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **Smoother maximizing.** A tiled window you maximize no longer lags behind the others.
+- **Maximizing a tiled window.** It no longer lags behind the other windows.
 - **Moving tiled windows.** A tiled window you move to a side, a corner or another screen stays there, and the others make room.
 - **Windows on all workspaces.** A window shown on every workspace no longer covers the tiled ones.
 - **The icon on Ubuntu.** Gestos shows its icon in Ubuntu's app list.
@@ -98,7 +98,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **Typed text keeps its punctuation.** Text a gesture types keeps its dots, slashes and other symbols on every system, Alpine included, so `www.google.com` comes out whole.
+- **Typed text keeps its punctuation.** Text a gesture types keeps its dots, slashes and other symbols on every system, Alpine included, so `www.google.com` is typed as written.
 
 ## [6.8.0] - 2026-11-09
 
@@ -124,25 +124,25 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - **Apps with the same name.** Apps that share a name are told apart, like Files (Nemo) and Files (Nautilus).
-- **New apps right away.** Apps you install show up without reopening Gestos.
+- **Newly installed apps.** They show up without reopening Gestos.
 
 ## [6.6.1] - 2026-11-09
 
 ### Fixed
 
-- **Closing a tiled window is instant.** It disappears right away.
+- **Closing a tiled window.** It disappears at once, without waiting for the other windows to move.
 
 ## [6.6.0] - 2026-11-09
 
 ### Added
 
 - **GNOME 51.** Gestures per app, the gesture path and tiling work on the new GNOME.
-- **Know what's missing.** A gesture that can't run says why, and what to do.
+- **Why a gesture can't run.** A gesture that can't run says why, and what to do.
 
 ### Changed
 
 - **Looks like GNOME.** Gestos matches GNOME's own apps, follows dark style, and has new About and Preferences windows.
-- **Better bug reports.** Reports say what Gestos did with your gestures.
+- **Gestures in bug reports.** Reports include what Gestos did with your gestures.
 
 ## [6.5.0] - 2026-11-08
 
@@ -151,23 +151,23 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Open any app.** Every app has an action that opens it, or brings it to the front.
 - **See your gesture as you draw it.** Its path follows your pointer and fades when you let go (Preferences).
 - **Choose the button you draw with.** Right, middle, back or forward, and left-handed mice use the other side (Preferences).
-- **Bug reports in one click.** A report of your setup, ready to attach (Preferences).
+- **Bug reports.** A button makes a report of your setup to attach to a bug report (Preferences).
 
 ### Changed
 
 - **Fewer notifications.** Gestos only notifies you when something goes wrong.
-- **A clearer Preferences window.** Settings are grouped by what they're for.
-- **A tidier gesture editor.** Each step says what it is, and the drawing area keeps its size.
+- **Preferences in groups.** Settings are grouped by what they're for.
+- **Labeled steps.** In the gesture editor, each step says what it is, and the drawing area keeps its size.
 
 ### Fixed
 
-- **Every mouse draws gestures.** Not just the first one.
+- **Several mice.** Every mouse draws gestures, not only the first one found.
 
 ## [6.4.1] - 2026-11-08
 
 ### Changed
 
-- **Clearer steps.** Each step of a custom action is a row with an icon for its kind, and a button adds each kind.
+- **Steps as rows.** Each step of a custom action is a row with an icon for its kind, and a button adds each kind.
 
 ### Fixed
 
@@ -184,8 +184,8 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - **New names.** Custom Keyboard Action is now Custom Action, and Run Command is now Run Command in Shell.
-- **A clearer gesture editor.** It shows what a gesture does first, then what triggers it.
-- **Quiet start and stop.** Starting and stopping gestures no longer notifies you, unless it fails.
+- **The action first.** The gesture editor shows what a gesture does first, then what triggers it.
+- **No notification on start and stop.** Starting and stopping gestures notifies you only when it fails.
 
 ## [6.3.0] - 2026-11-07
 
@@ -193,27 +193,27 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Shortcuts, text and pauses, in any order.** One action can press shortcuts, type text, even several lines with accented letters, and wait in between (Custom Keyboard Action).
 - **Tile automatically.** Every workspace is tiled, new ones too (Tile Automatically, in Preferences).
-- **Know when to update.** Gestos tells you when its GNOME extension is out of date, and how to update it.
+- **Out-of-date extension.** Gestos says when its GNOME extension is out of date, and how to update it.
 
 ### Changed
 
 - **Tiling keeps windows at their own sizes.** Windows move just enough not to overlap, and only shrink when they must.
-- **Tiling stays on.** Until you turn it off, even after you log in again.
+- **Tiling stays on.** It stays on until you turn it off, even after you log in again.
 - **Pick the gesture you meant, at the pointer.** The card appears where you drew, and your window keeps its focus (GNOME).
-- **Always offered.** Run Command and Custom Keyboard Action show up in every search.
+- **Two actions in every search.** Run Command and Custom Keyboard Action show up whatever you search for.
 - **Record any key.** The shortcut recorder takes Escape, Backspace, Tab and Enter too.
 
 ### Fixed
 
 - **Gestos's own windows aren't tiled.**
-- **Gestures start when asked.** Settings can start gestures even when they weren't running.
+- **Starting gestures from Settings.** Settings can start gestures when they weren't running.
 
 ## [6.2.2] - 2026-11-04
 
 ### Fixed
 
-- **Every window gets a tile.** Windows of some apps no longer overlap their neighbors.
-- **Tiles stay usable.** No tile gets too small, and up to 12 windows fit, 4 across and 3 down.
+- **Overlapping windows of some apps.** They now get a tile like the others.
+- **Smallest tile size.** Tiles stay big enough to use, so up to 12 windows fit, 4 across and 3 down.
 
 ## [6.2.1] - 2026-11-04
 
@@ -235,7 +235,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **No more crashes with several monitors.** Closing a window on another monitor while tiling no longer ends your session.
+- **Crash with several monitors.** Closing a window on another monitor while tiling no longer ends your session.
 - **Force quit hung apps.** Closing a window that doesn't respond offers to force quit it (Close Window).
 
 ## [6.1.2] - 2026-11-03
@@ -243,17 +243,17 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - **Close Window like its close button.** Windows close just as when you click their close button (Close Window; GNOME).
-- **Quicker shortcuts.** Gestures press shortcuts sooner (GNOME).
-- **A smooth pointer.** The pointer stays smooth on a busy desktop.
+- **Shortcuts start sooner.** Gestures press their shortcuts with less delay (GNOME).
+- **Pointer on a busy desktop.** It keeps moving smoothly when the computer is busy.
 
 ## [6.1.1] - 2026-11-02
 
 ### Fixed
 
 - **Tiled windows don't overlap.** Even apps that won't shrink, or resize themselves, get a tile of their own.
-- **Usable tiles.** Tiles stay at least 100 pixels wide and tall.
-- **Even gaps.** The gap between tiles is always exact.
-- **Moved windows join.** Windows moved to a tiled workspace get a tile.
+- **Smallest tile size.** Tiles stay at least 100 pixels wide and tall.
+- **Odd gaps.** A gap of an odd number of pixels is exact.
+- **Windows moved to a tiled workspace.** They get a tile.
 
 ## [6.1.0] - 2026-11-02
 
@@ -261,7 +261,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Tile windows.** Fit a workspace's windows together without overlaps, and put them back with the same gesture (Toggle Tile Windows; GNOME).
 - **The Gestos GNOME extension.** It comes with Gestos and brings tiling: log out and back in, then turn it on (Preferences).
-- **Original sizes kept.** Apps remember the size you gave a window, not its tile.
+- **Apps keep your window sizes.** They save the size you gave a window, not its tile.
 
 ### Changed
 
@@ -279,9 +279,9 @@ The first release named Gestos, formerly MyGestures. Your gestures and settings 
 
 - **Modifier keys.** A gesture can require Ctrl, Alt, Shift or Super to be held.
 - **Standard shortcuts.** Copy, Zoom In and other common shortcuts are actions of their own.
-- **Search first.** Make a gesture by searching for what it should do.
+- **Make gestures from search.** Search for what a gesture should do, and make it from there.
 - **Similar gestures.** When a drawing matches several gestures, you pick the one you meant.
-- **Quieter gestures.** Hide the notice of which gesture ran (Reduce Notifications).
+- **Hide which gesture ran.** A setting hides that notification (Reduce Notifications).
 - **Any keyboard layout.** Shortcuts press the right keys on every layout.
 - **Locked screen.** Gestures do nothing while the screen is locked.
 - **A new look.** A new icon, a smaller gesture editor, and Start and Stop in the header bar.
@@ -303,8 +303,8 @@ The first release named Gestos, formerly MyGestures. Your gestures and settings 
 
 ### Security
 
-- **Less access.** What runs your gestures can't read what you type ([README](https://github.com/deters/gestos#security)).
-- **Protected settings.** A configuration other users can change is refused, and the error says how to fix it.
+- **No access to your typing.** What runs your gestures can't read what you type ([README](https://github.com/deters/gestos#security)).
+- **Configurations others can change.** They're refused, and the error says how to fix it.
 
 ## [4.2.2] - 2026-10-31
 
@@ -318,11 +318,11 @@ The first release named Gestos, formerly MyGestures. Your gestures and settings 
 
 ### Changed
 
-- **A clearer main window.** Each gesture shows what it does, with shortcuts as keycaps.
+- **What each gesture does.** The main window shows it, with shortcuts as keycaps.
 
 ### Fixed
 
-- **More reliable.** Keys and clicks are passed on dependably, and gestures are saved as you leave them.
+- **Keys, clicks and saving.** Keys and clicks are passed on every time, and gestures are saved as you leave them.
 
 ## [4.2.1] - 2026-06-11
 

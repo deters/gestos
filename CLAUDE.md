@@ -22,7 +22,12 @@ Each release's page on GitHub is its section there.
 - Entries go under `### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed` or
   `### Security`, in that order.
 - Each entry is a plain bold name and a short sentence on what the user gets, with a concrete
-  example where it helps. Nothing on how it's built: no extensions, D-Bus or threads.
+  example where it helps. Nothing on how it's built: no extensions, D-Bus or threads. Where to
+  find it goes last, in parentheses: "(Allow Middle Click Paste, in Settings)".
+- Before committing any text for users, reread it for what makes text read as AI-written:
+  slogan headings, vague comparatives like "smoother" or "better" with nothing behind them,
+  marketing phrases like "in one click" or "no more", and fragments used for punch. Headings
+  name the feature, or the problem fixed.
 - To release, run `packaging/bump-version.sh <major|minor|patch>`. It moves what's under
   Unreleased to the new version, dated, and refuses to release with nothing there. Pushing the
   tag publishes that section.
