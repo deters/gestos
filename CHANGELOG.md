@@ -40,16 +40,16 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Categories.** Actions are grouped, such as Windows, Navigation and Sound and Media, each with the gestures you made for them.
 - **A page for each app.** See an app's gestures and shortcuts, and make a gesture for any of those shortcuts.
-- **See what a gesture did.** A small panel says what ran, why it couldn't, or that nothing matched (GNOME, KDE, X11).
+- **See what a gesture did.** A small panel shows what ran, or why nothing did (GNOME, KDE, X11).
 - **The gesture path on KDE and X11.** See your gesture as you draw it there too.
-- **Look up what you select.** Select text and draw: a link opens, a sum is worked out, anything else is searched on the web (Look Up Selection).
+- **Look up what you select.** Select text and draw to open it as a link, work out a sum, or search the web for it (Look Up Selection).
 - **Gestures per app on Sway and Hyprland.** One shape can do something different in each app there too.
 
 ### Changed
 
-- **Rough shapes are recognized.** An L with uneven sides or a rounded corner still counts, and a V is still told from a U.
+- **Gesture recognition.** Quick, rough drawings match their gesture more often.
 - **An example in the editor.** It shows a mouse drawing a gesture, then shows yours as you draw it.
-- **Record any shortcut.** Even ones your desktop keeps for itself, like Ctrl+Alt+Up, and modifier keys on their own.
+- **Record any shortcut.** The recorder also takes shortcuts your desktop uses itself, like Ctrl+Alt+Up, and modifier keys alone.
 - **Undo deleting a gesture.** Deleting no longer asks first, and can be undone.
 - **Keyboard shortcuts.** Ctrl+W closes a window, Ctrl+Q quits, and Ctrl+? lists them all.
 
@@ -191,14 +191,14 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Shortcuts, text and pauses, in any order.** One action can press shortcuts, type text, even several lines with accented letters, and wait in between (Custom Keyboard Action).
+- **Custom Keyboard Action.** One action can press shortcuts, type text and wait, in the order you set. The text can have several lines and accented letters.
 - **Tile automatically.** Every workspace is tiled, new ones too (Tile Automatically, in Preferences).
 - **Out-of-date extension.** Gestos says when its GNOME extension is out of date, and how to update it.
 
 ### Changed
 
 - **Tiling keeps windows at their own sizes.** Windows move just enough not to overlap, and only shrink when they must.
-- **Tiling stays on.** It stays on until you turn it off, even after you log in again.
+- **Tiling stays on** until you turn it off, even after you log in again.
 - **Pick the gesture you meant, at the pointer.** The card appears where you drew, and your window keeps its focus (GNOME).
 - **Two actions in every search.** Run Command and Custom Keyboard Action show up whatever you search for.
 - **Record any key.** The shortcut recorder takes Escape, Backspace, Tab and Enter too.
