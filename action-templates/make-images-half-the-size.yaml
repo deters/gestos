@@ -11,10 +11,14 @@ steps:
   - run: |
       fail() { echo "$*" >&2; exit 1; }
       show() { echo "$*"; }
+      # /a/report.pdf → /a/report
+      without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
+      # /a/report.pdf → pdf
+      extension_of() { printf '%s\n' "$1" | sed 's/.*\.//'; }
 
       made=0
       for f in "$@"; do
-          small="${f%.*} (small).${f##*.}"
+          small="$(without_extension "$f") (small).$(extension_of "$f")"
           [ -e "$small" ] && continue
           convert "$f" -resize 50% "$small" || fail "Couldn't resize $(basename "$f")"
           made=$((made + 1))

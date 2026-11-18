@@ -11,12 +11,14 @@ steps:
   - run: |
       fail() { echo "$*" >&2; exit 1; }
       show() { echo "$*"; }
+      # /a/report.pdf → /a/report
+      without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
 
       for f in "$@"; do
           case $f in *.zip|*.ZIP) ;; *) fail "$(basename "$f") isn't a ZIP file" ;; esac
       done
 
       for f in "$@"; do
-          unzip -qn "$f" -d "${f%.*}" || fail "Couldn't extract $(basename "$f")"
+          unzip -qn "$f" -d "$(without_extension "$f")" || fail "Couldn't extract $(basename "$f")"
       done
       show "Extracted $# files"

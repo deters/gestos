@@ -11,17 +11,19 @@ steps:
   - run: |
       fail() { echo "$*" >&2; exit 1; }
       show() { echo "$*"; }
+      # /a/report.pdf → /a/report
+      without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
 
       for f in "$@"; do
           case $f in *.pdf|*.PDF) ;; *) fail "$(basename "$f") isn't a PDF" ;; esac
       done
 
       for f in "$@"; do
-          folder="${f%.*} (pages)"
+          folder="$(without_extension "$f") (pages)"
           [ -e "$folder" ] && fail "$(basename "$folder") is there already"
           mkdir "$folder" || fail "Couldn't make $(basename "$folder")"
           name=$(basename "$f")
-          pdfseparate "$f" "$folder/${name%.*} page %d.pdf" || fail "Couldn't split $(basename "$f")"
+          pdfseparate "$f" "$folder/$(without_extension "$name") page %d.pdf" || fail "Couldn't split $(basename "$f")"
       done
 
       [ $# -eq 1 ] && show "Saved $(ls "$folder" | wc -l) pages in $(basename "$folder")" || show "Split $# PDFs"

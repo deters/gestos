@@ -14,6 +14,6 @@ steps:
       done
 
       for f in "$@"; do
-          sum=$(sha256sum "$f") || fail "Couldn't read $(basename "$f")"
-          show "${sum%% *}  $(basename "$f")"
+          sum=$(sha256sum < "$f") || fail "Couldn't read $(basename "$f")"
+          show "$(printf '%s\n' "$sum" | cut -d ' ' -f 1)  $(basename "$f")"
       done

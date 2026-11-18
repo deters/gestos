@@ -11,6 +11,8 @@ steps:
   - run: |
       fail() { echo "$*" >&2; exit 1; }
       show() { echo "$*"; }
+      # /a/report.pdf → /a/report
+      without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
       size() { wc -c < "$1" | awk '{ printf ($1 >= 1048576 ? "%.1f MB" : "%d KB"), ($1 >= 1048576 ? $1 / 1048576 : $1 / 1024) }'; }
 
       for f in "$@"; do
@@ -19,7 +21,7 @@ steps:
 
       made=0
       for f in "$@"; do
-          small="${f%.*} (compressed).pdf"
+          small="$(without_extension "$f") (compressed).pdf"
           [ -e "$small" ] && continue
           gs -q -dNOPAUSE -dBATCH -dSAFER -sDEVICE=pdfwrite -dPDFSETTINGS=/ebook \
               -sOutputFile="$small" "$f" || { rm -f "$small"; fail "Couldn't compress $(basename "$f")"; }

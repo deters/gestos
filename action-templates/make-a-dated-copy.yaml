@@ -8,6 +8,10 @@ steps:
   - run: |
       fail() { echo "$*" >&2; exit 1; }
       show() { echo "$*"; }
+      # /a/report.pdf → /a/report
+      without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
+      # /a/report.pdf → pdf
+      extension_of() { printf '%s\n' "$1" | sed 's/.*\.//'; }
 
       today=$(date '+%F')
       for f in "$@"; do
@@ -16,8 +20,8 @@ steps:
           # The date goes before the extension, which a folder or a hidden file doesn't have.
           case $name in
               .*) base="$name"; ext="" ;;
-              *.tar.*) base="${name%.tar.*}"; ext=".tar.${name##*.tar.}" ;;
-              *.*) [ -d "$f" ] && { base="$name"; ext=""; } || { base="${name%.*}"; ext=".${name##*.}"; } ;;
+              *.tar.*) base=$(without_extension "$(without_extension "$name")"); ext=".tar.$(extension_of "$name")" ;;
+              *.*) [ -d "$f" ] && { base="$name"; ext=""; } || { base=$(without_extension "$name"); ext=".$(extension_of "$name")"; } ;;
               *) base="$name"; ext="" ;;
           esac
           copy="$dir/$base $today$ext"
