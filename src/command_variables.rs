@@ -69,7 +69,9 @@ pub struct CommandContext {
 pub struct Copied {
     pub clipboard: String,
     pub selection: String,
-    /// The clipboard as a list of URIs, as file managers copy files, empty if it isn't one.
+    /// The files copied, as a list of URIs, empty if none are. File managers copy them as
+    /// text/uri-list, or only in GNOME's or MATE's own form, which starts with a line saying
+    /// whether they're copied or cut.
     pub uri_list: String,
 }
 
@@ -95,12 +97,18 @@ const FILE_MANAGER_VARIABLES: [(&str, &str); 3] = [
 /// The most an environment variable can hold, with its name, `=` and the end, on Linux.
 const MAX_VARIABLE: usize = 128 * 1024;
 
-/// The URIs in a list of them, as text/uri-list has them: one per line, with comments.
+/// What file managers copy files as, the first one most offer, then the ones that some offer
+/// alone: Nemo and Thunar GNOME's own, and Caja MATE's.
+pub const COPIED_FILE_TYPES: [&str; 3] =
+    ["text/uri-list", "x-special/gnome-copied-files", "x-special/mate-copied-files"];
+
+/// The URIs in a list of them, as text/uri-list has them: one per line, with comments. GNOME's
+/// and MATE's own lists start with a line that says "copy" or "cut", which isn't one.
 pub fn uris(uri_list: &str) -> Vec<String> {
     uri_list
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter(|line| !line.is_empty() && !line.starts_with('#') && !matches!(*line, "copy" | "cut"))
         .map(str::to_string)
         .collect()
 }
@@ -180,6 +188,13 @@ mod tests {
         let uris = uris(list);
         assert_eq!(uris, ["file:///home/me/a%20b.txt", "sftp://server/x"]);
         assert_eq!(file_paths(&uris), [PathBuf::from("/home/me/a b.txt")]);
+    }
+
+    #[test]
+    fn files_copied_in_gnomes_or_mates_own_form_are_read_too() {
+        assert_eq!(uris("copy\nfile:///tmp/a\nfile:///tmp/b"), ["file:///tmp/a", "file:///tmp/b"]);
+        assert_eq!(uris("cut\nfile:///tmp/a\n"), ["file:///tmp/a"]);
+        assert!(uris("copy\n").is_empty());
     }
 
     #[test]

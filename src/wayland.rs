@@ -1,5 +1,5 @@
 use crate::chooser::ChooserEntry;
-use crate::command_variables::{CommandContext, Copied, ShellCommand};
+use crate::command_variables::{uris, CommandContext, Copied, ShellCommand};
 use crate::config::ActionType;
 use gio::prelude::*;
 use std::collections::HashMap;
@@ -1190,7 +1190,7 @@ impl WaylandContext {
         context: &CommandContext,
         after_copy: crate::key_steps::CopyWait,
     ) -> bool {
-        use crate::command_variables::{file_paths, too_big, uris, variables};
+        use crate::command_variables::{file_paths, too_big, variables};
         let cmd = shell_command.text.as_str();
         let mut command = Command::new("sh");
         command.arg("-c").arg(cmd);
@@ -1259,8 +1259,8 @@ impl WaylandContext {
             let copied = self.copied()?;
             let (arrived, missing) = match after_copy {
                 CopyWait::Nothing => (true, ""),
-                CopyWait::Anything => (!copied.clipboard.is_empty() || !copied.uri_list.is_empty(), "Nothing was copied"),
-                CopyWait::Kind(CopyKind::Files) => (!copied.uri_list.is_empty(), "No files were selected"),
+                CopyWait::Anything => (!copied.clipboard.is_empty() || !uris(&copied.uri_list).is_empty(), "Nothing was copied"),
+                CopyWait::Kind(CopyKind::Files) => (!uris(&copied.uri_list).is_empty(), "No files were selected"),
                 CopyWait::Kind(CopyKind::Text) => (!copied.clipboard.is_empty(), "No text was selected"),
             };
             if arrived {
@@ -1284,20 +1284,24 @@ impl WaylandContext {
         }
         // Text only, as a command can't be given an image as a variable.
         let is_x11 = crate::active_app::is_x11_session();
-        let (clipboard, selection, uri_list): (&[&str], &[&str], &[&str]) =
+        let (clipboard, selection): (&[&str], &[&str]) = if is_x11 {
+            (
+                &["xclip", "-o", "-selection", "clipboard", "-t", "UTF8_STRING"],
+                &["xclip", "-o", "-selection", "primary", "-t", "UTF8_STRING"],
+            )
+        } else {
+            (
+                &["wl-paste", "--no-newline", "--type", "text"],
+                &["wl-paste", "--no-newline", "--primary", "--type", "text"],
+            )
+        };
+        let files_as = |kind: &'static str| -> Vec<&'static str> {
             if is_x11 {
-                (
-                    &["xclip", "-o", "-selection", "clipboard", "-t", "UTF8_STRING"],
-                    &["xclip", "-o", "-selection", "primary", "-t", "UTF8_STRING"],
-                    &["xclip", "-o", "-selection", "clipboard", "-t", "text/uri-list"],
-                )
+                vec!["xclip", "-o", "-selection", "clipboard", "-t", kind]
             } else {
-                (
-                    &["wl-paste", "--no-newline", "--type", "text"],
-                    &["wl-paste", "--no-newline", "--primary", "--type", "text"],
-                    &["wl-paste", "--no-newline", "--type", "text/uri-list"],
-                )
-            };
+                vec!["wl-paste", "--no-newline", "--type", kind]
+            }
+        };
         // Nothing to read is an empty answer. One that never comes, as from a desktop that
         // doesn't let it read, is a failure, rather than the command waiting forever.
         let read = |command: &[&str]| -> Result<String, String> {
@@ -1314,7 +1318,15 @@ impl WaylandContext {
                 _ => Ok(String::new()),
             }
         };
-        Ok(Copied { clipboard: read(clipboard)?, selection: read(selection)?, uri_list: read(uri_list)? })
+        // In the first form the file manager offers them in.
+        let mut uri_list = String::new();
+        for kind in crate::command_variables::COPIED_FILE_TYPES {
+            uri_list = read(&files_as(kind))?;
+            if !uris(&uri_list).is_empty() {
+                break;
+            }
+        }
+        Ok(Copied { clipboard: read(clipboard)?, selection: read(selection)?, uri_list })
     }
 
     /// Clears what's copied, before a copy made for a command, which can then tell when the copy

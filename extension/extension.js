@@ -109,6 +109,9 @@ function answerGestosOnly(invocation, answer) {
         });
 }
 
+// What file managers copy files as, as the daemon reads them.
+const COPIED_FILE_TYPES = ['text/uri-list', 'x-special/gnome-copied-files', 'x-special/mate-copied-files'];
+
 /**
  * Answers with what's copied and selected.
  *
@@ -119,9 +122,13 @@ function answerCopied(invocation) {
     const clipboard = St.Clipboard.get_default();
     const text = type => new Promise(resolve =>
         clipboard.get_text(type, (_clipboard, value) => resolve(value ?? '')));
-    const uriList = new Promise(resolve =>
-        clipboard.get_content(St.ClipboardType.CLIPBOARD, 'text/uri-list', (_clipboard, bytes) =>
+    const content = type => new Promise(resolve =>
+        clipboard.get_content(St.ClipboardType.CLIPBOARD, type, (_clipboard, bytes) =>
             resolve(bytes?.get_size() ? new TextDecoder().decode(bytes.toArray()) : '')));
+    // In the first form the file manager offers them in: most offer a list of URIs, Nemo and
+    // Thunar may only offer GNOME's own form, and Caja MATE's.
+    const uriList = COPIED_FILE_TYPES.reduce((found, type) =>
+        found.then(list => list || content(type)), Promise.resolve(''));
     Promise.all([text(St.ClipboardType.CLIPBOARD), text(St.ClipboardType.PRIMARY), uriList])
         .then(values => invocation.return_value(new GLib.Variant('(sss)', values)))
         .catch(e => invocation.return_error_literal(Gio.DBusError, Gio.DBusError.FAILED, `${e}`));
