@@ -1870,6 +1870,7 @@ mod tests {
             middle_button_windows: false,
             show_path: true,
             hide_gestures: false,
+            disabled_templates: Vec::new(),
         };
         let (signals, received) = std::sync::mpsc::sync_channel(16);
         let (mut wake_reader, _wake_writer) = UnixStream::pair().unwrap();
@@ -1939,6 +1940,7 @@ mod tests {
             middle_button_windows: false,
             show_path: true,
             hide_gestures: false,
+            disabled_templates: Vec::new(),
         };
         let names = |modifiers: &str| -> Vec<String> {
             gesture_templates(&config, Modifiers::parse(modifiers), None)
@@ -1964,6 +1966,7 @@ mod tests {
             middle_button_windows: false,
             show_path: true,
             hide_gestures: false,
+            disabled_templates: Vec::new(),
         };
         let names = |app: Option<&str>| -> Vec<String> {
             gesture_templates(&config, Modifiers::default(), app)
@@ -1996,6 +1999,7 @@ mod tests {
             middle_button_windows: false,
             show_path: true,
             hide_gestures: false,
+            disabled_templates: Vec::new(),
         };
         assert!(matches_app_gesture(&line(10.0), &config, Modifiers::default()));
         assert!(!matches_app_gesture(&line(0.0), &config, Modifiers::default()));

@@ -1229,7 +1229,7 @@ fn clamped(child: &impl IsA<gtk::Widget>) -> adw::Clamp {
 
 /// The actions to make gestures for. Reading the desktop's action lists can be slow, so it doesn't
 /// happen on the UI thread.
-fn load_action_options(state: &Rc<RefCell<AppState>>) {
+pub fn load_action_options(state: &Rc<RefCell<AppState>>) {
     let load_options = gtk::gio::spawn_blocking(|| {
         let mut options = get_static_action_options();
         options.extend(fetch_gnome_action_options());
@@ -1246,8 +1246,14 @@ fn load_action_options(state: &Rc<RefCell<AppState>>) {
     glib::spawn_future_local(async move {
         if let Ok((options, app_templates)) = load_options.await {
             let mut state = state_options.borrow_mut();
-            state.action_options = options;
-            state.app_templates = app_templates;
+            // Templates turned off in Preferences aren't offered.
+            let disabled = state.config.disabled_templates.clone();
+            let off = |id: &str| disabled.iter().any(|disabled| disabled == id);
+            state.action_options = options
+                .into_iter()
+                .filter(|option| !matches!(&option.action_type, gestos::config::ActionType::Template(id) if off(id)))
+                .collect();
+            state.app_templates = app_templates.into_iter().filter(|template| !off(&template.id)).collect();
             drop(state);
             refresh_gesture_list(&state_options, None);
         }

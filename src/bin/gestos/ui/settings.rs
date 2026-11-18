@@ -319,6 +319,215 @@ fn append_extension_row(
     list.add(&status_row);
 }
 
+/// The actions made of templates, each with a switch to offer it or not, and a way to save it to
+/// a file. Imported ones are the user's own, and can be removed; one with the ID of an action that
+/// came with Gestos takes its place.
+fn actions_page(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window) -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::builder().title("Actions").icon_name("system-run-symbolic").build();
+    let group = adw::PreferencesGroup::builder().title("Actions").build();
+    let import = gtk::Button::with_mnemonic("_Import…");
+    import.set_valign(gtk::Align::Center);
+    group.set_header_suffix(Some(&import));
+    page.add(&group);
+    let rows: Rc<RefCell<Vec<adw::ActionRow>>> = Rc::default();
+    let fill: Rc<dyn Fn()> = {
+        let state_rc = Rc::downgrade(state_rc);
+        let group = group.clone();
+        let dialog = dialog.clone();
+        let rows = Rc::clone(&rows);
+        // Filled again after each import or removal, as the list changes.
+        // Weak, as the rows it makes hold it, and the import button keeps it.
+        let fill_cell: Rc<RefCell<std::rc::Weak<dyn Fn()>>> = Rc::new(RefCell::new(std::rc::Weak::<Box<dyn Fn()>>::new()));
+        let fill_again = Rc::clone(&fill_cell);
+        let fill: Rc<dyn Fn()> = Rc::new(move || {
+            let Some(state_rc) = state_rc.upgrade() else { return };
+            for row in rows.borrow_mut().drain(..) {
+                group.remove(&row);
+            }
+            let refill = fill_again.borrow().upgrade();
+            for listed in gestos::action_templates::list() {
+                let row = action_template_row(&state_rc, &dialog, &listed, refill.clone());
+                group.add(&row);
+                rows.borrow_mut().push(row);
+            }
+        });
+        *fill_cell.borrow_mut() = Rc::downgrade(&fill);
+        fill
+    };
+    fill();
+    let state_import = Rc::downgrade(state_rc);
+    let dialog_import = dialog.clone();
+    import.connect_clicked(move |_| {
+        if let Some(state_rc) = state_import.upgrade() {
+            import_action_template(&state_rc, &dialog_import, Rc::clone(&fill));
+        }
+    });
+    page
+}
+
+/// An action's row: its name and description, a button to export it, one to remove it if it's
+/// the user's own, and a switch to offer it or not.
+fn action_template_row(
+    state_rc: &Rc<RefCell<AppState>>,
+    dialog: &gtk::Window,
+    listed: &gestos::action_templates::Listed,
+    refill: Option<Rc<dyn Fn()>>,
+) -> adw::ActionRow {
+    let template = &listed.template;
+    let row = adw::ActionRow::builder()
+        .title(glib::markup_escape_text(&template.name).as_str())
+        .subtitle(glib::markup_escape_text(&template.description).as_str())
+        .build();
+    if let Some(icon) = &template.icon {
+        row.add_prefix(&gtk::Image::from_icon_name(icon));
+    }
+
+    let export = gtk::Button::from_icon_name("document-save-symbolic");
+    export.set_tooltip_text(Some("Export…"));
+    export.update_property(&[gtk::accessible::Property::Label("Export…")]);
+    export.add_css_class("flat");
+    export.set_valign(gtk::Align::Center);
+    let from = listed.path.clone();
+    let id = template.id.clone();
+    let dialog_export = dialog.clone();
+    export.connect_clicked(move |_| {
+        let chooser = gtk::FileChooserNative::new(
+            Some("Export Action"),
+            Some(&dialog_export),
+            gtk::FileChooserAction::Save,
+            Some("_Export"),
+            Some("_Cancel"),
+        );
+        chooser.set_current_name(&format!("{id}.yaml"));
+        let from = from.clone();
+        let parent = dialog_export.clone();
+        chooser.connect_response(move |chooser, response| {
+            if response == gtk::ResponseType::Accept {
+                if let Some(to) = chooser.file().and_then(|file| file.path()) {
+                    if let Err(e) = std::fs::copy(&from, &to) {
+                        show_error_dialog(&parent, &format!("Couldn't export the action: {e}"));
+                    }
+                }
+            }
+            chooser.destroy();
+        });
+        chooser.show();
+    });
+    row.add_suffix(&export);
+
+    if listed.own {
+        let remove = gtk::Button::from_icon_name("user-trash-symbolic");
+        remove.set_tooltip_text(Some("Remove"));
+        remove.update_property(&[gtk::accessible::Property::Label("Remove")]);
+        remove.add_css_class("flat");
+        remove.set_valign(gtk::Align::Center);
+        let (id, name, replaces) = (template.id.clone(), template.name.clone(), listed.replaces);
+        let state_remove = Rc::downgrade(state_rc);
+        let dialog_remove = dialog.clone();
+        remove.connect_clicked(move |_| {
+            let message = if replaces {
+                "The action that came with Gestos is offered again in its place."
+            } else {
+                "Gestures made with it stop working."
+            };
+            let (id, state_remove, parent, refill) =
+                (id.clone(), state_remove.clone(), dialog_remove.clone(), refill.clone());
+            show_confirm_dialog(&dialog_remove, &format!("Remove \u{201c}{name}\u{201d}?"), message, "Remove", true, move || {
+                if let Err(e) = gestos::action_templates::remove(&id) {
+                    show_error_dialog(&parent, &format!("Couldn't remove the action: {e}"));
+                    return;
+                }
+                if let Some(state_rc) = state_remove.upgrade() {
+                    crate::ui::main_window::load_action_options(&state_rc);
+                }
+                if let Some(refill) = &refill {
+                    refill();
+                }
+            });
+        });
+        row.add_suffix(&remove);
+    }
+
+    let switch = settings_switch(&template.name);
+    switch.set_active(!state_rc.borrow().config.disabled_templates.contains(&template.id));
+    let id = template.id.clone();
+    let state_switch = Rc::downgrade(state_rc);
+    switch.connect_state_set(move |_, enabled| {
+        let Some(state_rc) = state_switch.upgrade() else { return glib::Propagation::Proceed };
+        {
+            let mut state = state_rc.borrow_mut();
+            let before = state.config.disabled_templates.clone();
+            state.config.disabled_templates.retain(|disabled| *disabled != id);
+            if !enabled {
+                state.config.disabled_templates.push(id.clone());
+            }
+            if state.config.save_to_file().is_err() {
+                state.config.disabled_templates = before;
+                return glib::Propagation::Stop;
+            }
+        }
+        crate::ui::main_window::load_action_options(&state_rc);
+        glib::Propagation::Proceed
+    });
+    row.add_suffix(&switch);
+    row.set_activatable_widget(Some(&switch));
+    row
+}
+
+/// Asks for a template's file, and makes it the user's own. One of their own with the same ID is
+/// only replaced once they say so.
+fn import_action_template(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window, refill: Rc<dyn Fn()>) {
+    let chooser = gtk::FileChooserNative::new(
+        Some("Import Action"),
+        Some(dialog),
+        gtk::FileChooserAction::Open,
+        Some("_Import"),
+        Some("_Cancel"),
+    );
+    let filter = gtk::FileFilter::new();
+    filter.set_name(Some("Actions"));
+    filter.add_pattern("*.yaml");
+    chooser.add_filter(&filter);
+    let state_import = Rc::downgrade(state_rc);
+    let parent = dialog.clone();
+    chooser.connect_response(move |chooser, response| {
+        let path = (response == gtk::ResponseType::Accept).then(|| chooser.file().and_then(|file| file.path())).flatten();
+        chooser.destroy();
+        let Some(path) = path else { return };
+        let template = match gestos::action_templates::read_to_import(&path) {
+            Ok(template) => template,
+            Err(why) => {
+                show_error_dialog(&parent, &format!("Couldn't import the action. {why}."));
+                return;
+            }
+        };
+        let (state_import, parent_import, refill) = (state_import.clone(), parent.clone(), Rc::clone(&refill));
+        let import = move || {
+            if let Err(why) = gestos::action_templates::import(&path) {
+                show_error_dialog(&parent_import, &format!("Couldn't import the action. {why}."));
+                return;
+            }
+            if let Some(state_rc) = state_import.upgrade() {
+                crate::ui::main_window::load_action_options(&state_rc);
+            }
+            refill();
+        };
+        if gestos::action_templates::is_own(&template.id) {
+            show_confirm_dialog(
+                &parent,
+                &format!("Replace \u{201c}{}\u{201d}?", template.name),
+                "An action you imported before has the same file name. It's replaced by this one.",
+                "Replace",
+                true,
+                import,
+            );
+        } else {
+            import();
+        }
+    });
+    chooser.show();
+}
+
 pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     let parent = state_rc.borrow().window.clone();
     let preferences = adw::PreferencesWindow::builder()
@@ -330,8 +539,12 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
         .build();
     let dialog: gtk::Window = preferences.clone().upcast();
     crate::ui::components::close_with_ctrl_w(&dialog);
-    let page = adw::PreferencesPage::new();
+    let page = adw::PreferencesPage::builder()
+        .title("General")
+        .icon_name("preferences-system-symbolic")
+        .build();
     preferences.add(&page);
+    preferences.add(&actions_page(state_rc, &dialog));
 
     let on_gnome = state_rc.borrow().extension_status != ExtensionStatus::Unavailable;
     // The extension keeps its settings with it, so they can only be bound while it's installed.
