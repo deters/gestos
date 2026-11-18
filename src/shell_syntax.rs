@@ -65,21 +65,52 @@ fn variable_end(chars: &[char], start: usize) -> Option<usize> {
     Some(start + 1 + length)
 }
 
+/// A command inside another, as `$(…)` or `` `…` `` are, from its opening to after its close,
+/// and how deep it is: 1 inside the command, 2 inside one of those, and so on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Inner {
+    pub start: usize,
+    pub end: usize,
+    pub depth: usize,
+}
+
 /// The parts of a command worth coloring, in order. Quoted text is cut around what's colored
 /// inside it, so a variable or a command in double quotes is shown as itself.
 pub fn spans(command: &str) -> Vec<Span> {
+    parse(command).0
+}
+
+/// The commands inside a command, each after the ones inside it.
+pub fn inner_commands(command: &str) -> Vec<Inner> {
+    parse(command).1
+}
+
+fn parse(command: &str) -> (Vec<Span>, Vec<Inner>) {
     let chars: Vec<char> = command.chars().collect();
-    let mut parser = Parser { chars: &chars, spans: Vec::new() };
+    let mut parser = Parser { chars: &chars, spans: Vec::new(), inner: Vec::new(), depth: 0 };
     parser.commands(0, None);
-    parser.spans
+    (parser.spans, parser.inner)
 }
 
 struct Parser<'a> {
     chars: &'a [char],
     spans: Vec<Span>,
+    inner: Vec<Inner>,
+    depth: usize,
 }
 
 impl Parser<'_> {
+    /// Reads a command inside another, from `start`, its opening `$(` or `` ` `` that's `opening`
+    /// long, to the `close` that ends it. Where it ended.
+    fn inner_command(&mut self, start: usize, opening: usize, close: char) -> usize {
+        self.push(start, start + opening, Kind::Operator);
+        self.depth += 1;
+        let end = self.commands(start + opening, Some(close));
+        self.inner.push(Inner { start, end: end.min(self.chars.len()), depth: self.depth });
+        self.depth -= 1;
+        end
+    }
+
     fn push(&mut self, start: usize, end: usize, kind: Kind) {
         let end = end.min(self.chars.len());
         if end > start {
@@ -131,8 +162,7 @@ impl Parser<'_> {
                     at_command = false;
                 }
                 '$' if chars.get(i + 1) == Some(&'(') => {
-                    self.push(i, i + 2, Kind::Operator);
-                    i = self.commands(i + 2, Some(')'));
+                    i = self.inner_command(i, 2, ')');
                     at_command = false;
                 }
                 '$' => match variable_end(chars, i) {
@@ -144,8 +174,7 @@ impl Parser<'_> {
                     None => i += 1,
                 },
                 '`' => {
-                    self.push(i, i + 1, Kind::Operator);
-                    i = self.commands(i + 1, Some('`'));
+                    i = self.inner_command(i, 1, '`');
                     at_command = false;
                 }
                 '(' | ')' => {
@@ -207,14 +236,12 @@ impl Parser<'_> {
                 '\\' => i += 2,
                 '$' if chars.get(i + 1) == Some(&'(') => {
                     self.push(text, i, Kind::Quoted);
-                    self.push(i, i + 2, Kind::Operator);
-                    i = self.commands(i + 2, Some(')'));
+                    i = self.inner_command(i, 2, ')');
                     text = i;
                 }
                 '`' => {
                     self.push(text, i, Kind::Quoted);
-                    self.push(i, i + 1, Kind::Operator);
-                    i = self.commands(i + 1, Some('`'));
+                    i = self.inner_command(i, 1, '`');
                     text = i;
                 }
                 '$' => match variable_end(chars, i) {
@@ -405,6 +432,21 @@ mod tests {
         ]);
         assert_eq!(parts("echo ${open"), [part("${open", Kind::Variable)]);
         assert!(parts("echo \\").is_empty());
+    }
+
+    #[test]
+    fn inner_commands_say_how_deep_they_are() {
+        let command = "echo \"$(ls $(pwd))\" `date`";
+        let chars: Vec<char> = command.chars().collect();
+        let found: Vec<(String, usize)> = inner_commands(command)
+            .into_iter()
+            .map(|inner| (chars[inner.start..inner.end].iter().collect(), inner.depth))
+            .collect();
+        assert_eq!(
+            found,
+            [("$(pwd)".to_string(), 2), ("$(ls $(pwd))".to_string(), 1), ("`date`".to_string(), 1)]
+        );
+        assert_eq!(inner_commands("echo $(unclosed")[0], Inner { start: 5, end: 15, depth: 1 });
     }
 
     #[test]

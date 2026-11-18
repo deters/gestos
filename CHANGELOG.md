@@ -24,7 +24,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A new gesture is now drawn first, in a window of its own that says which mouse button draws gestures. The editor opens once the gesture is drawn. Press Esc in that window to cancel.
 - To draw a gesture again, click "Redraw" on its drawing in the editor. Press Esc in the window that opens to keep the old drawing. Clicking the drawing no longer clears it.
 - Gestures now work while the gesture editor is open. They stop only while you draw a gesture.
-- Commands in "Run Command in Shell" and in the "Command" steps of an "Advanced Action" are now edited in a window of their own, with room for a script of several lines and the option "Use Variables". Open it with the edit button on the command's row. In that window, Enter starts a new line and Ctrl+Enter sets the command. Keywords, quoted text, variables, comments and operators are shown in colors, and the command's box grows with the window.
+- Commands in "Run Command in Shell" and in the "Command" steps of an "Advanced Action" are now edited in a window of their own, with room for a script of several lines and the option "Use Variables". Open it with the edit button on the command's row. In that window, Enter starts a new line and Ctrl+Enter sets the command. Keywords, quoted text, variables, comments and operators are shown in colors. A command inside the command, like `$(date)`, has a tinted background. The command's box grows with the window.
 - A new "Command" step is now added only after you click "Set" in that window.
 - When a command fails, its notification now shows the last lines of the command's error message, in place of its exit code.
 

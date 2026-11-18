@@ -4,7 +4,7 @@
 
 use adw::prelude::*;
 use gestos::command_variables::ShellCommand;
-use gestos::shell_syntax::{spans, Kind};
+use gestos::shell_syntax::{inner_commands, spans, Kind};
 use gtk4 as gtk;
 use std::rc::Rc;
 
@@ -136,9 +136,28 @@ fn color_of(kind: Kind, dark: bool) -> &'static str {
     }
 }
 
+/// The background of a command inside another, a little deeper for one inside that, so its own
+/// colors still show on it.
+fn inner_background(depth: usize, dark: bool) -> &'static str {
+    match (depth, dark) {
+        (1, false) => "rgba(53, 132, 228, 0.08)",
+        (_, false) => "rgba(53, 132, 228, 0.16)",
+        (1, true) => "rgba(153, 193, 241, 0.10)",
+        (_, true) => "rgba(153, 193, 241, 0.20)",
+    }
+}
+
+/// The deepest a command inside others gets a background of its own for. Deeper ones share it.
+const INNER_DEPTHS: usize = 2;
+
 /// Colors a command's keywords, quoted text, variables, comments and operators as it's written,
-/// in colors for the style in use, light or dark, which change with it while `window` is open.
+/// and puts a background behind the commands inside it, in colors for the style in use, light or
+/// dark, which change with it while `window` is open.
 fn highlight_shell(buffer: &gtk::TextBuffer, window: &gtk::Window) {
+    // Made from the shallowest, so a deeper one's background is shown over it.
+    let inner: Vec<gtk::TextTag> = (1..=INNER_DEPTHS)
+        .map(|_| buffer.create_tag(None, &[]).expect("a tag without a name"))
+        .collect();
     let kinds = [Kind::Quoted, Kind::Keyword, Kind::Operator, Kind::Comment, Kind::Variable];
     let tags: Vec<(Kind, gtk::TextTag)> = kinds
         .into_iter()
@@ -147,7 +166,11 @@ fn highlight_shell(buffer: &gtk::TextBuffer, window: &gtk::Window) {
     let style = adw::StyleManager::default();
     let color = {
         let tags = tags.clone();
+        let inner = inner.clone();
         move |style: &adw::StyleManager| {
+            for (depth, tag) in inner.iter().enumerate() {
+                tag.set_background(Some(inner_background(depth + 1, style.is_dark())));
+            }
             for (kind, tag) in &tags {
                 tag.set_foreground(Some(color_of(*kind, style.is_dark())));
                 if *kind == Kind::Comment {
@@ -166,10 +189,17 @@ fn highlight_shell(buffer: &gtk::TextBuffer, window: &gtk::Window) {
 
     let paint = move |buffer: &gtk::TextBuffer| {
         let (start, end) = buffer.bounds();
-        for (_, tag) in &tags {
+        for tag in tags.iter().map(|(_, tag)| tag).chain(&inner) {
             buffer.remove_tag(tag, &start, &end);
         }
-        for span in spans(&buffer.text(&start, &end, false)) {
+        let text = buffer.text(&start, &end, false);
+        for command in inner_commands(&text) {
+            let tag = &inner[command.depth.min(INNER_DEPTHS) - 1];
+            let from = buffer.iter_at_offset(command.start as i32);
+            let to = buffer.iter_at_offset(command.end as i32);
+            buffer.apply_tag(tag, &from, &to);
+        }
+        for span in spans(&text) {
             let Some((_, tag)) = tags.iter().find(|(kind, _)| *kind == span.kind) else { continue };
             let from = buffer.iter_at_offset(span.start as i32);
             let to = buffer.iter_at_offset(span.end as i32);
