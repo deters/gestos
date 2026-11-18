@@ -9,14 +9,18 @@ needs:
 steps:
   - copy: text
   - run: |
-      fail() { echo "$*" >&2; exit 1; }
-      show() { echo "$*"; }
+      #!/bin/sh
+      fail() { printf '%s\n' "$*" >&2; exit 1; }
+      show() { printf '%s\n' "$*"; }
 
-      [ -n "$GESTOS_CLIPBOARD" ] || fail "Select some text first"
+      input_text="$GESTOS_CLIPBOARD"
+      [ -n "$input_text" ] || fail "Select some text first"
 
-      image="${XDG_RUNTIME_DIR:-/tmp}/gestos-qr-code.png"
+      runtime_folder="${XDG_RUNTIME_DIR:-/tmp}"
+      output_image="$runtime_folder/gestos-qr-code.png"
       # A QR code holds up to 2953 bytes, at the lowest error correction qrencode uses by default.
-      [ "$(printf %s "$GESTOS_CLIPBOARD" | wc -c)" -le 2953 ] || fail "The selected text is too long for a QR code"
-      printf %s "$GESTOS_CLIPBOARD" | qrencode -s 12 -m 2 -o "$image" || fail "Couldn't make the QR code"
+      bytes=$(printf %s "$input_text" | wc -c)
+      [ "$bytes" -le 2953 ] || fail "The selected text is too long for a QR code"
+      printf %s "$input_text" | qrencode -s 12 -m 2 -o "$output_image" || fail "Couldn't make the QR code"
       # A viewer that stays open mustn't keep what Gestos reads from this open.
-      xdg-open "$image" >/dev/null 2>&1 || fail "No app is set to open PNG images"
+      xdg-open "$output_image" >/dev/null 2>&1 || fail "No app is set to open PNG images"

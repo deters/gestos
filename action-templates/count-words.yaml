@@ -6,10 +6,17 @@ icon: format-text-plaintext-symbolic
 steps:
   - copy: text
   - run: |
-      fail() { echo "$*" >&2; exit 1; }
-      show() { echo "$*"; }
+      #!/bin/sh
+      fail() { printf '%s\n' "$*" >&2; exit 1; }
+      show() { printf '%s\n' "$*"; }
 
-      [ -n "$GESTOS_CLIPBOARD" ] || fail "Select some text first"
+      input_text="$GESTOS_CLIPBOARD"
+      [ -n "$input_text" ] || fail "Select some text first"
 
-      words=$(echo "$GESTOS_CLIPBOARD" | wc -w)
-      [ "$words" -eq 1 ] && show "1 word" || show "$words words"
+      words=$(printf '%s\n' "$input_text" | wc -w)
+      if [ "$words" -eq 1 ]; then
+          output_result="1 word"
+      else
+          output_result="$words words"
+      fi
+      show "$output_result"

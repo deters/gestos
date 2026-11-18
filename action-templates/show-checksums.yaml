@@ -7,14 +7,19 @@ apps: [FileManager]
 steps:
   - copy: files
   - run: |
-      fail() { echo "$*" >&2; exit 1; }
-      show() { echo "$*"; }
+      #!/bin/sh
+      fail() { printf '%s\n' "$*" >&2; exit 1; }
+      show() { printf '%s\n' "$*"; }
 
-      for f in "$@"; do
-          [ -f "$f" ] || fail "$(basename "$f") is a folder, and only files have a checksum"
+      for input_file in "$@"; do
+          name=$(basename "$input_file")
+          [ -f "$input_file" ] || fail "$name is a folder, and only files have a checksum"
       done
 
-      for f in "$@"; do
-          sum=$(sha256sum < "$f") || fail "Couldn't read $(basename "$f")"
-          show "$(printf '%s\n' "$sum" | cut -d ' ' -f 1)  $(basename "$f")"
+      for input_file in "$@"; do
+          name=$(basename "$input_file")
+          # The checksum, then a - for what it read.
+          checksum_line=$(sha256sum < "$input_file") || fail "Couldn't read $name"
+          checksum=$(printf '%s\n' "$checksum_line" | cut -d ' ' -f 1)
+          show "$checksum  $name"
       done

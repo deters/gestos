@@ -9,13 +9,17 @@ needs:
 steps:
   - copy: text
   - run: |
-      fail() { echo "$*" >&2; exit 1; }
-      show() { echo "$*"; }
+      #!/bin/sh
+      fail() { printf '%s\n' "$*" >&2; exit 1; }
+      show() { printf '%s\n' "$*"; }
 
-      [ -n "$GESTOS_CLIPBOARD" ] || fail "Select some text first"
-      others=$(echo "$GESTOS_CLIPBOARD" | tr -d '0-9.+*/%^() \n-')
+      input_text="$GESTOS_CLIPBOARD"
+      [ -n "$input_text" ] || fail "Select some text first"
+
+      # What's left once digits, operators, brackets and spaces are taken out.
+      others=$(printf '%s\n' "$input_text" | tr -d '0-9.+*/%^() \n-')
       [ -z "$others" ] || fail "The selected text isn't a calculation"
 
-      result=$(echo "$GESTOS_CLIPBOARD" | bc -l 2>/dev/null)
-      [ -n "$result" ] || fail "The selected text isn't a calculation"
-      show "$GESTOS_CLIPBOARD = $result"
+      output_result=$(printf '%s\n' "$input_text" | bc -l 2>/dev/null)
+      [ -n "$output_result" ] || fail "The selected text isn't a calculation"
+      show "$input_text = $output_result"

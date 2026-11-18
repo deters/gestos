@@ -10,16 +10,20 @@ needs:
 steps:
   - copy: files
   - run: |
-      fail() { echo "$*" >&2; exit 1; }
-      show() { echo "$*"; }
-      # /a/report.pdf → /a/report
-      without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
+      #!/bin/sh
+      fail() { printf '%s\n' "$*" >&2; exit 1; }
+      show() { printf '%s\n' "$*"; }
 
-      for f in "$@"; do
-          case $f in *.zip|*.ZIP) ;; *) fail "$(basename "$f") isn't a ZIP file" ;; esac
+      for input_zip in "$@"; do
+          name=$(basename "$input_zip")
+          case $name in *.zip|*.ZIP) ;; *) fail "$name isn't a ZIP file" ;; esac
       done
 
-      for f in "$@"; do
-          unzip -qn "$f" -d "$(without_extension "$f")" || fail "Couldn't extract $(basename "$f")"
+      for input_zip in "$@"; do
+          folder=$(dirname "$input_zip")
+          name=$(basename "$input_zip")
+          without_extension="${name%.*}"
+          output_folder="$folder/$without_extension"
+          unzip -qn "$input_zip" -d "$output_folder" || fail "Couldn't extract $name"
       done
       show "Extracted $# files"

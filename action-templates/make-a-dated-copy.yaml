@@ -7,28 +7,45 @@ apps: [FileManager]
 steps:
   - copy: files
   - run: |
-      fail() { echo "$*" >&2; exit 1; }
-      show() { echo "$*"; }
-      # /a/report.pdf → /a/report
-      without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
-      # /a/report.pdf → pdf
-      extension_of() { printf '%s\n' "$1" | sed 's/.*\.//'; }
+      #!/bin/sh
+      fail() { printf '%s\n' "$*" >&2; exit 1; }
+      show() { printf '%s\n' "$*"; }
 
       today=$(date '+%F')
-      for f in "$@"; do
-          dir=$(dirname "$f")
-          name=$(basename "$f")
-          # The date goes before the extension, which a folder or a hidden file doesn't have.
-          case $name in
-              .*) base="$name"; ext="" ;;
-              *.tar.*) base=$(without_extension "$(without_extension "$name")"); ext=".tar.$(extension_of "$name")" ;;
-              *.*) [ -d "$f" ] && { base="$name"; ext=""; } || { base=$(without_extension "$name"); ext=".$(extension_of "$name")"; } ;;
-              *) base="$name"; ext="" ;;
-          esac
-          copy="$dir/$base $today$ext"
-          [ -e "$copy" ] && copy="$dir/$base $today $(date '+%H-%M-%S')$ext"
-          [ -e "$copy" ] && fail "$(basename "$copy") is there already"
-          cp -Rp "$f" "$copy" || fail "Couldn't copy $(basename "$f")"
+      for input_file in "$@"; do
+          folder=$(dirname "$input_file")
+          name=$(basename "$input_file")
+          without_extension="${name%.*}"
+          extension="${name##*.}"
+          without_tar_extension="${without_extension%.tar}"
+          # Empty for a hidden file, whose name starts with a dot.
+          before_first_dot="${name%%.*}"
+
+          # The date goes before the extension, which a folder, a hidden file or a name without a
+          # dot doesn't have.
+          if [ -d "$input_file" ] || [ -z "$before_first_dot" ] || [ "$name" = "$without_extension" ]; then
+              before_date="$name"
+              after_date=""
+          elif [ "$without_tar_extension" != "$without_extension" ]; then
+              before_date="$without_tar_extension"
+              after_date=".tar.$extension"
+          else
+              before_date="$without_extension"
+              after_date=".$extension"
+          fi
+
+          output_file="$folder/$before_date $today$after_date"
+          if [ -e "$output_file" ]; then
+              now=$(date '+%H-%M-%S')
+              output_file="$folder/$before_date $today $now$after_date"
+          fi
+          output_name=$(basename "$output_file")
+          [ -e "$output_file" ] && fail "$output_name is there already"
+          cp -Rp "$input_file" "$output_file" || fail "Couldn't copy $name"
       done
 
-      [ $# -eq 1 ] && show "Saved $(basename "$copy")" || show "Made $# dated copies"
+      if [ $# -eq 1 ]; then
+          show "Saved $output_name"
+      else
+          show "Made $# dated copies"
+      fi

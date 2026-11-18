@@ -10,16 +10,20 @@ needs:
 steps:
   - copy: files
   - run: |
-      fail() { echo "$*" >&2; exit 1; }
-      show() { echo "$*"; }
-      # /a/report.pdf → /a/report
-      without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
+      #!/bin/sh
+      fail() { printf '%s\n' "$*" >&2; exit 1; }
+      show() { printf '%s\n' "$*"; }
 
       converted=0
-      for f in "$@"; do
-          case $f in *.pdf|*.PDF) continue ;; esac
-          libreoffice --headless --convert-to pdf --outdir "$(dirname "$f")" "$f" >/dev/null
-          [ -e "$(without_extension "$f").pdf" ] || fail "Couldn't convert $(basename "$f")"
+      for input_document in "$@"; do
+          folder=$(dirname "$input_document")
+          name=$(basename "$input_document")
+          without_extension="${name%.*}"
+          case $name in *.pdf|*.PDF) continue ;; esac
+
+          output_pdf="$folder/$without_extension.pdf"
+          libreoffice --headless --convert-to pdf --outdir "$folder" "$input_document" >/dev/null
+          [ -e "$output_pdf" ] || fail "Couldn't convert $name"
           converted=$((converted + 1))
       done
 

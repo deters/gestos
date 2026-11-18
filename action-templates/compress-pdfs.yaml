@@ -10,31 +10,42 @@ needs:
 steps:
   - copy: files
   - run: |
-      fail() { echo "$*" >&2; exit 1; }
-      show() { echo "$*"; }
-      # /a/report.pdf → /a/report
-      without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
-      size() { wc -c < "$1" | awk '{ printf ($1 >= 1048576 ? "%.1f MB" : "%d KB"), ($1 >= 1048576 ? $1 / 1048576 : $1 / 1024) }'; }
-      # Ghostscript reads a % in the name it saves to as a page number, and %% as a %.
-      escape_percent() { printf '%s\n' "$1" | sed 's/%/%%/g'; }
+      #!/bin/sh
+      fail() { printf '%s\n' "$*" >&2; exit 1; }
+      show() { printf '%s\n' "$*"; }
+      # 52000 → 50 KB, 2097152 → 2.0 MB
+      readable_size() { awk -v bytes="$1" 'BEGIN { if (bytes >= 1048576) printf "%.1f MB", bytes / 1048576; else printf "%d KB", bytes / 1024 }'; }
 
-      for f in "$@"; do
-          case $f in *.pdf|*.PDF) ;; *) fail "$(basename "$f") isn't a PDF" ;; esac
+      for input_pdf in "$@"; do
+          name=$(basename "$input_pdf")
+          case $name in *.pdf|*.PDF) ;; *) fail "$name isn't a PDF" ;; esac
       done
 
-      made=0
-      for f in "$@"; do
-          small="$(without_extension "$f") (compressed).pdf"
-          [ -e "$small" ] && continue
+      compressed=0
+      for input_pdf in "$@"; do
+          folder=$(dirname "$input_pdf")
+          name=$(basename "$input_pdf")
+          without_extension="${name%.*}"
+          output_pdf="$folder/$without_extension (compressed).pdf"
+          [ -e "$output_pdf" ] && continue
+
+          # Ghostscript reads a % in the name it saves to as a page number, and %% as a %.
+          output_for_ghostscript=$(printf '%s\n' "$output_pdf" | sed 's/%/%%/g')
           gs -q -dNOPAUSE -dBATCH -dSAFER -sDEVICE=pdfwrite -dPDFSETTINGS=/ebook \
-              -sOutputFile="$(escape_percent "$small")" "$f" || { rm -f "$small"; fail "Couldn't compress $(basename "$f")"; }
-          if [ "$(wc -c < "$small")" -ge "$(wc -c < "$f")" ]; then
-              rm -f "$small"
+              -sOutputFile="$output_for_ghostscript" "$input_pdf" || { rm -f "$output_pdf"; fail "Couldn't compress $name"; }
+
+          original_size=$(wc -c < "$input_pdf")
+          compressed_size=$(wc -c < "$output_pdf")
+          if [ "$compressed_size" -ge "$original_size" ]; then
+              rm -f "$output_pdf"
               continue
           fi
-          made=$((made + 1))
-          last="$(basename "$f"): $(size "$f") → $(size "$small")"
+          compressed=$((compressed + 1))
+          original_readable=$(readable_size "$original_size")
+          compressed_readable=$(readable_size "$compressed_size")
+          output_result="$name: $original_readable → $compressed_readable"
       done
 
-      [ "$made" -gt 0 ] || fail "The selected PDFs can't be made smaller"
-      [ "$made" -eq 1 ] && show "$last" || show "Compressed $made PDFs"
+      [ "$compressed" -gt 0 ] || fail "The selected PDFs can't be made smaller"
+      [ "$compressed" -eq 1 ] || output_result="Compressed $compressed PDFs"
+      show "$output_result"

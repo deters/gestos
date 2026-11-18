@@ -10,17 +10,20 @@ needs:
 steps:
   - copy: files
   - run: |
-      fail() { echo "$*" >&2; exit 1; }
-      show() { echo "$*"; }
-      # /a/report.pdf → /a/report
-      without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
+      #!/bin/sh
+      fail() { printf '%s\n' "$*" >&2; exit 1; }
+      show() { printf '%s\n' "$*"; }
 
       converted=0
-      for f in "$@"; do
-          case $f in *.jpg|*.JPG|*.jpeg|*.JPEG) continue ;; esac
-          jpg="$(without_extension "$f").jpg"
-          [ -e "$jpg" ] && continue
-          convert "$f" "$jpg" || fail "Couldn't convert $(basename "$f")"
+      for input_image in "$@"; do
+          folder=$(dirname "$input_image")
+          name=$(basename "$input_image")
+          without_extension="${name%.*}"
+          case $name in *.jpg|*.JPG|*.jpeg|*.JPEG) continue ;; esac
+
+          output_jpg="$folder/$without_extension.jpg"
+          [ -e "$output_jpg" ] && continue
+          convert "$input_image" "$output_jpg" || fail "Couldn't convert $name"
           converted=$((converted + 1))
       done
 

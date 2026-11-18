@@ -10,20 +10,25 @@ needs:
 steps:
   - copy: files
   - run: |
-      fail() { echo "$*" >&2; exit 1; }
-      show() { echo "$*"; }
-      # /a/report.pdf → /a/report
-      without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
-      # /a/report.pdf → pdf
-      extension_of() { printf '%s\n' "$1" | sed 's/.*\.//'; }
+      #!/bin/sh
+      fail() { printf '%s\n' "$*" >&2; exit 1; }
+      show() { printf '%s\n' "$*"; }
 
-      made=0
-      for f in "$@"; do
-          small="$(without_extension "$f") (small).$(extension_of "$f")"
-          [ -e "$small" ] && continue
-          convert "$f" -resize 50% "$small" || fail "Couldn't resize $(basename "$f")"
-          made=$((made + 1))
+      resized=0
+      for input_image in "$@"; do
+          folder=$(dirname "$input_image")
+          name=$(basename "$input_image")
+          without_extension="${name%.*}"
+          extension="${name##*.}"
+          if [ "$name" = "$without_extension" ]; then
+              output_image="$folder/$name (small)"
+          else
+              output_image="$folder/$without_extension (small).$extension"
+          fi
+          [ -e "$output_image" ] && continue
+          convert "$input_image" -resize 50% "$output_image" || fail "Couldn't resize $name"
+          resized=$((resized + 1))
       done
 
-      [ "$made" -gt 0 ] || fail "The selected images have a smaller copy already"
-      show "Made $made smaller copies"
+      [ "$resized" -gt 0 ] || fail "The selected images have a smaller copy already"
+      show "Made $resized smaller copies"

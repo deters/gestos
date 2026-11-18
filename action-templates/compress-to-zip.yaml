@@ -10,15 +10,24 @@ needs:
 steps:
   - copy: files
   - run: |
-      fail() { echo "$*" >&2; exit 1; }
-      show() { echo "$*"; }
+      #!/bin/sh
+      fail() { printf '%s\n' "$*" >&2; exit 1; }
+      show() { printf '%s\n' "$*"; }
 
-      cd "$(dirname "$1")" || fail "Couldn't open the folder of the selected files"
-      archive="Archive $(date '+%F %H-%M-%S').zip"
-      n=$#
-      # With ./ in front, a name that starts with - isn't read as an option.
-      for f; do set -- "$@" "./$(basename "$f")"; done
-      shift $n
+      # "$@": the selected files, all in one folder
+      folder=$(dirname "$1")
+      now=$(date '+%F %H-%M-%S')
+      output_zip="Archive $now.zip"
 
-      zip -qr "$archive" "$@" || fail "Couldn't make the ZIP file"
-      show "Saved $archive"
+      # zip runs in the folder of the files, so it keeps their names without the folders above.
+      cd "$folder" || fail "Couldn't open the folder of the selected files"
+      # Each path is swapped for its name, with ./ in front, so a name that starts with - isn't
+      # read as an option.
+      for input_file in "$@"; do
+          name=$(basename "$input_file")
+          set -- "$@" "./$name"
+          shift
+      done
+
+      zip -qr "$output_zip" "$@" || fail "Couldn't make the ZIP file"
+      show "Saved $output_zip"

@@ -10,14 +10,20 @@ needs:
 steps:
   - copy: files
   - run: |
-      fail() { echo "$*" >&2; exit 1; }
-      show() { echo "$*"; }
+      #!/bin/sh
+      fail() { printf '%s\n' "$*" >&2; exit 1; }
+      show() { printf '%s\n' "$*"; }
 
+      # "$@": the selected PDFs, merged in this order
       [ $# -ge 2 ] || fail "Select at least two PDFs to merge"
-      for f in "$@"; do
-          case $f in *.pdf|*.PDF) ;; *) fail "$(basename "$f") isn't a PDF" ;; esac
+      for input_pdf in "$@"; do
+          name=$(basename "$input_pdf")
+          case $name in *.pdf|*.PDF) ;; *) fail "$name isn't a PDF" ;; esac
       done
 
-      merged="$(dirname "$1")/Merged $(date '+%F %H-%M-%S').pdf"
-      pdfunite "$@" "$merged" || fail "Couldn't merge the PDFs"
-      show "Saved $(basename "$merged")"
+      folder=$(dirname "$1")
+      now=$(date '+%F %H-%M-%S')
+      output_name="Merged $now.pdf"
+      output_pdf="$folder/$output_name"
+      pdfunite "$@" "$output_pdf" || fail "Couldn't merge the PDFs"
+      show "Saved $output_name"
