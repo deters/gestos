@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: make-a-dated-copy
 name: Make a Dated Copy
 description: Copies each selected file or folder next to it, with today's date in its name
 icon: x-office-calendar-symbolic

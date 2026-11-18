@@ -516,7 +516,7 @@ fn import_action_template(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window
             show_confirm_dialog(
                 &parent,
                 &format!("Replace \u{201c}{}\u{201d}?", template.name),
-                "An action you imported before has the same file name. It's replaced by this one.",
+                "An action you imported before has the same ID. It's replaced by this one.",
                 "Replace",
                 true,
                 import,

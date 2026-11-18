@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: compress-pdfs
 name: Compress PDFs
 description: Saves a smaller copy of each selected PDF, next to it, for sending by email
 icon: zoom-out-symbolic

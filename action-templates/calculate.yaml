@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: calculate
 name: Calculate
 description: Shows the result of the selected calculation
 icon: accessories-calculator-symbolic

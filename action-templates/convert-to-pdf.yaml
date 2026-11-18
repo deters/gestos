@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: convert-to-pdf
 name: Convert to PDF
 description: Converts the selected documents to PDF, next to them
 icon: x-office-document-symbolic

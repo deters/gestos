@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: show-qr-code
 name: Show QR Code
 description: Shows the selected text or link as a QR code, to scan with a phone
 icon: phone-symbolic

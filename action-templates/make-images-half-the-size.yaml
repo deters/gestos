@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: make-images-half-the-size
 name: Make Images Half the Size
 description: Saves a copy of each selected image at half its size, next to it
 icon: zoom-out-symbolic

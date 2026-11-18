@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: merge-pdfs
 name: Merge PDFs
 description: Puts the selected PDFs together in one, next to them
 icon: view-continuous-symbolic

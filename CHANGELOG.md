@@ -17,8 +17,8 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An action that needs a program you don't have says which package to install.
 - New step "Copy" in an "Advanced Action": it copies the selected files or text for the command after it. It uses the copy shortcut the app lists, Ctrl+Shift+C in terminals, and Ctrl+C in other apps. In a window Gestos can't recognise, it copies nothing and the action stops.
 - A gesture made with one of the new file or text actions runs the steps of the installed version, so updates to Gestos change what the gesture does. Clicking "Customize Action…" in the gesture editor gives the gesture its own copy of the steps to change. Updates no longer change that copy.
-- New page "Actions" in Preferences: each action made from a file, like the file and text actions, can be turned off there, so it isn't offered for new gestures. Gestures already made with it keep working. Each can also be exported to a file, and "Import…" adds one from a file. An imported action takes the place of one that came with Gestos and has the same file name, until you remove it.
-- You can add your own actions as files in `~/.local/share/gestos/action-templates`. A file there with the same name as one of Gestos's own takes its place. An action file can name an icon from the icon theme with `icon:`, which the action and its gestures are shown with.
+- New page "Actions" in Preferences: each action made from a file, like the file and text actions, can be turned off there, so it isn't offered for new gestures. Gestures already made with it keep working. Each can also be exported to a file, and "Import…" adds one from a file. An imported action takes the place of one that came with Gestos and has the same ID, until you remove it.
+- You can add your own actions as files in `~/.local/share/gestos/action-templates`. Each action file has a short ID, like `id: convert-to-pdf`. One there with the same ID as one of Gestos's own takes its place, whatever the file is called. An action file can name an icon from the icon theme with `icon:`, which the action and its gestures are shown with.
 
 ### Changed
 

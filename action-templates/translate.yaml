@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: translate
 name: Translate
 description: Opens the selected text in Google Translate
 icon: preferences-desktop-locale-symbolic

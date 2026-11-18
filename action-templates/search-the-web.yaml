@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: search-the-web
 name: Search the Web
 description: Searches the web for the selected text
 icon: web-browser-symbolic

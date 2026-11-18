@@ -4,13 +4,15 @@
 //! user customizes gets a copy of them, and no longer follows the template.
 //!
 //! They're read from `gestos/action-templates` in the user's data folder, then in the system's,
-//! where Gestos installs its own. A user's template takes the place of a system one with the same
-//! file name. A file is only read if it says it's one, with `gestos-action-template: 1`, if only
-//! its owner or root can change it and its folder, and if it's small. One with anything Gestos
-//! doesn't know is left out whole, rather than run with a part missing.
+//! where Gestos installs its own. Each has a short ID of its own, like `convert-to-pdf`, whatever
+//! its file is called. A user's template takes the place of a system one with the same ID. A file is only read if it says it's
+//! one, with `gestos-action-template: 1`, if only its owner or root can change it and its folder,
+//! and if it's small. One with anything Gestos doesn't know is left out whole, rather than run with
+//! a part missing.
 //!
 //! ```yaml
 //! gestos-action-template: 1
+//! id: convert-to-pdf
 //! name: Convert to PDF
 //! description: Converts the selected documents to PDF, next to them
 //! icon: x-office-document-symbolic
@@ -37,7 +39,7 @@ const MAX_SIZE: u64 = 64 * 1024;
 /// A template as Gestos offers it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActionTemplate {
-    /// Its file name without `.yaml`.
+    /// Its own short ID, which gestures made from it name.
     pub id: String,
     pub name: String,
     pub description: String,
@@ -63,6 +65,7 @@ struct TemplateFile {
     // Read already, and only here so that it isn't an unknown field.
     #[serde(rename = "gestos-action-template")]
     _version: u32,
+    id: String,
     name: String,
     #[serde(default)]
     description: String,
@@ -151,123 +154,28 @@ pub fn list() -> Vec<Listed> {
 }
 
 fn list_from(dirs: &[PathBuf]) -> Vec<Listed> {
-    let in_dir = |dir: &PathBuf, id: &str| dir.join(format!("{id}.yaml")).is_file();
-    load_from(dirs)
-        .into_iter()
-        .filter_map(|template| {
-            let index = dirs.iter().position(|dir| in_dir(dir, &template.id))?;
-            Some(Listed {
-                path: dirs[index].join(format!("{}.yaml", template.id)),
-                own: index == 0,
-                replaces: index == 0 && dirs[1..].iter().any(|dir| in_dir(dir, &template.id)),
-                template,
-            })
-        })
-        .collect()
-}
-
-/// Whether an ID can be a template's: a file name of its own, never a path to elsewhere.
-fn is_id(id: &str) -> bool {
-    !id.is_empty() && !id.starts_with('.') && !id.contains('/')
-}
-
-/// Reads a template from a file, as importing it would, without importing it: its ID is the
-/// file's name without `.yaml`.
-pub fn read_to_import(from: &Path) -> Result<ActionTemplate, String> {
-    let id = from
-        .file_stem()
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .filter(|id| is_id(id) && from.extension().is_some_and(|ext| ext == "yaml"))
-        .ok_or("Its name has to end in .yaml")?;
-    let size = std::fs::metadata(from).map_err(|e| e.to_string())?.len();
-    if size > MAX_SIZE {
-        return Err(format!("It's larger than {} KB", MAX_SIZE / 1024));
+    let read = read_dirs(dirs);
+    let mut listed: Vec<Listed> = Vec::new();
+    for (index, path, template) in &read {
+        // The first with an ID is the one, the user's before the system's.
+        if listed.iter().any(|listed| listed.template.id == template.id) {
+            continue;
+        }
+        listed.push(Listed {
+            own: *index == 0,
+            replaces: *index == 0 && read.iter().any(|(other, _, t)| *other > 0 && t.id == template.id),
+            path: path.clone(),
+            template: template.clone(),
+        });
     }
-    let text = std::fs::read_to_string(from).map_err(|e| e.to_string())?;
-    parse(&text, &id).map_err(|why| format!("It isn't an action Gestos can read: {why}"))
+    listed
 }
 
-/// Makes a template the user's own, in their folder, where it takes the place of one with the
-/// same ID that came with Gestos, and of one of their own. Only they can change it there.
-pub fn import(from: &Path) -> Result<ActionTemplate, String> {
-    import_into(&user_dir(), from)
-}
-
-fn import_into(dir: &Path, from: &Path) -> Result<ActionTemplate, String> {
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-    use std::io::Write;
-    let template = read_to_import(from)?;
-    let text = std::fs::read(from).map_err(|e| e.to_string())?;
-    std::fs::DirBuilder::new().recursive(true).mode(0o755).create(dir).map_err(|e| e.to_string())?;
-    // Written beside it first, so that a template is never half there.
-    let path = dir.join(format!("{}.yaml", template.id));
-    let partial = dir.join(format!(".{}.yaml.partial", template.id));
-    let written = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o644)
-        .open(&partial)
-        .and_then(|mut file| file.write_all(&text))
-        .and_then(|_| std::fs::set_permissions(&partial, std::os::unix::fs::PermissionsExt::from_mode(0o644)))
-        .and_then(|_| std::fs::rename(&partial, &path));
-    if let Err(e) = written {
-        let _ = std::fs::remove_file(&partial);
-        return Err(e.to_string());
-    }
-    Ok(template)
-}
-
-/// Whether the user has a template of their own with this ID.
-pub fn is_own(id: &str) -> bool {
-    is_id(id) && user_dir().join(format!("{id}.yaml")).is_file()
-}
-
-/// Removes the user's own template with this ID. One that came with Gestos with the same ID is
-/// offered again.
-pub fn remove(id: &str) -> Result<(), String> {
-    if !is_id(id) {
-        return Err(format!("{id} isn't an action's ID"));
-    }
-    std::fs::remove_file(user_dir().join(format!("{id}.yaml"))).map_err(|e| e.to_string())
-}
-
-/// The templates in the folders, by name. Those that can't be read are logged and left out.
-pub fn load() -> Vec<ActionTemplate> {
-    let mut templates = load_from(&template_dirs());
-    templates.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    templates
-}
-
-/// The template with this ID, the user's if they have one, read now so that it's as installed.
-pub fn find(id: &str) -> Option<ActionTemplate> {
-    find_in(&template_dirs(), id)
-}
-
-fn find_in(dirs: &[PathBuf], id: &str) -> Option<ActionTemplate> {
-    if !is_id(id) {
-        return None;
-    }
-    dirs.iter()
-        .filter(|dir| dir.is_dir() && trusted(dir).is_ok())
-        .map(|dir| dir.join(format!("{id}.yaml")))
-        // The first file there is the one, even one that can't be read: the user's own copy
-        // takes the place of the system's, and a mistake in it isn't hidden by running that.
-        .find(|path| path.is_file())
-        .and_then(|path| match read(&path, id) {
-            Ok(template) => Some(template),
-            Err(why) => {
-                eprintln!("gestos: The action template {} is left out: {why}", path.display());
-                None
-            }
-        })
-}
-
-fn load_from(dirs: &[PathBuf]) -> Vec<ActionTemplate> {
-    let mut templates: Vec<ActionTemplate> = Vec::new();
-    // The IDs of the files found so far, read or not.
-    let mut seen: Vec<String> = Vec::new();
-    for dir in dirs {
+/// Every template that can be read in the folders, in order, with the folder's place and the file
+/// it's in. Those that can't be read are logged and left out.
+fn read_dirs(dirs: &[PathBuf]) -> Vec<(usize, PathBuf, ActionTemplate)> {
+    let mut read_all = Vec::new();
+    for (index, dir) in dirs.iter().enumerate() {
         if !dir.is_dir() {
             continue;
         }
@@ -283,19 +191,110 @@ fn load_from(dirs: &[PathBuf]) -> Vec<ActionTemplate> {
             .collect();
         paths.sort();
         for path in paths {
-            let Some(id) = path.file_stem().map(|stem| stem.to_string_lossy().into_owned()) else { continue };
-            // An earlier folder's, the user's, takes its place, even if it can't be read.
-            if seen.contains(&id) {
-                continue;
-            }
-            seen.push(id.clone());
-            match read(&path, &id) {
-                Ok(template) => templates.push(template),
+            match read(&path) {
+                Ok(template) => read_all.push((index, path, template)),
                 Err(why) => eprintln!("gestos: The action template {} is left out: {why}", path.display()),
             }
         }
     }
-    templates
+    read_all
+}
+
+/// Whether an ID is a short one, like `convert-to-pdf`: letters, digits, `-`, `_` and `.`, not
+/// starting with a dot. It's a file name of its own, never a path to elsewhere.
+pub fn is_id(id: &str) -> bool {
+    !id.is_empty()
+        && !id.starts_with('.')
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// Reads a template from a file, as importing it would, without importing it.
+pub fn read_to_import(from: &Path) -> Result<ActionTemplate, String> {
+    let size = std::fs::metadata(from).map_err(|e| e.to_string())?.len();
+    if size > MAX_SIZE {
+        return Err(format!("It's larger than {} KB", MAX_SIZE / 1024));
+    }
+    let text = std::fs::read_to_string(from).map_err(|e| e.to_string())?;
+    parse(&text).map_err(|why| format!("It isn't an action Gestos can read: {why}"))
+}
+
+/// Makes a template the user's own, in their folder, where it takes the place of one with the
+/// same ID that came with Gestos, and of one of their own. Only they can change it there.
+pub fn import(from: &Path) -> Result<ActionTemplate, String> {
+    import_into(&user_dir(), from)
+}
+
+fn import_into(dir: &Path, from: &Path) -> Result<ActionTemplate, String> {
+    use std::io::Write;
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let template = read_to_import(from)?;
+    let text = std::fs::read(from).map_err(|e| e.to_string())?;
+    std::fs::DirBuilder::new().recursive(true).mode(0o755).create(dir).map_err(|e| e.to_string())?;
+    // Named by its ID, which is a file name of its own, and written beside it first, so that a
+    // template is never half there.
+    let path = dir.join(format!("{}.yaml", template.id));
+    let partial = dir.join(format!(".{}.yaml.partial", template.id));
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o644)
+        .open(&partial)
+        .and_then(|mut file| file.write_all(&text))
+        .and_then(|_| std::fs::set_permissions(&partial, std::os::unix::fs::PermissionsExt::from_mode(0o644)))
+        .and_then(|_| std::fs::rename(&partial, &path));
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&partial);
+        return Err(e.to_string());
+    }
+    // Another of the user's files with the same ID would be read instead of it, or after it.
+    for (_, other, _) in own_files(dir, &template.id) {
+        if other != path {
+            let _ = std::fs::remove_file(other);
+        }
+    }
+    Ok(template)
+}
+
+/// The user's files with a template with this ID.
+fn own_files(dir: &Path, id: &str) -> Vec<(usize, PathBuf, ActionTemplate)> {
+    read_dirs(&[dir.to_path_buf()]).into_iter().filter(|(_, _, template)| template.id == id).collect()
+}
+
+/// Whether the user has a template of their own with this ID.
+pub fn is_own(id: &str) -> bool {
+    !own_files(&user_dir(), id).is_empty()
+}
+
+/// Removes the user's own templates with this ID. One that came with Gestos with the same ID is
+/// offered again.
+pub fn remove(id: &str) -> Result<(), String> {
+    for (_, path, _) in own_files(&user_dir(), id) {
+        std::fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// The templates in the folders, the user's in place of the system's with the same ID.
+fn load_from(dirs: &[PathBuf]) -> Vec<ActionTemplate> {
+    list_from(dirs).into_iter().map(|listed| listed.template).collect()
+}
+
+/// The templates in the folders, by name. Those that can't be read are logged and left out.
+pub fn load() -> Vec<ActionTemplate> {
+    list().into_iter().map(|listed| listed.template).collect()
+}
+
+/// The template with this ID, the user's if they have one, read now so that it's as installed.
+pub fn find(id: &str) -> Option<ActionTemplate> {
+    find_in(&template_dirs(), id)
+}
+
+fn find_in(dirs: &[PathBuf], id: &str) -> Option<ActionTemplate> {
+    if !is_id(id) {
+        return None;
+    }
+    load_from(dirs).into_iter().find(|template| template.id == id)
 }
 
 /// Whether only the user or root can change a file or folder, as another account could otherwise
@@ -312,17 +311,17 @@ fn trusted(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn read(path: &Path, id: &str) -> Result<ActionTemplate, String> {
+fn read(path: &Path) -> Result<ActionTemplate, String> {
     trusted(path)?;
     let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
     if size > MAX_SIZE {
         return Err(format!("it's larger than {} KB", MAX_SIZE / 1024));
     }
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    parse(&text, id)
+    parse(&text)
 }
 
-fn parse(text: &str, id: &str) -> Result<ActionTemplate, String> {
+fn parse(text: &str) -> Result<ActionTemplate, String> {
     let version: Version = serde_yaml::from_str(text)
         .map_err(|_| "it doesn't start with gestos-action-template: 1".to_string())?;
     if version.gestos_action_template != FORMAT {
@@ -332,6 +331,10 @@ fn parse(text: &str, id: &str) -> Result<ActionTemplate, String> {
         ));
     }
     let file: TemplateFile = serde_yaml::from_str(text).map_err(|e| e.to_string())?;
+    let id = file.id.trim().to_string();
+    if !is_id(&id) {
+        return Err(format!("its ID, \"{id}\", has to be letters, digits, -, _ and dots, like convert-to-pdf"));
+    }
     if file.name.trim().is_empty() {
         return Err("it has no name".to_string());
     }
@@ -354,7 +357,7 @@ fn parse(text: &str, id: &str) -> Result<ActionTemplate, String> {
         }
     }
     Ok(ActionTemplate {
-        id: id.to_string(),
+        id,
         name: file.name.trim().to_string(),
         description: file.description.trim().to_string(),
         icon,
@@ -425,6 +428,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     const PDF: &str = r#"gestos-action-template: 1
+id: convert-to-pdf
 name: Convert to PDF
 description: Converts the selected documents
 apps: [FileManager]
@@ -439,7 +443,7 @@ steps:
 
     #[test]
     fn a_template_is_read_with_its_steps() {
-        let template = parse(PDF, "convert-to-pdf").unwrap();
+        let template = parse(PDF).unwrap();
         assert_eq!(template.name, "Convert to PDF");
         assert_eq!(template.apps, ["FileManager"]);
         assert_eq!(template.needs[0].package, "LibreOffice");
@@ -460,8 +464,8 @@ steps:
 
     #[test]
     fn every_kind_of_step_is_read() {
-        let text = "gestos-action-template: 1\nname: All\nsteps:\n  - open: org.gnome.TextEditor\n  - press: Control+N\n  - type: hi\n  - wait: 99999999\n  - copy: text\n";
-        let steps = parse(text, "all").unwrap().steps;
+        let text = "gestos-action-template: 1\nid: test\nname: All\nsteps:\n  - open: org.gnome.TextEditor\n  - press: Control+N\n  - type: hi\n  - wait: 99999999\n  - copy: text\n";
+        let steps = parse(text).unwrap().steps;
         assert_eq!(
             steps,
             [
@@ -476,28 +480,28 @@ steps:
 
     #[test]
     fn a_file_that_isnt_a_template_or_is_newer_is_left_out() {
-        assert!(parse("name: Notes\nsteps: []\n", "notes").unwrap_err().contains("doesn't start"));
+        assert!(parse("name: Notes\nsteps: []\n").unwrap_err().contains("doesn't start"));
         let newer = PDF.replace("gestos-action-template: 1", "gestos-action-template: 2");
-        assert!(parse(&newer, "pdf").unwrap_err().contains("version 2"));
+        assert!(parse(&newer).unwrap_err().contains("version 2"));
     }
 
     #[test]
     fn a_template_has_the_icon_it_names() {
         let with_icon = PDF.replace("apps:", "icon: x-office-document-symbolic\napps:");
-        assert_eq!(parse(&with_icon, "pdf").unwrap().icon.as_deref(), Some("x-office-document-symbolic"));
-        assert_eq!(parse(PDF, "pdf").unwrap().icon, None);
+        assert_eq!(parse(&with_icon).unwrap().icon.as_deref(), Some("x-office-document-symbolic"));
+        assert_eq!(parse(PDF).unwrap().icon, None);
         for bad in ["/usr/share/icons/a.svg", "../a", "a b"] {
-            assert!(parse(&PDF.replace("apps:", &format!("icon: '{bad}'\napps:")), "pdf").is_err(), "{bad}");
+            assert!(parse(&PDF.replace("apps:", &format!("icon: '{bad}'\napps:"))).is_err(), "{bad}");
         }
     }
 
     #[test]
     fn anything_unknown_leaves_the_whole_template_out() {
-        assert!(parse(&PDF.replace("  - copy: files", "  - delete: files"), "pdf").is_err());
-        assert!(parse(&PDF.replace("description:", "author: me\ndescription:"), "pdf").is_err());
-        assert!(parse(&PDF.replace("copy: files", "copy: images"), "pdf").is_err());
-        assert!(parse("gestos-action-template: 1\nname: Empty\nsteps: []\n", "empty").is_err());
-        assert!(parse("gestos-action-template: 1\nname: ' '\nsteps:\n  - wait: 1\n", "blank").is_err());
+        assert!(parse(&PDF.replace("  - copy: files", "  - delete: files")).is_err());
+        assert!(parse(&PDF.replace("description:", "author: me\ndescription:")).is_err());
+        assert!(parse(&PDF.replace("copy: files", "copy: images")).is_err());
+        assert!(parse("gestos-action-template: 1\nid: test\nname: Empty\nsteps: []\n").is_err());
+        assert!(parse("gestos-action-template: 1\nid: test\nname: ' '\nsteps:\n  - wait: 1\n").is_err());
     }
 
     #[test]
@@ -513,7 +517,7 @@ steps:
 
     #[test]
     fn templates_are_offered_for_their_apps_by_id_or_category() {
-        let template = parse(PDF, "pdf").unwrap();
+        let template = parse(PDF).unwrap();
         assert!(template.is_for("org.gnome.Nautilus", "GTK;Utility;Core;FileManager;"));
         assert!(!template.is_for("org.gnome.Ptyxis", "System;TerminalEmulator;"));
         let mut for_one = template.clone();
@@ -589,30 +593,51 @@ steps:
     #[test]
     fn only_a_readable_template_is_imported() {
         let (user, elsewhere) = (TempDir::new("import-bad-user"), TempDir::new("import-bad-from"));
-        elsewhere.write("broken.yaml", "gestos-action-template: 1\nname: Broken\n", 0o644);
-        elsewhere.write("notes.txt", PDF, 0o644);
+        elsewhere.write("broken.yaml", "gestos-action-template: 1\nid: test\nname: Broken\n", 0o644);
         assert!(import_into(&user.0, &elsewhere.0.join("broken.yaml")).is_err());
-        assert!(import_into(&user.0, &elsewhere.0.join("notes.txt")).is_err());
         assert!(!user.0.join("broken.yaml").exists());
     }
 
     #[test]
-    fn a_users_template_that_cant_be_read_isnt_replaced_by_the_systems() {
+    fn a_template_is_known_by_its_id_whatever_its_file_is_called() {
+        let user = TempDir::new("id-user");
+        let system = TempDir::new("id-system");
+        system.write("convert-to-pdf.yaml", PDF, 0o644);
+        // Another name, the same ID: it's the user's in place of the system's.
+        user.write("my-pdf.yaml", &PDF.replace("Convert to PDF", "Mine"), 0o644);
+        // The same name, another ID: it's another template.
+        user.write("convert-to-pdf.yaml", &PDF.replace("id: convert-to-pdf", "id: other").replace("Convert to PDF", "Other"), 0o644);
+        let dirs = [user.0.clone(), system.0.clone()];
+        assert_eq!(find_in(&dirs, "convert-to-pdf").unwrap().name, "Mine");
+        assert_eq!(find_in(&dirs, "other").unwrap().name, "Other");
+        assert_eq!(load_from(&dirs).len(), 2);
+    }
+
+    #[test]
+    fn a_template_needs_an_id_that_can_be_a_file_name() {
+        assert!(parse(&PDF.replace("id: convert-to-pdf\n", "")).is_err());
+        for bad in ["../x", ".hidden", "a/b", "with space", "''"] {
+            assert!(parse(&PDF.replace("id: convert-to-pdf", &format!("id: {bad}"))).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_users_template_that_cant_be_read_leaves_the_systems_offered() {
         let user = TempDir::new("broken-user");
         let system = TempDir::new("broken-system");
-        user.write("convert-to-pdf.yaml", "gestos-action-template: 1\nname: Mine\n", 0o644);
+        user.write("convert-to-pdf.yaml", "gestos-action-template: 1\nid: convert-to-pdf\nname: Mine\n", 0o644);
         system.write("convert-to-pdf.yaml", PDF, 0o644);
         let dirs = [user.0.clone(), system.0.clone()];
-        assert!(find_in(&dirs, "convert-to-pdf").is_none());
-        assert!(load_from(&dirs).is_empty());
+        assert_eq!(find_in(&dirs, "convert-to-pdf").unwrap().name, "Convert to PDF");
     }
 
     #[test]
     fn templates_others_can_change_or_too_large_are_left_out() {
         let dir = TempDir::new("unsafe");
-        dir.write("shared.yaml", PDF, 0o666);
-        dir.write("large.yaml", &format!("{PDF}#{}\n", "x".repeat(MAX_SIZE as usize)), 0o644);
-        dir.write("fine.yaml", PDF, 0o644);
+        let with_id = |id: &str| PDF.replace("id: convert-to-pdf", &format!("id: {id}"));
+        dir.write("shared.yaml", &with_id("shared"), 0o666);
+        dir.write("large.yaml", &format!("{}#{}\n", with_id("large"), "x".repeat(MAX_SIZE as usize)), 0o644);
+        dir.write("fine.yaml", &with_id("fine"), 0o644);
         let ids: Vec<String> = load_from(&[dir.0.clone()]).into_iter().map(|t| t.id).collect();
         assert_eq!(ids, ["fine"]);
         std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(0o777)).unwrap();
@@ -622,7 +647,7 @@ steps:
     /// An installed template's command, by its file name.
     fn installed_command(id: &str) -> String {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("action-templates").join(format!("{id}.yaml"));
-        let template = parse(&std::fs::read_to_string(path).unwrap(), id).unwrap();
+        let template = parse(&std::fs::read_to_string(path).unwrap()).unwrap();
         template
             .steps
             .into_iter()
@@ -851,7 +876,9 @@ steps:
         for entry in std::fs::read_dir(&dir).unwrap().filter_map(Result::ok) {
             let path = entry.path();
             let id = path.file_stem().unwrap().to_string_lossy().into_owned();
-            let template = parse(&std::fs::read_to_string(&path).unwrap(), &id).unwrap();
+            let template = parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            // As gestures made before templates had IDs named them by their files.
+            assert_eq!(template.id, id);
             assert!(template.icon.is_some(), "{id} has no icon");
             for (i, step) in template.steps.iter().enumerate() {
                 if let KeyStep::Run(command) = step {

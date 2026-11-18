@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: open-link
 name: Open Link
 description: Opens the selected text as a link
 icon: insert-link-symbolic

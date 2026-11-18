@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: split-pdf-into-pages
 name: Split PDF into Pages
 description: Saves each page of the selected PDFs as a PDF of its own, in a folder next to it
 icon: view-paged-symbolic

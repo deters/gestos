@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: copy-text-from-screen
 name: Copy Text from Screen
 description: Copies the text in an area of the screen you select, even in images and videos
 icon: applets-screenshooter-symbolic

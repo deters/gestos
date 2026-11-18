@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: show-checksums
 name: Show Checksums
 description: Shows the SHA-256 checksum of each selected file
 icon: security-high-symbolic

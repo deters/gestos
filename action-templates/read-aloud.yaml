@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: read-aloud
 name: Read Aloud
 description: Reads the selected text aloud
 icon: audio-speakers-symbolic

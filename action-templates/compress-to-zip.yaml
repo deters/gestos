@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: compress-to-zip
 name: Compress to ZIP
 description: Puts the selected files in one ZIP archive, next to them
 icon: package-x-generic-symbolic

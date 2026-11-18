@@ -1,4 +1,5 @@
 gestos-action-template: 1
+id: convert-images-to-png
 name: Convert Images to PNG
 description: Saves a PNG copy of each selected image, next to it
 icon: image-x-generic-symbolic
