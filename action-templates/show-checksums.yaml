@@ -10,10 +10,10 @@ steps:
       show() { echo "$*"; }
 
       for f in "$@"; do
-          [ -f "$f" ] || fail "${f##*/} is a folder, and only files have a checksum"
+          [ -f "$f" ] || fail "$(basename "$f") is a folder, and only files have a checksum"
       done
 
       for f in "$@"; do
-          sum=$(sha256sum "$f") || fail "Couldn't read ${f##*/}"
-          show "${sum%% *}  ${f##*/}"
+          sum=$(sha256sum "$f") || fail "Couldn't read $(basename "$f")"
+          show "${sum%% *}  $(basename "$f")"
       done

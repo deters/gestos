@@ -13,15 +13,15 @@ steps:
       show() { echo "$*"; }
 
       for f in "$@"; do
-          case $f in *.pdf|*.PDF) ;; *) fail "${f##*/} isn't a PDF" ;; esac
+          case $f in *.pdf|*.PDF) ;; *) fail "$(basename "$f") isn't a PDF" ;; esac
       done
 
       for f in "$@"; do
           folder="${f%.*} (images)"
-          [ -e "$folder" ] && fail "${folder##*/} is there already"
-          mkdir "$folder" || fail "Couldn't make ${folder##*/}"
-          name="${f##*/}"
-          pdftoppm -png -r 150 "$f" "$folder/${name%.*} page" || fail "Couldn't convert ${f##*/}"
+          [ -e "$folder" ] && fail "$(basename "$folder") is there already"
+          mkdir "$folder" || fail "Couldn't make $(basename "$folder")"
+          name=$(basename "$f")
+          pdftoppm -png -r 150 "$f" "$folder/${name%.*} page" || fail "Couldn't convert $(basename "$f")"
       done
 
-      [ $# -eq 1 ] && show "Saved $(ls "$folder" | wc -l) images in ${folder##*/}" || show "Converted $# PDFs"
+      [ $# -eq 1 ] && show "Saved $(ls "$folder" | wc -l) images in $(basename "$folder")" || show "Converted $# PDFs"

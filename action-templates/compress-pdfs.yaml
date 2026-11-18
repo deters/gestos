@@ -14,7 +14,7 @@ steps:
       size() { wc -c < "$1" | awk '{ printf ($1 >= 1048576 ? "%.1f MB" : "%d KB"), ($1 >= 1048576 ? $1 / 1048576 : $1 / 1024) }'; }
 
       for f in "$@"; do
-          case $f in *.pdf|*.PDF) ;; *) fail "${f##*/} isn't a PDF" ;; esac
+          case $f in *.pdf|*.PDF) ;; *) fail "$(basename "$f") isn't a PDF" ;; esac
       done
 
       made=0
@@ -22,13 +22,13 @@ steps:
           small="${f%.*} (compressed).pdf"
           [ -e "$small" ] && continue
           gs -q -dNOPAUSE -dBATCH -dSAFER -sDEVICE=pdfwrite -dPDFSETTINGS=/ebook \
-              -sOutputFile="$small" "$f" || { rm -f "$small"; fail "Couldn't compress ${f##*/}"; }
+              -sOutputFile="$small" "$f" || { rm -f "$small"; fail "Couldn't compress $(basename "$f")"; }
           if [ "$(wc -c < "$small")" -ge "$(wc -c < "$f")" ]; then
               rm -f "$small"
               continue
           fi
           made=$((made + 1))
-          last="${f##*/}: $(size "$f") → $(size "$small")"
+          last="$(basename "$f"): $(size "$f") → $(size "$small")"
       done
 
       [ "$made" -gt 0 ] || fail "The selected PDFs can't be made smaller"

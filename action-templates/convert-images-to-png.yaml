@@ -17,7 +17,7 @@ steps:
           case $f in *.png|*.PNG) continue ;; esac
           png="${f%.*}.png"
           [ -e "$png" ] && continue
-          convert "$f" "$png" || fail "Couldn't convert ${f##*/}"
+          convert "$f" "$png" || fail "Couldn't convert $(basename "$f")"
           converted=$((converted + 1))
       done
 

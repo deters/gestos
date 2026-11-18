@@ -16,7 +16,7 @@ steps:
       for f in "$@"; do
           case $f in *.pdf|*.PDF) continue ;; esac
           libreoffice --headless --convert-to pdf --outdir "$(dirname "$f")" "$f" >/dev/null
-          [ -e "${f%.*}.pdf" ] || fail "Couldn't convert ${f##*/}"
+          [ -e "${f%.*}.pdf" ] || fail "Couldn't convert $(basename "$f")"
           converted=$((converted + 1))
       done
 

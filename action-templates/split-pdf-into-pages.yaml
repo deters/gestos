@@ -13,15 +13,15 @@ steps:
       show() { echo "$*"; }
 
       for f in "$@"; do
-          case $f in *.pdf|*.PDF) ;; *) fail "${f##*/} isn't a PDF" ;; esac
+          case $f in *.pdf|*.PDF) ;; *) fail "$(basename "$f") isn't a PDF" ;; esac
       done
 
       for f in "$@"; do
           folder="${f%.*} (pages)"
-          [ -e "$folder" ] && fail "${folder##*/} is there already"
-          mkdir "$folder" || fail "Couldn't make ${folder##*/}"
-          name="${f##*/}"
-          pdfseparate "$f" "$folder/${name%.*} page %d.pdf" || fail "Couldn't split ${f##*/}"
+          [ -e "$folder" ] && fail "$(basename "$folder") is there already"
+          mkdir "$folder" || fail "Couldn't make $(basename "$folder")"
+          name=$(basename "$f")
+          pdfseparate "$f" "$folder/${name%.*} page %d.pdf" || fail "Couldn't split $(basename "$f")"
       done
 
-      [ $# -eq 1 ] && show "Saved $(ls "$folder" | wc -l) pages in ${folder##*/}" || show "Split $# PDFs"
+      [ $# -eq 1 ] && show "Saved $(ls "$folder" | wc -l) pages in $(basename "$folder")" || show "Split $# PDFs"

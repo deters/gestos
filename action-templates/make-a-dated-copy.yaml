@@ -12,7 +12,7 @@ steps:
       today=$(date '+%F')
       for f in "$@"; do
           dir=$(dirname "$f")
-          name="${f##*/}"
+          name=$(basename "$f")
           # The date goes before the extension, which a folder or a hidden file doesn't have.
           case $name in
               .*) base="$name"; ext="" ;;
@@ -22,8 +22,8 @@ steps:
           esac
           copy="$dir/$base $today$ext"
           [ -e "$copy" ] && copy="$dir/$base $today $(date '+%H-%M-%S')$ext"
-          [ -e "$copy" ] && fail "${copy##*/} is there already"
-          cp -Rp "$f" "$copy" || fail "Couldn't copy ${f##*/}"
+          [ -e "$copy" ] && fail "$(basename "$copy") is there already"
+          cp -Rp "$f" "$copy" || fail "Couldn't copy $(basename "$f")"
       done
 
-      [ $# -eq 1 ] && show "Saved ${copy##*/}" || show "Made $# dated copies"
+      [ $# -eq 1 ] && show "Saved $(basename "$copy")" || show "Made $# dated copies"

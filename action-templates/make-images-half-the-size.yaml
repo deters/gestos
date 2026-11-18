@@ -16,7 +16,7 @@ steps:
       for f in "$@"; do
           small="${f%.*} (small).${f##*.}"
           [ -e "$small" ] && continue
-          convert "$f" -resize 50% "$small" || fail "Couldn't resize ${f##*/}"
+          convert "$f" -resize 50% "$small" || fail "Couldn't resize $(basename "$f")"
           made=$((made + 1))
       done
 
