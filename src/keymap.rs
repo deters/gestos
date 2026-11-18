@@ -52,22 +52,30 @@ fn parse_gnome_sources(value: &str) -> Option<LayoutName> {
 }
 
 /// The first layout in `localectl status` output.
-fn parse_localectl(output: &str) -> Option<LayoutName> {
-    let field = |label: &str| {
-        output
-            .lines()
-            .find_map(|line| line.trim().strip_prefix(label))
-            .map(|value| value.split(',').next().unwrap_or("").trim().to_string())
-    };
-    let layout = field("X11 Layout:").filter(|layout| !layout.is_empty() && layout != "(unset)")?;
-    let mut name = LayoutName::new(&layout, &field("X11 Variant:").unwrap_or_default());
-    name.options = output
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("X11 Options:"))
-        .unwrap_or("")
-        .trim()
-        .to_string();
+/// The first layout of the ones set for the whole system, as systemd-localed lists them.
+fn localed_layout(layouts: &str, variants: &str, options: &str) -> Option<LayoutName> {
+    let first = |list: &str| list.split(',').next().unwrap_or("").trim().to_string();
+    let layout = first(layouts);
+    if layout.is_empty() {
+        return None;
+    }
+    let mut name = LayoutName::new(&layout, &first(variants));
+    name.options = options.trim().to_string();
     Some(name)
+}
+
+/// The layout set for the whole system, asked of systemd-localed.
+fn system_layout() -> Option<LayoutName> {
+    let conn = zbus::blocking::Connection::system().ok()?;
+    let locale = zbus::blocking::Proxy::new(
+        &conn,
+        "org.freedesktop.locale1",
+        "/org/freedesktop/locale1",
+        "org.freedesktop.locale1",
+    )
+    .ok()?;
+    let property = |name: &str| locale.get_property::<String>(name).unwrap_or_default();
+    localed_layout(&property("X11Layout"), &property("X11Variant"), &property("X11Options"))
 }
 
 /// The first layout in KDE's `kxkbrc`.
@@ -120,24 +128,9 @@ fn x11_layout() -> Option<LayoutName> {
     parse_xkb_rules_names(&value)
 }
 
-fn command_output(program: &str, args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new(program).args(args).output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
 fn gnome_layout() -> Option<LayoutName> {
     const INPUT_SOURCES: &str = "org.gnome.desktop.input-sources";
-    // Read in this process when possible: it's looked up before every shortcut, and starting
-    // gsettings for each key takes longer than pressing the shortcut.
-    let setting = |key: &str| {
-        if crate::wayland::gio_reads_user_settings() {
-            return crate::wayland::read_gnome_setting(INPUT_SOURCES, key);
-        }
-        command_output("gsettings", &["get", INPUT_SOURCES, key])
-    };
+    let setting = |key: &str| crate::wayland::read_gnome_setting(INPUT_SOURCES, key);
     // Most recently used first, which puts the layout in use now at the front.
     let mut layout = setting("mru-sources")
         .as_deref()
@@ -179,7 +172,7 @@ fn desktop_layout() -> Option<LayoutName> {
             return Some(layout);
         }
     }
-    command_output("localectl", &["status"]).as_deref().and_then(parse_localectl)
+    system_layout()
 }
 
 /// Which physical key and shift level produce each symbol on one layout, and each character.
@@ -435,12 +428,17 @@ mod tests {
         assert_eq!(parse_gnome_sources("@a(ss) []"), None);
     }
 
+    /// Asks this computer's systemd-localed, so it only runs on request.
     #[test]
-    fn localectl_gives_the_first_layout() {
-        let output = "   System Locale: LANG=en_US.UTF-8\n       X11 Layout: br,us\n      X11 Variant: abnt2,\n";
-        assert_eq!(parse_localectl(output), Some(name("br", "abnt2")));
-        assert_eq!(parse_localectl("X11 Layout: (unset)\n"), None);
-        assert_eq!(parse_localectl("System Locale: LANG=C\n"), None);
+    #[ignore]
+    fn systemd_localed_says_the_system_layout() {
+        assert!(system_layout().is_some_and(|name| !name.layout.is_empty()));
+    }
+
+    #[test]
+    fn localed_gives_the_first_layout() {
+        assert_eq!(localed_layout("br,us", "abnt2,", ""), Some(name("br", "abnt2")));
+        assert_eq!(localed_layout("", "", ""), None);
     }
 
     #[test]
@@ -555,9 +553,7 @@ mod tests {
         let mut swapped = name("br", "abnt2");
         swapped.options = "ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl".to_string();
         assert_eq!(
-            parse_localectl(
-                "   X11 Layout: br,us\n  X11 Variant: abnt2,\n  X11 Options: ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl\n"
-            ),
+            localed_layout("br,us", "abnt2,", "ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl"),
             Some(swapped.clone())
         );
         assert_eq!(

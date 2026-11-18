@@ -15,7 +15,7 @@ steps:
       cd "$(dirname "$1")" || fail "Couldn't open the folder of the selected files"
       archive="Archive $(date '+%F %H-%M-%S').zip"
       n=$#
-      for f; do set -- "$@" "${f##*/}"; done
+      for f; do set -- "$@" "$(basename "$f")"; done
       shift $n
 
       zip -qr "$archive" "$@" || fail "Couldn't make the ZIP file"

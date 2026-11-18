@@ -18,20 +18,32 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - New step "Copy" in an "Advanced Action": it copies the selected files or text for the command after it. It uses the copy shortcut the app lists, Ctrl+Shift+C in terminals, and Ctrl+C in other apps. In a window Gestos can't recognise, it copies nothing and the action stops.
 - A gesture made with one of the new file or text actions runs the steps of the installed version, so updates to Gestos change what the gesture does. Clicking "Customize Action…" in the gesture editor gives the gesture its own copy of the steps to change. Updates no longer change that copy.
 - You can add your own actions as files in `~/.local/share/gestos/action-templates`. A file there with the same name as one of Gestos's own takes its place. An action file can name an icon from the icon theme with `icon:`, which the action and its gestures are shown with.
+
 ### Changed
 
-- Gestos now runs two background processes instead of three.
 - A new gesture is now drawn first, in a window of its own that says which mouse button draws gestures. The editor opens once the gesture is drawn. Press Esc in that window to cancel.
 - To draw a gesture again, click "Record a New Gesture…" below its drawing in the editor. Press Esc in the window that opens to keep the old drawing. Clicking the drawing no longer clears it.
 - Gestures now work while the gesture editor is open. They stop only while you draw a gesture.
-- Commands in "Run Command in Shell" and in the "Command" steps of an "Advanced Action" are now edited in a window of their own, with room for a script of several lines and the option "Use Variables". Open it with the edit button on the command's row. In that window, Enter starts a new line and Ctrl+Enter sets the command.
+- Commands in "Run Command in Shell" and in the "Command" steps of an "Advanced Action" are now edited in a window of their own, with room for a script of several lines and the option "Use Variables". Open it with the edit button on the command's row. In that window, Enter starts a new line and Ctrl+Enter sets the command. Keywords, function names, quoted text, variables, comments and operators are shown in colors. A command inside the command, like `$(date)`, has colors of its own. The command's box grows with the window.
 - A new "Command" step is now added only after you click "Set" in that window.
 - When a command fails, its notification now shows the last lines of the command's error message, in place of its exit code.
 
+## [8.1.1] - 2026-11-17
+
+### Changed
+
+- Gestos now runs two background processes instead of three.
+
 ### Fixed
 
-- After Gestos was updated, the gestures went on running the old version until you logged out. That version ignored what it didn't know, like the step "Copy", and showed no message. The gestures now restart on their own when Gestos is updated.
+- After Gestos was updated, the gestures went on running the old version until you logged out. They now restart on their own when Gestos is updated.
 - In an "Advanced Action", cancelling the keys of a new "Shortcut" step left a step that pressed nothing. Clearing the keys of a step now removes it.
+- Plugging in or unplugging a monitor while windows were tiled could crash GNOME and log you out.
+- A mouse plugged in or connected after Gestos started, like a Bluetooth mouse, didn't draw gestures until Gestos was started again. A mouse plugged back in could also stop drawing them.
+- Gestos didn't start when no mouse was connected. It now starts and waits for one.
+- The path of a gesture wasn't drawn on a monitor plugged in after Gestos started (X11).
+- After plugging in or unplugging a monitor, the path of the next gesture could be drawn on the wrong screen, or not at all (KDE).
+- The windows that "Export…", "Import…" and "Remove All…" open in Preferences belonged to the main window instead of Preferences. They could open on another monitor, apart from Preferences.
 
 ## [8.1.0] - 2026-11-16
 
@@ -454,7 +466,8 @@ Rebuilt the packages, with no changes.
 - Rewritten in Rust, and built with Meson.
 - Gestures are now recognized whatever their size or proportions.
 
-[Unreleased]: https://github.com/deters/gestos/compare/v8.1.0...HEAD
+[Unreleased]: https://github.com/deters/gestos/compare/v8.1.1...HEAD
+[8.1.1]: https://github.com/deters/gestos/compare/v8.1.0...v8.1.1
 [8.1.0]: https://github.com/deters/gestos/compare/v8.0.1...v8.1.0
 [8.0.1]: https://github.com/deters/gestos/compare/v8.0.0...v8.0.1
 [8.0.0]: https://github.com/deters/gestos/compare/v7.1.0...v8.0.0

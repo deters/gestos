@@ -164,6 +164,17 @@ function isSnapped(window) {
     return flags !== 0 && flags !== Meta.MaximizeFlags.BOTH && !window.is_fullscreen();
 }
 
+// A window is on no monitor for a moment after one is unplugged, and maybe as it closes. Asking
+// Mutter for its work area then crashes the Shell, and so does unmaximizing it, which asks for that.
+function isOnMonitor(window) {
+    return window.get_monitor() >= 0;
+}
+
+// The work area of the monitor a window is on, or null while it's on none.
+function workAreaOf(window) {
+    return isOnMonitor(window) ? window.get_work_area_current_monitor() : null;
+}
+
 // With workspaces only on the primary monitor, as GNOME has by default, windows on the others are
 // on every workspace. They're tiled with the workspace in use.
 function isOnSharedMonitor(window) {
@@ -291,6 +302,10 @@ class WindowActions {
         this._middleIds = Object.entries(middleHandlers).map(([signal, handler]) =>
             Gio.DBus.session.signal_subscribe(null, DAEMON_INTERFACE, signal, DAEMON_PATH, null,
                 Gio.DBusSignalFlags.NONE, (...args) => handler(args.at(-1))));
+        // Windows on no monitor for a moment are placed once they're on one again.
+        this._monitorWaits = new Map();
+        this._enteredMonitorId = global.display.connect('window-entered-monitor',
+            (_display, _monitor, window) => this._onEnteredMonitor(window));
         // Monitors that come and go move windows, which isn't the user placing them.
         this._monitorsSettleId = 0;
         this._monitorsId = Main.layoutManager.connect('monitors-changed',
@@ -324,6 +339,9 @@ class WindowActions {
         global.window_manager.disconnect(this._unminimizeId);
         global.workspace_manager.disconnect(this._activeWorkspaceId);
         Main.layoutManager.disconnect(this._monitorsId);
+        global.display.disconnect(this._enteredMonitorId);
+        for (const window of [...this._monitorWaits.keys()])
+            this._stopMonitorWait(window);
         if (this._monitorsSettleId)
             GLib.source_remove(this._monitorsSettleId);
         global.workspace_manager.disconnect(this._workspaceAddedId);
@@ -479,11 +497,15 @@ class WindowActions {
     }
 
     _resizeReopened(window, reopened) {
+        const area = workAreaOf(window);
+        if (!area) {
+            this._whenOnMonitor(window, 'reopened', () => this._resizeReopened(window, reopened));
+            return;
+        }
         if (isMaximizedAtAll(window))
             window.unmaximize();
         const frame = window.get_frame_rect();
-        const {x, y} = keepInside({x: frame.x, y: frame.y, ...reopened.rect},
-            window.get_work_area_current_monitor());
+        const {x, y} = keepInside({x: frame.x, y: frame.y, ...reopened.rect}, area);
         window.move_resize_frame(true, x, y, reopened.rect.width, reopened.rect.height);
     }
 
@@ -616,8 +638,8 @@ class WindowActions {
     _restoreOriginal(window) {
         const original = this._originals.get(window);
         if (original?.rect && !original.closing) {
-            const {x, y, width, height} =
-                keepInside(original.rect, window.get_work_area_current_monitor());
+            const area = workAreaOf(window);
+            const {x, y, width, height} = area ? keepInside(original.rect, area) : original.rect;
             window.move_resize_frame(true, x, y, width, height);
             this._forgetGiven(original);
         }
@@ -627,6 +649,10 @@ class WindowActions {
     // Gives a window its original size back, and calls done once the app has taken it, or after a
     // while if it doesn't.
     _restoreOriginalThen(window, original, done) {
+        if (!isOnMonitor(window)) {
+            done();
+            return;
+        }
         original.fixing = true;
         if (isMaximizedAtAll(window))
             window.unmaximize();
@@ -1061,6 +1087,18 @@ class WindowActions {
     // A snapped one stays snapped, set aside, as the user put it there, and the others are tiled
     // beside it. Returns whether it joined.
     _addToTiling(tiling, window, reopened = null) {
+        // One on no monitor can't be unmaximized or fitted to a screen, so it joins once it's on one.
+        if (!isOnMonitor(window)) {
+            this._whenOnMonitor(window, 'join', () => {
+                if (this._tilings.get(tiling.workspace) !== tiling ||
+                    window.get_workspace() !== tiling.workspace || this._findTiling(window)[1] ||
+                    window.minimized || !isTileable(window))
+                    return;
+                if (this._addToTiling(tiling, window, reopened))
+                    this._layoutWhenReady(tiling);
+            });
+            return false;
+        }
         if (isSnapped(window)) {
             this._setAside(tiling, window, this._originals.get(window)?.rect ?? null);
             tiling.aside.get(window).settle();
@@ -1143,7 +1181,12 @@ class WindowActions {
             : [...tiling.parked.keys()].filter(window => window.get_workspace() === tiling.workspace);
         // One snapped while it's still tiled isn't resized or minimized, and keeps its side.
         const windows = [...tiling.order.filter(window => tiling.windows.has(window) &&
-            !isSnapped(window)), ...parked];
+            !isSnapped(window)), ...parked].filter(window => {
+            if (isOnMonitor(window))
+                return true;
+            this._layoutOnceOnMonitor(tiling, window);
+            return false;
+        });
         tiling.plans = this._byMonitor(windows).map(group => {
             const workArea = group[0].get_work_area_current_monitor();
             // Snapped windows keep their side, and the others are tiled in the room left.
@@ -1190,6 +1233,59 @@ class WindowActions {
             .filter(window => !window.minimized && window.get_monitor() === monitor &&
                 isSnapped(window))
             .map(window => window.get_frame_rect());
+    }
+
+    // Lays the tiling out again once the window is on a monitor, if it's still tiled then.
+    _layoutOnceOnMonitor(tiling, window) {
+        this._whenOnMonitor(window, tiling, () => {
+            // After monitors change, every tiling is laid out again anyway.
+            if (this._tilings.get(tiling.workspace) === tiling && tiling.windows.has(window) &&
+                !this._monitorsSettleId)
+                this._layoutWhenReady(tiling);
+        });
+    }
+
+    // Runs what's asked once the window is on a monitor: at once if it is. Asking again with the same
+    // key replaces what was asked before.
+    _whenOnMonitor(window, key, run) {
+        if (isOnMonitor(window)) {
+            run();
+            return;
+        }
+        let wait = this._monitorWaits.get(window);
+        if (!wait) {
+            wait = {runs: new Map(), idleId: 0,
+                unmanagedId: window.connect('unmanaged', () => this._stopMonitorWait(window))};
+            this._monitorWaits.set(window, wait);
+        }
+        wait.runs.set(key, run);
+    }
+
+    // Mutter says so while it's still moving every window to the monitors there are now, so what
+    // waits runs once it's done.
+    _onEnteredMonitor(window) {
+        const wait = this._monitorWaits.get(window);
+        if (!wait || wait.idleId)
+            return;
+        wait.idleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            wait.idleId = 0;
+            if (!isOnMonitor(window))
+                return GLib.SOURCE_REMOVE;
+            this._stopMonitorWait(window);
+            for (const run of wait.runs.values())
+                run();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _stopMonitorWait(window) {
+        const wait = this._monitorWaits.get(window);
+        if (!wait)
+            return;
+        window.disconnect(wait.unmanagedId);
+        if (wait.idleId)
+            GLib.source_remove(wait.idleId);
+        this._monitorWaits.delete(window);
     }
 
     _byMonitor(windows) {
@@ -1283,6 +1379,10 @@ class WindowActions {
                 isMaximizedAtAll(window) || window.is_fullscreen() || isOnAllByChoice(window) ||
                 floats(window))
                 return;
+            if (!isOnMonitor(window)) {
+                this._whenOnMonitor(window, aside, join);
+                return;
+            }
             this._forgetAside(tiling, window);
             if (this._findTiling(window)[1])
                 return;
@@ -1360,6 +1460,10 @@ class WindowActions {
             };
             const frame = window.get_frame_rect();
             const monitor = window.get_monitor();
+            if (monitor < 0) {
+                makeRoom();
+                return;
+            }
             const full = window.is_fullscreen()
                 ? global.display.get_monitor_geometry(monitor)
                 : window.get_work_area_for_monitor(monitor);
@@ -1459,10 +1563,14 @@ class WindowActions {
                 if (!state?.tile || !original || original.closing || this._grabbed === window ||
                     isSnapped(window) || (early && original.asked))
                     return;
+                const area = workAreaOf(window);
+                if (!area) {
+                    this._layoutOnceOnMonitor(tiling, window);
+                    return;
+                }
                 original.asked = null;
                 const frame = window.get_frame_rect();
                 const tile = state.tile;
-                const area = window.get_work_area_current_monitor();
                 // A bit smaller where it was put fills its tile as well as it can, as a terminal
                 // does with whole lines and columns.
                 if (Math.abs(frame.x - tile.x) <= 1 && Math.abs(frame.y - tile.y) <= 1 &&
@@ -1674,7 +1782,7 @@ class WindowActions {
 
     _onMiddleDragStarted() {
         const middle = this._middleWindow(Meta.GrabOp.MOVING);
-        if (!middle?.window?.allows_move())
+        if (!middle?.window?.allows_move() || !isOnMonitor(middle.window))
             return;
         // It's held where the pointer took it, as a part of its size, so one that changes size as
         // it's restored stays under the pointer.
@@ -1707,10 +1815,13 @@ class WindowActions {
         if (!middle?.window?.allows_resize())
             return;
         const window = middle.window;
+        const area = workAreaOf(window);
+        if (!area)
+            return;
         const from = middle.rect ?? copyRect(window.get_frame_rect());
         if (isMaximizedAtAll(window))
             window.unmaximize();
-        middle.rect = steppedRect(from, notches, window.get_work_area_current_monitor());
+        middle.rect = steppedRect(from, notches, area);
         const {x, y, width, height} = middle.rect;
         window.move_resize_frame(true, x, y, width, height);
     }

@@ -86,7 +86,8 @@ pub fn report() -> String {
     line(
         &mut out,
         "Left-handed",
-        &command_output("gsettings", &["get", "org.gnome.desktop.peripherals.mouse", "left-handed"]),
+        &gestos::wayland::read_gnome_setting("org.gnome.desktop.peripherals.mouse", "left-handed")
+            .unwrap_or_else(|| "not set".to_string()),
     );
     for mouse in mice() {
         line(&mut out, "Mouse", &mouse);

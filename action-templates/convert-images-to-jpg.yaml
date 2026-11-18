@@ -11,13 +11,15 @@ steps:
   - run: |
       fail() { echo "$*" >&2; exit 1; }
       show() { echo "$*"; }
+      # /a/report.pdf → /a/report
+      without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
 
       converted=0
       for f in "$@"; do
           case $f in *.jpg|*.JPG|*.jpeg|*.JPEG) continue ;; esac
-          jpg="${f%.*}.jpg"
+          jpg="$(without_extension "$f").jpg"
           [ -e "$jpg" ] && continue
-          convert "$f" "$jpg" || fail "Couldn't convert ${f##*/}"
+          convert "$f" "$jpg" || fail "Couldn't convert $(basename "$f")"
           converted=$((converted + 1))
       done
 

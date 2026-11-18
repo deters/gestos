@@ -2,8 +2,9 @@
 //! action's command steps: room for a long command or a script of several lines, and its
 //! variables, which the rows it's for don't have.
 
+use adw::prelude::*;
 use gestos::command_variables::ShellCommand;
-use gtk::prelude::*;
+use gestos::shell_syntax::{inner_commands, spans, Kind};
 use gtk4 as gtk;
 use std::rc::Rc;
 
@@ -54,6 +55,7 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
     view.set_left_margin(8);
     view.set_right_margin(8);
     view.update_property(&[gtk::accessible::Property::Label("Command")]);
+    highlight_shell(&view.buffer(), &dialog);
     let scrolled = gtk::ScrolledWindow::new();
     scrolled.set_child(Some(&view));
     scrolled.set_has_frame(true);
@@ -61,6 +63,8 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
     scrolled.set_min_content_height(160);
     scrolled.set_max_content_height(400);
     scrolled.set_propagate_natural_height(true);
+    // Made taller with the window, for a long script.
+    scrolled.set_vexpand(true);
     // An example while it's empty, as a text field has.
     let placeholder = gtk::Label::new(Some("e.g. firefox"));
     placeholder.add_css_class("monospace");
@@ -114,6 +118,94 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
     dialog.set_default_widget(Some(&set_btn));
     dialog.present();
     view.grab_focus();
+}
+
+/// The colors of a command's parts, for a light style and a dark one, from GNOME's palette. The
+/// commands inside it, as `$(…)` is, have colors of their own for their text, keywords and quoted
+/// text, and share the others, so a variable or a function looks the same anywhere. Plain text outside them
+/// keeps the text's own color.
+fn color_of(kind: Option<Kind>, inner: bool, dark: bool) -> &'static str {
+    match (kind, inner, dark) {
+        (None, _, false) => "#865e3c",
+        (None, _, true) => "#cdab8f",
+        (Some(Kind::Keyword), false, false) => "#813d9c",
+        (Some(Kind::Keyword), false, true) => "#dc8add",
+        (Some(Kind::Keyword), true, false) => "#a51d2d",
+        (Some(Kind::Keyword), true, true) => "#f66151",
+        (Some(Kind::Quoted), false, false) => "#26a269",
+        (Some(Kind::Quoted), false, true) => "#8ff0a4",
+        (Some(Kind::Quoted), true, false) => "#9c6e03",
+        (Some(Kind::Quoted), true, true) => "#f8e45c",
+        // GNOME's palette has no magenta, and its purple is the keywords'.
+        (Some(Kind::Function), _, false) => "#b0187e",
+        (Some(Kind::Function), _, true) => "#f28cd2",
+        (Some(Kind::Variable), _, false) => "#1c71d8",
+        (Some(Kind::Variable), _, true) => "#99c1f1",
+        (Some(Kind::Comment), _, false) => "#77767b",
+        (Some(Kind::Comment), _, true) => "#9a9996",
+        (Some(Kind::Operator), _, false) => "#c64600",
+        (Some(Kind::Operator), _, true) => "#ffbe6f",
+    }
+}
+
+/// Colors a command's keywords, function names, quoted text, variables, comments and operators as
+/// it's written, and the commands inside it in colors of their own, for the style in use, light or
+/// dark, which change with it while `window` is open.
+fn highlight_shell(buffer: &gtk::TextBuffer, window: &gtk::Window) {
+    let new_tag = || buffer.create_tag(None, &[]).expect("a tag without a name");
+    // Made first, so the parts inside a command inside are shown in their own colors over it.
+    let inner_text = new_tag();
+    let kinds = [Kind::Quoted, Kind::Keyword, Kind::Function, Kind::Operator, Kind::Comment, Kind::Variable];
+    let tags: Vec<(Kind, bool, gtk::TextTag)> = [false, true]
+        .into_iter()
+        .flat_map(|inner| kinds.into_iter().map(move |kind| (kind, inner)))
+        .map(|(kind, inner)| (kind, inner, new_tag()))
+        .collect();
+    let style = adw::StyleManager::default();
+    let color = {
+        let tags = tags.clone();
+        let inner_text = inner_text.clone();
+        move |style: &adw::StyleManager| {
+            inner_text.set_foreground(Some(color_of(None, true, style.is_dark())));
+            for (kind, inner, tag) in &tags {
+                tag.set_foreground(Some(color_of(Some(*kind), *inner, style.is_dark())));
+                if *kind == Kind::Comment {
+                    tag.set_style(gtk::pango::Style::Italic);
+                }
+            }
+        }
+    };
+    color(&style);
+    let recolor = std::cell::Cell::new(Some(style.connect_dark_notify(color)));
+    window.connect_destroy(move |_| {
+        if let Some(recolor) = recolor.take() {
+            style.disconnect(recolor);
+        }
+    });
+
+    let paint = move |buffer: &gtk::TextBuffer| {
+        let (start, end) = buffer.bounds();
+        for tag in tags.iter().map(|(_, _, tag)| tag).chain([&inner_text]) {
+            buffer.remove_tag(tag, &start, &end);
+        }
+        let text = buffer.text(&start, &end, false);
+        let apply = |tag: &gtk::TextTag, from: usize, to: usize| {
+            buffer.apply_tag(tag, &buffer.iter_at_offset(from as i32), &buffer.iter_at_offset(to as i32));
+        };
+        let commands = inner_commands(&text);
+        for command in &commands {
+            apply(&inner_text, command.start, command.end);
+        }
+        for span in spans(&text) {
+            let inner = commands.iter().any(|c| c.start <= span.start && span.end <= c.end);
+            let Some((_, _, tag)) = tags.iter().find(|(kind, i, _)| *kind == span.kind && *i == inner) else {
+                continue;
+            };
+            apply(tag, span.start, span.end);
+        }
+    };
+    paint(buffer);
+    buffer.connect_changed(paint);
 }
 
 /// A command as a row shows it: on one line, cut short at the end, or a dimmed "None" before

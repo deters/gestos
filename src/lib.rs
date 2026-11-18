@@ -24,6 +24,7 @@ pub mod panel;
 pub mod processes;
 pub mod protractor;
 #[cfg(target_os = "linux")]
+pub mod shell_syntax;
 pub mod smooth;
 pub mod trail;
 pub mod uinput;

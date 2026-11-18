@@ -208,9 +208,6 @@ mod wayland {
     use smithay_client_toolkit::{delegate_dispatch2, delegate_registry, registry_handlers};
     use std::time::{Duration, Instant};
 
-    /// How long the desktop gets to make room for the layer.
-    const CONFIGURE_TIMEOUT: Duration = Duration::from_millis(500);
-
     pub struct Screen {
         queue: EventQueue<State>,
         state: State,
@@ -271,6 +268,10 @@ mod wayland {
 
         /// A layer over the screen `point` is on, which clicks go through.
         pub fn open_layer(&mut self, point: (f64, f64)) -> Result<PathLayer, Error> {
+            // The screens as they are now: the desktop said which came or went since the last
+            // gesture, and a new one says where it is once asked.
+            self.queue.roundtrip(&mut self.state)?;
+            self.queue.roundtrip(&mut self.state)?;
             let outputs = &self.state.outputs;
             let screens: Vec<_> = outputs
                 .outputs()
@@ -304,10 +305,9 @@ mod wayland {
             layer.commit();
             self.state.configured = None;
             self.state.closed = false;
-            let start = Instant::now();
-            while self.state.configured.is_none() && !self.state.closed && start.elapsed() < CONFIGURE_TIMEOUT {
-                self.queue.blocking_dispatch(&mut self.state)?;
-            }
+            // The desktop answers the first commit with the layer's size, before the roundtrip's own
+            // answer.
+            self.queue.roundtrip(&mut self.state)?;
             let (points_wide, points_high) = self.state.configured.ok_or("the desktop didn't show the path")?;
             let (width, height) = (points_wide as i32 * scale, points_high as i32 * scale);
 
