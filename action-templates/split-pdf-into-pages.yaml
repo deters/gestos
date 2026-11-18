@@ -14,6 +14,8 @@ steps:
       show() { echo "$*"; }
       # /a/report.pdf → /a/report
       without_extension() { printf '%s\n' "$1" | sed 's/\.[^./]*$//'; }
+      # pdfseparate reads a % in the names it saves to as the page number, and %% as a %.
+      escape_percent() { printf '%s\n' "$1" | sed 's/%/%%/g'; }
 
       for f in "$@"; do
           case $f in *.pdf|*.PDF) ;; *) fail "$(basename "$f") isn't a PDF" ;; esac
@@ -24,7 +26,7 @@ steps:
           [ -e "$folder" ] && fail "$(basename "$folder") is there already"
           mkdir "$folder" || fail "Couldn't make $(basename "$folder")"
           name=$(basename "$f")
-          pdfseparate "$f" "$folder/$(without_extension "$name") page %d.pdf" || fail "Couldn't split $(basename "$f")"
+          pdfseparate "$f" "$(escape_percent "$folder/$(without_extension "$name")") page %d.pdf" || fail "Couldn't split $(basename "$f")"
       done
 
       [ $# -eq 1 ] && show "Saved $(ls "$folder" | wc -l) pages in $(basename "$folder")" || show "Split $# PDFs"
