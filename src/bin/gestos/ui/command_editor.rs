@@ -120,59 +120,52 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
     view.grab_focus();
 }
 
-/// The colors of a command's parts, for a light style and a dark one, from GNOME's palette.
-fn color_of(kind: Kind, dark: bool) -> &'static str {
-    match (kind, dark) {
-        (Kind::Keyword, false) => "#813d9c",
-        (Kind::Keyword, true) => "#dc8add",
-        (Kind::Quoted, false) => "#26a269",
-        (Kind::Quoted, true) => "#8ff0a4",
-        (Kind::Variable, false) => "#1c71d8",
-        (Kind::Variable, true) => "#99c1f1",
-        (Kind::Comment, false) => "#77767b",
-        (Kind::Comment, true) => "#9a9996",
-        (Kind::Operator, false) => "#c64600",
-        (Kind::Operator, true) => "#ffbe6f",
+/// The colors of a command's parts, for a light style and a dark one, from GNOME's palette. The
+/// commands inside it, as `$(…)` is, have colors of their own for their text, keywords and quoted
+/// text, and share the others, so a variable looks the same anywhere. Plain text outside them
+/// keeps the text's own color.
+fn color_of(kind: Option<Kind>, inner: bool, dark: bool) -> &'static str {
+    match (kind, inner, dark) {
+        (None, _, false) => "#865e3c",
+        (None, _, true) => "#cdab8f",
+        (Some(Kind::Keyword), false, false) => "#813d9c",
+        (Some(Kind::Keyword), false, true) => "#dc8add",
+        (Some(Kind::Keyword), true, false) => "#a51d2d",
+        (Some(Kind::Keyword), true, true) => "#f66151",
+        (Some(Kind::Quoted), false, false) => "#26a269",
+        (Some(Kind::Quoted), false, true) => "#8ff0a4",
+        (Some(Kind::Quoted), true, false) => "#9c6e03",
+        (Some(Kind::Quoted), true, true) => "#f8e45c",
+        (Some(Kind::Variable), _, false) => "#1c71d8",
+        (Some(Kind::Variable), _, true) => "#99c1f1",
+        (Some(Kind::Comment), _, false) => "#77767b",
+        (Some(Kind::Comment), _, true) => "#9a9996",
+        (Some(Kind::Operator), _, false) => "#c64600",
+        (Some(Kind::Operator), _, true) => "#ffbe6f",
     }
 }
-
-/// The background of a command inside another, a little deeper for one inside that, so its own
-/// colors still show on it.
-fn inner_background(depth: usize, dark: bool) -> &'static str {
-    match (depth, dark) {
-        (1, false) => "rgba(53, 132, 228, 0.08)",
-        (_, false) => "rgba(53, 132, 228, 0.16)",
-        (1, true) => "rgba(153, 193, 241, 0.10)",
-        (_, true) => "rgba(153, 193, 241, 0.20)",
-    }
-}
-
-/// The deepest a command inside others gets a background of its own for. Deeper ones share it.
-const INNER_DEPTHS: usize = 2;
 
 /// Colors a command's keywords, quoted text, variables, comments and operators as it's written,
-/// and puts a background behind the commands inside it, in colors for the style in use, light or
-/// dark, which change with it while `window` is open.
+/// and the commands inside it in colors of their own, for the style in use, light or dark, which
+/// change with it while `window` is open.
 fn highlight_shell(buffer: &gtk::TextBuffer, window: &gtk::Window) {
-    // Made from the shallowest, so a deeper one's background is shown over it.
-    let inner: Vec<gtk::TextTag> = (1..=INNER_DEPTHS)
-        .map(|_| buffer.create_tag(None, &[]).expect("a tag without a name"))
-        .collect();
+    let new_tag = || buffer.create_tag(None, &[]).expect("a tag without a name");
+    // Made first, so the parts inside a command inside are shown in their own colors over it.
+    let inner_text = new_tag();
     let kinds = [Kind::Quoted, Kind::Keyword, Kind::Operator, Kind::Comment, Kind::Variable];
-    let tags: Vec<(Kind, gtk::TextTag)> = kinds
+    let tags: Vec<(Kind, bool, gtk::TextTag)> = [false, true]
         .into_iter()
-        .map(|kind| (kind, buffer.create_tag(None, &[]).expect("a tag without a name")))
+        .flat_map(|inner| kinds.into_iter().map(move |kind| (kind, inner)))
+        .map(|(kind, inner)| (kind, inner, new_tag()))
         .collect();
     let style = adw::StyleManager::default();
     let color = {
         let tags = tags.clone();
-        let inner = inner.clone();
+        let inner_text = inner_text.clone();
         move |style: &adw::StyleManager| {
-            for (depth, tag) in inner.iter().enumerate() {
-                tag.set_background(Some(inner_background(depth + 1, style.is_dark())));
-            }
-            for (kind, tag) in &tags {
-                tag.set_foreground(Some(color_of(*kind, style.is_dark())));
+            inner_text.set_foreground(Some(color_of(None, true, style.is_dark())));
+            for (kind, inner, tag) in &tags {
+                tag.set_foreground(Some(color_of(Some(*kind), *inner, style.is_dark())));
                 if *kind == Kind::Comment {
                     tag.set_style(gtk::pango::Style::Italic);
                 }
@@ -189,21 +182,23 @@ fn highlight_shell(buffer: &gtk::TextBuffer, window: &gtk::Window) {
 
     let paint = move |buffer: &gtk::TextBuffer| {
         let (start, end) = buffer.bounds();
-        for tag in tags.iter().map(|(_, tag)| tag).chain(&inner) {
+        for tag in tags.iter().map(|(_, _, tag)| tag).chain([&inner_text]) {
             buffer.remove_tag(tag, &start, &end);
         }
         let text = buffer.text(&start, &end, false);
-        for command in inner_commands(&text) {
-            let tag = &inner[command.depth.min(INNER_DEPTHS) - 1];
-            let from = buffer.iter_at_offset(command.start as i32);
-            let to = buffer.iter_at_offset(command.end as i32);
-            buffer.apply_tag(tag, &from, &to);
+        let apply = |tag: &gtk::TextTag, from: usize, to: usize| {
+            buffer.apply_tag(tag, &buffer.iter_at_offset(from as i32), &buffer.iter_at_offset(to as i32));
+        };
+        let commands = inner_commands(&text);
+        for command in &commands {
+            apply(&inner_text, command.start, command.end);
         }
         for span in spans(&text) {
-            let Some((_, tag)) = tags.iter().find(|(kind, _)| *kind == span.kind) else { continue };
-            let from = buffer.iter_at_offset(span.start as i32);
-            let to = buffer.iter_at_offset(span.end as i32);
-            buffer.apply_tag(tag, &from, &to);
+            let inner = commands.iter().any(|c| c.start <= span.start && span.end <= c.end);
+            let Some((_, _, tag)) = tags.iter().find(|(kind, i, _)| *kind == span.kind && *i == inner) else {
+                continue;
+            };
+            apply(tag, span.start, span.end);
         }
     };
     paint(buffer);
