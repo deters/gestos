@@ -20,7 +20,6 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - You can add your own actions as files in `~/.local/share/gestos/action-templates`. A file there with the same name as one of Gestos's own takes its place. An action file can name an icon from the icon theme with `icon:`, which the action and its gestures are shown with.
 ### Changed
 
-- Gestos now runs two background processes instead of three.
 - A new gesture is now drawn first, in a window of its own that says which mouse button draws gestures. The editor opens once the gesture is drawn. Press Esc in that window to cancel.
 - To draw a gesture again, click "Redraw" on its drawing in the editor. Press Esc in the window that opens to keep the old drawing. Clicking the drawing no longer clears it.
 - Gestures now work while the gesture editor is open. They stop only while you draw a gesture.
@@ -28,9 +27,15 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A new "Command" step is now added only after you click "Set" in that window.
 - When a command fails, its notification now shows the last lines of the command's error message, in place of its exit code.
 
+## [8.1.1] - 2026-11-17
+
+### Changed
+
+- Gestos now runs two background processes instead of three.
+
 ### Fixed
 
-- After Gestos was updated, the gestures went on running the old version until you logged out. That version ignored what it didn't know, like the step "Copy", and showed no message. The gestures now restart on their own when Gestos is updated.
+- After Gestos was updated, the gestures went on running the old version until you logged out. They now restart on their own when Gestos is updated.
 - In an "Advanced Action", cancelling the keys of a new "Shortcut" step left a step that pressed nothing. Clearing the keys of a step now removes it.
 - Plugging in or unplugging a monitor while windows were tiled could crash GNOME and log you out.
 - A mouse plugged in or connected after Gestos started, like a Bluetooth mouse, didn't draw gestures until Gestos was started again. A mouse plugged back in could also stop drawing them.
@@ -460,7 +465,8 @@ Rebuilt the packages, with no changes.
 - Rewritten in Rust, and built with Meson.
 - Gestures are now recognized whatever their size or proportions.
 
-[Unreleased]: https://github.com/deters/gestos/compare/v8.1.0...HEAD
+[Unreleased]: https://github.com/deters/gestos/compare/v8.1.1...HEAD
+[8.1.1]: https://github.com/deters/gestos/compare/v8.1.0...v8.1.1
 [8.1.0]: https://github.com/deters/gestos/compare/v8.0.1...v8.1.0
 [8.0.1]: https://github.com/deters/gestos/compare/v8.0.0...v8.0.1
 [8.0.0]: https://github.com/deters/gestos/compare/v7.1.0...v8.0.0
