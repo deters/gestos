@@ -12,8 +12,7 @@ pub enum Kind {
 }
 
 /// A part of the command, from one character to before another, counted in characters as a
-/// text buffer counts them. A variable inside double quotes is a part of its own, inside the
-/// quoted one.
+/// text buffer counts them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     pub start: usize,
@@ -66,115 +65,174 @@ fn variable_end(chars: &[char], start: usize) -> Option<usize> {
     Some(start + 1 + length)
 }
 
-/// The parts of a command worth coloring, in order.
+/// The parts of a command worth coloring, in order. Quoted text is cut around what's colored
+/// inside it, so a variable or a command in double quotes is shown as itself.
 pub fn spans(command: &str) -> Vec<Span> {
     let chars: Vec<char> = command.chars().collect();
-    let mut spans = Vec::new();
-    let mut push = |start: usize, end: usize, kind: Kind| {
+    let mut parser = Parser { chars: &chars, spans: Vec::new() };
+    parser.commands(0, None);
+    parser.spans
+}
+
+struct Parser<'a> {
+    chars: &'a [char],
+    spans: Vec<Span>,
+}
+
+impl Parser<'_> {
+    fn push(&mut self, start: usize, end: usize, kind: Kind) {
+        let end = end.min(self.chars.len());
         if end > start {
-            spans.push(Span { start, end, kind });
-        }
-    };
-    // Whether the next word is where a command's name goes, which is the only place a keyword is
-    // one: `echo if` prints it.
-    let mut at_command = true;
-    let mut expects_in = false;
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        let word_start = i == 0 || chars[i - 1].is_whitespace() || is_operator(chars[i - 1]);
-        match c {
-            '\n' => {
-                at_command = true;
-                i += 1;
-            }
-            _ if c.is_whitespace() => i += 1,
-            '#' if word_start => {
-                let end = chars[i..].iter().position(|&c| c == '\n').map_or(chars.len(), |n| i + n);
-                push(i, end, Kind::Comment);
-                i = end;
-            }
-            '\\' => {
-                i += 2;
-                at_command = false;
-            }
-            '\'' => {
-                let close = chars[i + 1..].iter().position(|&c| c == '\'');
-                let end = close.map_or(chars.len(), |close| i + 1 + close + 1);
-                push(i, end, Kind::Quoted);
-                i = end;
-                at_command = false;
-            }
-            '"' => {
-                let start = i;
-                let mut variables = Vec::new();
-                i += 1;
-                while i < chars.len() && chars[i] != '"' {
-                    match chars[i] {
-                        '\\' => i += 2,
-                        '$' => match variable_end(&chars, i) {
-                            Some(end) => {
-                                variables.push((i, end));
-                                i = end;
-                            }
-                            None => i += 1,
-                        },
-                        _ => i += 1,
-                    }
-                }
-                i = (i + 1).min(chars.len());
-                push(start, i, Kind::Quoted);
-                for (start, end) in variables {
-                    push(start, end, Kind::Variable);
-                }
-                at_command = false;
-            }
-            '$' => {
-                if chars.get(i + 1) == Some(&'(') {
-                    push(i, i + 2, Kind::Operator);
-                    i += 2;
-                    at_command = true;
-                } else if let Some(end) = variable_end(&chars, i) {
-                    push(i, end, Kind::Variable);
-                    i = end;
-                    at_command = false;
-                } else {
-                    i += 1;
-                }
-            }
-            '`' => {
-                push(i, i + 1, Kind::Operator);
-                i += 1;
-                at_command = true;
-            }
-            _ if is_operator(c) => {
-                let length = chars[i..].iter().take_while(|&&c| is_operator(c)).count();
-                push(i, i + length, Kind::Operator);
-                // After a redirection comes a file, and after the others a command.
-                at_command = !matches!(c, '<' | '>');
-                expects_in = false;
-                i += length;
-            }
-            _ => {
-                let length = chars[i..].iter().take_while(|&&c| !ends_word(c)).count().max(1);
-                let word: String = chars[i..i + length].iter().collect();
-                if at_command && KEYWORDS.contains(&word.as_str()) || expects_in && word == "in" {
-                    push(i, i + length, Kind::Keyword);
-                    expects_in = BEFORE_NAME.contains(&word.as_str());
-                    at_command = BEFORE_COMMAND.contains(&word.as_str());
-                } else if let Some(name) = word.split_once('=').map(|(name, _)| name).filter(|name| {
-                    at_command && name.starts_with(is_name_start) && name.chars().all(is_name)
-                }) {
-                    // An assignment before a command, or on its own.
-                    push(i, i + name.chars().count(), Kind::Variable);
-                } else {
-                    at_command = false;
-                }
-                i += length;
-            }
+            self.spans.push(Span { start, end, kind });
         }
     }
-    spans
+
+    /// Reads commands from `i` to the end, or, inside `$(…)` or `` `…` ``, to the `close` that
+    /// ends it. Where it stopped, after that close.
+    fn commands(&mut self, mut i: usize, close: Option<char>) -> usize {
+        let chars = self.chars;
+        // Whether the next word is where a command's name goes, which is the only place a keyword
+        // is one: `echo if` prints it.
+        let mut at_command = true;
+        let mut expects_in = false;
+        // Parentheses opened inside `$(…)`, which its `)` comes after.
+        let mut open = 0u32;
+        while i < chars.len() {
+            let c = chars[i];
+            let word_start = i == 0 || chars[i - 1].is_whitespace() || is_operator(chars[i - 1]);
+            if Some(c) == close && (c == '`' || open == 0) {
+                self.push(i, i + 1, Kind::Operator);
+                return i + 1;
+            }
+            match c {
+                '\n' => {
+                    at_command = true;
+                    i += 1;
+                }
+                _ if c.is_whitespace() => i += 1,
+                '#' if word_start => {
+                    let end = chars[i..].iter().position(|&c| c == '\n').map_or(chars.len(), |n| i + n);
+                    self.push(i, end, Kind::Comment);
+                    i = end;
+                }
+                '\\' => {
+                    i += 2;
+                    at_command = false;
+                }
+                '\'' => {
+                    let close = chars[i + 1..].iter().position(|&c| c == '\'');
+                    let end = close.map_or(chars.len(), |close| i + 1 + close + 1);
+                    self.push(i, end, Kind::Quoted);
+                    i = end;
+                    at_command = false;
+                }
+                '"' => {
+                    i = self.double_quoted(i);
+                    at_command = false;
+                }
+                '$' if chars.get(i + 1) == Some(&'(') => {
+                    self.push(i, i + 2, Kind::Operator);
+                    i = self.commands(i + 2, Some(')'));
+                    at_command = false;
+                }
+                '$' => match variable_end(chars, i) {
+                    Some(end) => {
+                        self.push(i, end, Kind::Variable);
+                        i = end;
+                        at_command = false;
+                    }
+                    None => i += 1,
+                },
+                '`' => {
+                    self.push(i, i + 1, Kind::Operator);
+                    i = self.commands(i + 1, Some('`'));
+                    at_command = false;
+                }
+                '(' | ')' => {
+                    if c == '(' {
+                        open += 1;
+                    } else {
+                        open = open.saturating_sub(1);
+                    }
+                    self.push(i, i + 1, Kind::Operator);
+                    at_command = c == '(';
+                    i += 1;
+                }
+                _ if is_operator(c) => {
+                    let length = chars[i..]
+                        .iter()
+                        .take_while(|&&c| is_operator(c) && !matches!(c, '(' | ')'))
+                        .count();
+                    self.push(i, i + length, Kind::Operator);
+                    // After a redirection comes a file, and after the others a command.
+                    at_command = !matches!(c, '<' | '>');
+                    expects_in = false;
+                    i += length;
+                }
+                _ => {
+                    let length = chars[i..].iter().take_while(|&&c| !ends_word(c)).count().max(1);
+                    let word: String = chars[i..i + length].iter().collect();
+                    if at_command && KEYWORDS.contains(&word.as_str()) || expects_in && word == "in" {
+                        self.push(i, i + length, Kind::Keyword);
+                        expects_in = BEFORE_NAME.contains(&word.as_str());
+                        at_command = BEFORE_COMMAND.contains(&word.as_str());
+                    } else if let Some(name) = word.split_once('=').map(|(name, _)| name).filter(|name| {
+                        at_command && name.starts_with(is_name_start) && name.chars().all(is_name)
+                    }) {
+                        // An assignment before a command, or on its own.
+                        self.push(i, i + name.chars().count(), Kind::Variable);
+                    } else {
+                        at_command = false;
+                    }
+                    i += length;
+                }
+            }
+        }
+        i
+    }
+
+    /// Reads double-quoted text starting at `start`, its opening quote: the text itself, and the
+    /// variables and commands in it, which a shell fills in. Where it ended, after its closing
+    /// quote.
+    fn double_quoted(&mut self, start: usize) -> usize {
+        let chars = self.chars;
+        let mut text = start;
+        let mut i = start + 1;
+        while i < chars.len() {
+            match chars[i] {
+                '"' => {
+                    i += 1;
+                    break;
+                }
+                '\\' => i += 2,
+                '$' if chars.get(i + 1) == Some(&'(') => {
+                    self.push(text, i, Kind::Quoted);
+                    self.push(i, i + 2, Kind::Operator);
+                    i = self.commands(i + 2, Some(')'));
+                    text = i;
+                }
+                '`' => {
+                    self.push(text, i, Kind::Quoted);
+                    self.push(i, i + 1, Kind::Operator);
+                    i = self.commands(i + 1, Some('`'));
+                    text = i;
+                }
+                '$' => match variable_end(chars, i) {
+                    Some(end) => {
+                        self.push(text, i, Kind::Quoted);
+                        self.push(i, end, Kind::Variable);
+                        i = end;
+                        text = i;
+                    }
+                    None => i += 1,
+                },
+                _ => i += 1,
+            }
+        }
+        let end = i.min(chars.len());
+        self.push(text, end, Kind::Quoted);
+        end
+    }
 }
 
 #[cfg(test)]
@@ -220,8 +278,9 @@ mod tests {
                 part("for", Kind::Keyword),
                 part("in", Kind::Keyword),
                 part("do", Kind::Keyword),
-                part("\"$f\"", Kind::Quoted),
+                part("\"", Kind::Quoted),
                 part("$f", Kind::Variable),
+                part("\"", Kind::Quoted),
                 part("done", Kind::Keyword),
             ]
         );
@@ -233,10 +292,75 @@ mod tests {
             parts("echo '$HOME' \"${HOME}/x\" $1 $?"),
             [
                 part("'$HOME'", Kind::Quoted),
-                part("\"${HOME}/x\"", Kind::Quoted),
+                part("\"", Kind::Quoted),
                 part("${HOME}", Kind::Variable),
+                part("/x\"", Kind::Quoted),
                 part("$1", Kind::Variable),
                 part("$?", Kind::Variable),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_command_inside_quotes_is_shell_with_quotes_of_its_own() {
+        assert_eq!(
+            parts("fail \"$(basename \"$f\") isn't a PDF\""),
+            [
+                part("\"", Kind::Quoted),
+                part("$(", Kind::Operator),
+                part("\"", Kind::Quoted),
+                part("$f", Kind::Variable),
+                part("\"", Kind::Quoted),
+                part(")", Kind::Operator),
+                part(" isn't a PDF\"", Kind::Quoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn commands_inside_commands_end_where_theirs_do() {
+        assert_eq!(
+            parts("echo \"`date` $(ls | wc -l) (all)\"; if"),
+            [
+                part("\"", Kind::Quoted),
+                part("`", Kind::Operator),
+                part("`", Kind::Operator),
+                part(" ", Kind::Quoted),
+                part("$(", Kind::Operator),
+                part("|", Kind::Operator),
+                part(")", Kind::Operator),
+                part(" (all)\"", Kind::Quoted),
+                part(";", Kind::Operator),
+                part("if", Kind::Keyword),
+            ]
+        );
+        assert_eq!(
+            parts("x=$( (cd /; ls) )"),
+            [
+                part("x", Kind::Variable),
+                part("$(", Kind::Operator),
+                part("(", Kind::Operator),
+                part(";", Kind::Operator),
+                part(")", Kind::Operator),
+                part(")", Kind::Operator),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_keyword_inside_a_command_in_quotes_is_one() {
+        assert_eq!(
+            parts("echo \"$(if true; then echo y; fi)\""),
+            [
+                part("\"", Kind::Quoted),
+                part("$(", Kind::Operator),
+                part("if", Kind::Keyword),
+                part(";", Kind::Operator),
+                part("then", Kind::Keyword),
+                part(";", Kind::Operator),
+                part("fi", Kind::Keyword),
+                part(")", Kind::Operator),
+                part("\"", Kind::Quoted),
             ]
         );
     }
@@ -276,11 +400,23 @@ mod tests {
     fn what_isnt_finished_yet_runs_to_the_end() {
         assert_eq!(parts("echo 'unclosed"), [part("'unclosed", Kind::Quoted)]);
         assert_eq!(parts("echo \"unclosed $x"), [
-            part("\"unclosed $x", Kind::Quoted),
+            part("\"unclosed ", Kind::Quoted),
             part("$x", Kind::Variable),
         ]);
         assert_eq!(parts("echo ${open"), [part("${open", Kind::Variable)]);
         assert!(parts("echo \\").is_empty());
+    }
+
+    #[test]
+    fn every_template_is_colored_in_order_and_within_its_text() {
+        let templates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("action-templates");
+        for entry in std::fs::read_dir(templates).unwrap() {
+            let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            let length = text.chars().count();
+            let found = spans(&text);
+            assert!(found.windows(2).all(|pair| pair[0].end <= pair[1].start));
+            assert!(found.iter().all(|span| span.start < span.end && span.end <= length));
+        }
     }
 
     #[test]

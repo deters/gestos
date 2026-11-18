@@ -139,7 +139,6 @@ fn color_of(kind: Kind, dark: bool) -> &'static str {
 /// Colors a command's keywords, quoted text, variables, comments and operators as it's written,
 /// in colors for the style in use, light or dark, which change with it while `window` is open.
 fn highlight_shell(buffer: &gtk::TextBuffer, window: &gtk::Window) {
-    // Made in this order, so a variable inside quotes has its own color over theirs.
     let kinds = [Kind::Quoted, Kind::Keyword, Kind::Operator, Kind::Comment, Kind::Variable];
     let tags: Vec<(Kind, gtk::TextTag)> = kinds
         .into_iter()
