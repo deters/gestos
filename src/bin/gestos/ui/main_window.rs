@@ -1036,9 +1036,9 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
         state.gesture_groups.remove(&child);
     }
     let visible = get_visible_gestures(&state, None);
-    // On their categories' pages instead, unless Preferences ask for all of them above the
-    // categories too. With none, the categories are all there is.
-    if shows_categories(&state) && (!state.config.all_gestures || visible.is_empty()) {
+    // Above the categories too, unless Preferences ask for only the categories. With none, the
+    // categories are all there is.
+    if shows_categories(&state) && (state.config.hide_gestures || visible.is_empty()) {
         state.main_list.set_visible(false);
         state.empty_state_box.set_visible(false);
         return true;

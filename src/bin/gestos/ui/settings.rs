@@ -220,21 +220,21 @@ fn right_button_switch_row(
     (row, switch)
 }
 
-/// Whether the main page lists every gesture, above the categories. It only changes what Gestos
-/// shows, so the daemon isn't told.
-fn all_gestures_row(state_rc: &Rc<RefCell<AppState>>) -> adw::ActionRow {
-    let title = "Show Gestures in the Main Page";
-    let description = "List every gesture above the categories";
+/// Whether the main page leaves out the list of every gesture, above the categories. It only
+/// changes what Gestos shows, so the daemon isn't told.
+fn hide_gestures_row(state_rc: &Rc<RefCell<AppState>>) -> adw::ActionRow {
+    let title = "Hide Gesture List in the Main Page";
+    let description = "Show only the categories";
     let (row, row_box, subtitle) = settings_row(title, description);
     let switch = settings_switch(title);
-    switch.set_active(state_rc.borrow().config.all_gestures);
+    switch.set_active(state_rc.borrow().config.hide_gestures);
     let state_rc = Rc::clone(state_rc);
     switch.connect_state_set(move |_, enabled| {
         {
             let mut state = state_rc.borrow_mut();
-            state.config.all_gestures = enabled;
+            state.config.hide_gestures = enabled;
             if let Err(e) = state.config.save_to_file() {
-                state.config.all_gestures = !enabled;
+                state.config.hide_gestures = !enabled;
                 subtitle.set_text(&format!("Could not change this setting: {e}"));
                 return glib::Propagation::Stop;
             }
@@ -373,7 +373,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     } else if gestos::active_app::is_x11_session() || gestos::active_app::is_kde() {
         gestures_list.add(&daemon_path_row(state_rc));
     }
-    gestures_list.add(&all_gestures_row(state_rc));
+    gestures_list.add(&hide_gestures_row(state_rc));
 
     if on_gnome {
         // --- Window Tiling ---
@@ -428,7 +428,12 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
             let file = gio::File::for_path(home);
             let _ = chooser.set_current_folder(Some(&file));
         }
-        chooser.set_current_name("gestos.yaml");
+        // Dated, so that exports made on different days don't replace each other.
+        let today = glib::DateTime::now_local().ok().and_then(|now| now.format("%F").ok());
+        chooser.set_current_name(&match today {
+            Some(today) => format!("Gestos {today}.yaml"),
+            None => "Gestos.yaml".to_string(),
+        });
         
         let filter = gtk::FileFilter::new();
         filter.set_name(Some("YAML Files"));
