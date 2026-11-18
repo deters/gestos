@@ -122,7 +122,7 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
 
 /// The colors of a command's parts, for a light style and a dark one, from GNOME's palette. The
 /// commands inside it, as `$(…)` is, have colors of their own for their text, keywords and quoted
-/// text, and share the others, so a variable looks the same anywhere. Plain text outside them
+/// text, and share the others, so a variable or a function looks the same anywhere. Plain text outside them
 /// keeps the text's own color.
 fn color_of(kind: Option<Kind>, inner: bool, dark: bool) -> &'static str {
     match (kind, inner, dark) {
@@ -136,6 +136,9 @@ fn color_of(kind: Option<Kind>, inner: bool, dark: bool) -> &'static str {
         (Some(Kind::Quoted), false, true) => "#8ff0a4",
         (Some(Kind::Quoted), true, false) => "#9c6e03",
         (Some(Kind::Quoted), true, true) => "#f8e45c",
+        // GNOME's palette has no magenta, and its purple is the keywords'.
+        (Some(Kind::Function), _, false) => "#b0187e",
+        (Some(Kind::Function), _, true) => "#f28cd2",
         (Some(Kind::Variable), _, false) => "#1c71d8",
         (Some(Kind::Variable), _, true) => "#99c1f1",
         (Some(Kind::Comment), _, false) => "#77767b",
@@ -145,14 +148,14 @@ fn color_of(kind: Option<Kind>, inner: bool, dark: bool) -> &'static str {
     }
 }
 
-/// Colors a command's keywords, quoted text, variables, comments and operators as it's written,
-/// and the commands inside it in colors of their own, for the style in use, light or dark, which
-/// change with it while `window` is open.
+/// Colors a command's keywords, function names, quoted text, variables, comments and operators as
+/// it's written, and the commands inside it in colors of their own, for the style in use, light or
+/// dark, which change with it while `window` is open.
 fn highlight_shell(buffer: &gtk::TextBuffer, window: &gtk::Window) {
     let new_tag = || buffer.create_tag(None, &[]).expect("a tag without a name");
     // Made first, so the parts inside a command inside are shown in their own colors over it.
     let inner_text = new_tag();
-    let kinds = [Kind::Quoted, Kind::Keyword, Kind::Operator, Kind::Comment, Kind::Variable];
+    let kinds = [Kind::Quoted, Kind::Keyword, Kind::Function, Kind::Operator, Kind::Comment, Kind::Variable];
     let tags: Vec<(Kind, bool, gtk::TextTag)> = [false, true]
         .into_iter()
         .flat_map(|inner| kinds.into_iter().map(move |kind| (kind, inner)))

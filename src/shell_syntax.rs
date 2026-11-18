@@ -1,10 +1,12 @@
 //! Which parts of a shell command are what, so that the window a command is written in can color
-//! them as it's typed: keywords, quoted text, variables, comments and operators. It only reads the
+//! them as it's typed: keywords, function names, quoted text, variables, comments and operators. It only reads the
 //! command, as a shell would split it, and never runs anything.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Keyword,
+    /// A function's name, where it's defined and where it's called after that.
+    Function,
     Quoted,
     Variable,
     Comment,
@@ -87,7 +89,13 @@ pub fn inner_commands(command: &str) -> Vec<Inner> {
 
 fn parse(command: &str) -> (Vec<Span>, Vec<Inner>) {
     let chars: Vec<char> = command.chars().collect();
-    let mut parser = Parser { chars: &chars, spans: Vec::new(), inner: Vec::new(), depth: 0 };
+    let mut parser = Parser {
+        chars: &chars,
+        spans: Vec::new(),
+        inner: Vec::new(),
+        depth: 0,
+        functions: Vec::new(),
+    };
     parser.commands(0, None);
     (parser.spans, parser.inner)
 }
@@ -97,6 +105,8 @@ struct Parser<'a> {
     spans: Vec<Span>,
     inner: Vec<Inner>,
     depth: usize,
+    /// The functions defined so far, whose calls are colored too.
+    functions: Vec<String>,
 }
 
 impl Parser<'_> {
@@ -126,6 +136,7 @@ impl Parser<'_> {
         // is one: `echo if` prints it.
         let mut at_command = true;
         let mut expects_in = false;
+        let mut expects_function = false;
         // Parentheses opened inside `$(…)`, which its `)` comes after.
         let mut open = 0u32;
         while i < chars.len() {
@@ -201,10 +212,27 @@ impl Parser<'_> {
                 _ => {
                     let length = chars[i..].iter().take_while(|&&c| !ends_word(c)).count().max(1);
                     let word: String = chars[i..i + length].iter().collect();
-                    if at_command && KEYWORDS.contains(&word.as_str()) || expects_in && word == "in" {
+                    // `name() {`, with spaces or not before and inside the parentheses.
+                    let after: String = chars[i + length..].iter().filter(|c| **c != ' ').take(2).collect();
+                    let defined = expects_function || at_command && after == "()" && word.chars().all(|c| is_name(c) || c == '-');
+                    if defined {
+                        self.push(i, i + length, Kind::Function);
+                        if !self.functions.contains(&word) {
+                            self.functions.push(word);
+                        }
+                        expects_function = false;
+                        at_command = false;
+                    } else if at_command && KEYWORDS.contains(&word.as_str()) || expects_in && word == "in" {
                         self.push(i, i + length, Kind::Keyword);
                         expects_in = BEFORE_NAME.contains(&word.as_str());
+                        expects_function = word == "function";
                         at_command = BEFORE_COMMAND.contains(&word.as_str());
+                    } else if at_command && self.functions.contains(&word) {
+                        self.push(i, i + length, Kind::Function);
+                        at_command = false;
+                    } else if word == "{" || word == "}" {
+                        // A function's body, or a group of commands, starts with a command.
+                        at_command = true;
                     } else if let Some(name) = word.split_once('=').map(|(name, _)| name).filter(|name| {
                         at_command && name.starts_with(is_name_start) && name.chars().all(is_name)
                     }) {
@@ -386,6 +414,48 @@ mod tests {
                 part("then", Kind::Keyword),
                 part(";", Kind::Operator),
                 part("fi", Kind::Keyword),
+                part(")", Kind::Operator),
+                part("\"", Kind::Quoted),
+            ]
+        );
+    }
+
+    #[test]
+    fn functions_are_named_where_defined_and_where_called() {
+        assert_eq!(
+            parts("fail() { echo \"$*\" >&2; exit 1; }\nfunction show { echo; }\nfail x; echo fail; show"),
+            [
+                part("fail", Kind::Function),
+                part("(", Kind::Operator),
+                part(")", Kind::Operator),
+                part("\"", Kind::Quoted),
+                part("$*", Kind::Variable),
+                part("\"", Kind::Quoted),
+                part(">&", Kind::Operator),
+                part(";", Kind::Operator),
+                part(";", Kind::Operator),
+                part("function", Kind::Keyword),
+                part("show", Kind::Function),
+                part(";", Kind::Operator),
+                part("fail", Kind::Function),
+                part(";", Kind::Operator),
+                part(";", Kind::Operator),
+                part("show", Kind::Function),
+            ]
+        );
+        assert_eq!(
+            parts("size() { du -h \"$1\"; }\nshow \"$(size x)\""),
+            [
+                part("size", Kind::Function),
+                part("(", Kind::Operator),
+                part(")", Kind::Operator),
+                part("\"", Kind::Quoted),
+                part("$1", Kind::Variable),
+                part("\"", Kind::Quoted),
+                part(";", Kind::Operator),
+                part("\"", Kind::Quoted),
+                part("$(", Kind::Operator),
+                part("size", Kind::Function),
                 part(")", Kind::Operator),
                 part("\"", Kind::Quoted),
             ]
