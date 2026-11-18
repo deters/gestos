@@ -1189,7 +1189,7 @@ fn open_editor(
 
         dialog_clone2.destroy();
         // A gesture made from the main page is shown where it's kept, as the search that found
-        // its action may hide it. One made in a category's window shows there already.
+        // its action may hide it. One made on a category's page shows there already.
         let made_on_main_page = !is_edit && state_clone.borrow().open_category.is_none();
         if made_on_main_page {
             crate::ui::main_window::show_new_gesture(&state_clone, &name);

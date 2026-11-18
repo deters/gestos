@@ -90,12 +90,12 @@ impl PageHeading {
     }
 }
 
-/// A category's page, in a window over the main page: the gestures in it, then its actions to
-/// make more, with the one to make its own of first.
+/// A category's page, in place of the main page: the gestures in it, then its actions to make
+/// more, with the one to make its own of first.
 #[derive(Clone)]
 pub struct CategoryPage {
-    window: gtk::Window,
-    /// The headings over the gestures and over the actions to make more, as in an app's window.
+    page: gtk::Widget,
+    /// The headings over the gestures and over the actions to make more, as on an app's page.
     gestures_heading: gtk::Label,
     create_heading: gtk::Label,
     gestures: gtk::ListBox,
@@ -105,17 +105,78 @@ pub struct CategoryPage {
     shown: Rc<RefCell<(Vec<String>, Vec<crate::state::EditorActionOption>, Vec<Suggestion>)>>,
 }
 
-/// The window the editor and other dialogs open over: the topmost of an app's shortcuts and a
-/// category's, while one is open.
+/// The window the editor and other dialogs open over: the main window, whichever page it shows.
 pub fn dialog_parent(state: &AppState) -> gtk::Window {
-    // Only one still shown, as one closed is let go of only once nothing else holds the state.
-    let shown = |window: &gtk::Window| window.is_visible().then(|| window.clone());
-    state
-        .app_page
-        .as_ref()
-        .and_then(|page| shown(&page.window))
-        .or_else(|| state.category_page.as_ref().and_then(|page| shown(&page.window)))
-        .unwrap_or_else(|| state.window.clone().upcast())
+    state.window.clone().upcast()
+}
+
+/// Shows a category's or an app's page in place of the one shown, with the back button to go
+/// back to it. Typing goes to the page then, rather than to the main page's search.
+fn show_page(state_rc: &Rc<RefCell<AppState>>, page: &gtk::Widget) {
+    let state = state_rc.borrow();
+    state.pages.add_child(page);
+    state.pages.set_visible_child(page);
+    state.back_button.set_visible(true);
+    state.search_entry.set_key_capture_widget(None::<&gtk::Widget>);
+    drop(state);
+    // The keyboard goes on in the page, not in the one it replaced.
+    page.child_focus(gtk::DirectionType::TabForward);
+    drop_hidden_pages(state_rc);
+}
+
+/// Goes back a page: from an app's to the category's it was opened from, or else to the main
+/// page, and from a category's to the main page. Whether there was a page to go back from.
+pub fn go_back(state_rc: &Rc<RefCell<AppState>>) -> bool {
+    let mut state = state_rc.borrow_mut();
+    let target = if state.app_page.take().is_some() {
+        state.category_page.as_ref().map(|page| page.page.clone())
+    } else if state.category_page.take().is_some() {
+        state.open_category = None;
+        None
+    } else {
+        return false;
+    };
+    match target {
+        Some(page) => {
+            state.pages.set_visible_child(&page);
+            page.child_focus(gtk::DirectionType::TabForward);
+        }
+        None => {
+            state.pages.set_visible_child_name(MAIN_PAGE);
+            state.back_button.set_visible(false);
+            state.search_entry.set_key_capture_widget(Some(&state.window));
+            state.search_entry.grab_focus();
+        }
+    }
+    drop(state);
+    drop_hidden_pages(state_rc);
+    true
+}
+
+/// The main page's name among the pages.
+const MAIN_PAGE: &str = "main";
+
+/// Lets go of the pages gone back from, or replaced, once they've slid out of sight.
+fn drop_hidden_pages(state_rc: &Rc<RefCell<AppState>>) {
+    let Ok(state) = state_rc.try_borrow() else { return };
+    if state.pages.is_transition_running() {
+        return;
+    }
+    let kept: Vec<gtk::Widget> = [
+        state.pages.child_by_name(MAIN_PAGE),
+        state.category_page.as_ref().map(|page| page.page.clone()),
+        state.app_page.as_ref().map(|page| page.page.clone()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let mut child = state.pages.first_child();
+    while let Some(page) = child {
+        child = page.next_sibling();
+        if !kept.contains(&page) {
+            state.pages.remove(&page);
+        }
+    }
 }
 
 /// A keyboard shortcut of one's own for an app, named for it, as it's for that app alone, and so
@@ -131,10 +192,10 @@ fn shortcut_on_app(state: &AppState, app: &str) -> Option<crate::state::EditorAc
     })
 }
 
-/// An app's own window: the gestures made for it, then opening it and its own shortcuts.
+/// An app's own page: the gestures made for it, then opening it and its own shortcuts.
 #[derive(Clone)]
 pub struct AppPage {
-    window: gtk::Window,
+    page: gtk::Widget,
     app: String,
     /// The gestures only for the app, and those for every app that open it, apart, each under
     /// its heading, those for every app shown first.
@@ -221,26 +282,13 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
     *page.shown.borrow_mut() = (ids(only_here), ids(everywhere));
 }
 
-/// Opens an app's own window over its category's: opening the app first, then each of the
+/// Opens an app's own page in place of its category's: opening the app first, then each of the
 /// shortcuts its Keyboard Shortcuts window lists, under their groups, if it has that window.
 fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorActionOption, app: &str) {
-    // One app's at a time, over its category's, never over another app's.
-    let previous = state_rc.borrow_mut().app_page.take();
-    if let Some(previous) = previous {
-        previous.window.destroy();
-    }
+    // One app's at a time, in place of its category's, never of another app's.
+    state_rc.borrow_mut().app_page = None;
     let shortcuts = gestos::app_shortcuts::shortcuts_of(app);
-    let parent = dialog_parent(&state_rc.borrow());
-    let window = gtk::Window::new();
-    window.set_transient_for(Some(&parent));
-    window.set_modal(true);
-    window.set_destroy_with_parent(true);
     let name = crate::ui::app_picker::app_name(app);
-    window.set_title(Some(&name));
-    window.set_default_size(parent.width(), parent.height());
-    let header = gtk::HeaderBar::new();
-    header.set_title_widget(Some(&gtk::Label::new(None)));
-    window.set_titlebar(Some(&header));
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let heading = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -268,8 +316,12 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorAct
         label.set_xalign(0.0);
         label
     };
+    let scrolled = gtk::ScrolledWindow::new();
+    scrolled.set_vexpand(true);
+    scrolled.set_hscrollbar_policy(gtk::PolicyType::Never);
+    scrolled.set_child(Some(&clamped(&content)));
     let page = AppPage {
-        window: window.clone(),
+        page: scrolled.clone().upcast(),
         app: app.to_string(),
         only_here: (heading(&format!("Gestures Inside {name}")), list()),
         everywhere: (heading("Gestures"), list()),
@@ -421,29 +473,12 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorAct
         content.append(&own);
     }
 
-    let scrolled = gtk::ScrolledWindow::new();
-    scrolled.set_vexpand(true);
-    scrolled.set_hscrollbar_policy(gtk::PolicyType::Never);
-    scrolled.set_child(Some(&clamped(&content)));
-    window.set_child(Some(&scrolled));
-    crate::ui::components::close_with_keys(&window);
-    // Gone however it closes, its category's closing with it too.
-    let state_close = Rc::downgrade(state_rc);
-    window.connect_destroy(move |window| {
-        if let Some(state_rc) = state_close.upgrade() {
-            if let Ok(mut state) = state_rc.try_borrow_mut() {
-                if state.app_page.as_ref().is_some_and(|page| &page.window == window) {
-                    state.app_page = None;
-                }
-            }
-        }
-    });
     state_rc.borrow_mut().app_page = Some(page);
     refresh_app_page(state_rc, None);
-    window.present();
+    show_page(state_rc, &scrolled.upcast());
 }
 
-/// An app, which opens its own window, with how many gestures are made for it, if any.
+/// An app, which opens its own page, with how many gestures are made for it, if any.
 fn app_row(app: &str, count: usize) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -487,30 +522,18 @@ fn app_shortcut_row(shortcut: &gestos::app_shortcuts::AppShortcut) -> gtk::ListB
     row
 }
 
-/// Opens a category's page in a window of its own, or with None, closes it.
+/// Opens a category's page in place of the main page, or with None, goes back to the main page.
 pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category>) {
-    let open = state_rc.borrow_mut().category_page.take();
-    let app_page = state_rc.borrow_mut().app_page.take();
-    if let Some(page) = app_page {
-        page.window.destroy();
+    let Some(category) = category else {
+        while go_back(state_rc) {}
+        return;
+    };
+    {
+        let mut state = state_rc.borrow_mut();
+        state.app_page = None;
+        state.category_page = None;
+        state.open_category = Some(category);
     }
-    if let Some(page) = open {
-        page.window.destroy();
-    }
-    state_rc.borrow_mut().open_category = category;
-    let Some(category) = category else { return };
-
-    let parent = state_rc.borrow().window.clone();
-    let window = gtk::Window::new();
-    window.set_transient_for(Some(&parent));
-    window.set_modal(true);
-    window.set_destroy_with_parent(true);
-    window.set_title(Some(category.name()));
-    window.set_default_size((parent.width() - 60).clamp(360, 640), (parent.height() - 60).max(400));
-    // The page's heading names it, large, so the header doesn't too.
-    let header = gtk::HeaderBar::new();
-    header.set_title_widget(Some(&gtk::Label::new(None)));
-    window.set_titlebar(Some(&header));
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content.append(&PageHeading::new(category).area);
@@ -539,10 +562,9 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
     scrolled.set_vexpand(true);
     scrolled.set_hscrollbar_policy(gtk::PolicyType::Never);
     scrolled.set_child(Some(&clamped(&content)));
-    window.set_child(Some(&scrolled));
 
     let page = CategoryPage {
-        window: window.clone(),
+        page: scrolled.clone().upcast(),
         gestures_heading,
         create_heading,
         gestures,
@@ -584,7 +606,7 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
             let suggestion = shown.borrow().2.get(row.index() as usize).cloned();
             let Some(state_rc) = state_rc.upgrade() else { return };
             match suggestion {
-                // An app opens its own window, with opening it and any shortcuts it lists.
+                // An app opens its own page, with opening it and any shortcuts it lists.
                 Some(Suggestion::Action(option)) => {
                     let app = crate::ui::app_picker::opened_app(&option.action_type).map(str::to_string);
                     match app {
@@ -598,34 +620,9 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
         });
     }
 
-    // Escape closes it, as other dialogs.
-    let keys = gtk::ShortcutController::new();
-    keys.add_shortcut(gtk::Shortcut::new(
-        gtk::ShortcutTrigger::parse_string("Escape|<Control>w"),
-        Some(gtk::CallbackAction::new(|window, _| {
-            if let Some(window) = window.downcast_ref::<gtk::Window>() {
-                window.close();
-            }
-            glib::Propagation::Stop
-        })),
-    ));
-    window.add_controller(keys);
-    let state_close = Rc::downgrade(state_rc);
-    window.connect_close_request(move |window| {
-        if let Some(state_rc) = state_close.upgrade() {
-            if let Ok(mut state) = state_rc.try_borrow_mut() {
-                if state.category_page.as_ref().is_some_and(|page| &page.window == window) {
-                    state.category_page = None;
-                    state.open_category = None;
-                }
-            }
-        }
-        glib::Propagation::Proceed
-    });
-
     state_rc.borrow_mut().category_page = Some(page);
     refresh_category_page(state_rc, None);
-    window.present();
+    show_page(state_rc, &scrolled.upcast());
 }
 
 /// Shows what's in the category open, if one is. The gesture named, such as the one just saved,
@@ -640,7 +637,7 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
             list.remove(&child);
         }
     }
-    // The apps' gestures are each in its own app's window instead.
+    // The apps' gestures are each on its own app's page instead.
     let gestures = match category {
         Category::Apps => Vec::new(),
         _ => get_visible_gestures(&state, Some(category)),
@@ -658,7 +655,7 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
     let found = find_suggestions(&state.action_options, &state.config.gestures, "");
     let gestures_in = gestures_by_category(&state.config.gestures, &state.action_options);
     let (mut apart, mut found) = arrange_suggestions(found, false, Some(category), &gestures_in);
-    // Every app, as each opens its own window, even one already opened by a gesture, by name.
+    // Every app, as each opens its own page, even one already opened by a gesture, by name.
     // Those with gestures come first, apart from the rest.
     if category == Category::Apps {
         let mut apps: Vec<_> = state
@@ -698,7 +695,7 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
         page.actions.append(&row);
     }
     page.actions.set_visible(!found.is_empty());
-    // The Apps window lists apps, which aren't gestures or actions, so it needs neither heading.
+    // The Apps page lists apps, which aren't gestures or actions, so it needs neither heading.
     let headed = category != Category::Apps;
     page.gestures_heading.set_visible(headed && page.gestures.get_visible());
     page.create_heading.set_visible(headed && !(apart.is_empty() && found.is_empty()));
@@ -959,7 +956,7 @@ pub fn refresh_extension_status(state_rc: &Rc<RefCell<AppState>>) {
     }
 }
 
-/// Shows a gesture just made from the main page where it's kept: in its category's window, when
+/// Shows a gesture just made from the main page where it's kept: on its category's page, when
 /// the page shows categories, or in the page's own list. The search that found its action is
 /// cleared, as it would hide the gesture.
 pub fn show_new_gesture(state_rc: &Rc<RefCell<AppState>>, name: &str) {
@@ -975,7 +972,7 @@ pub fn show_new_gesture(state_rc: &Rc<RefCell<AppState>>, name: &str) {
             >= crate::suggestions::FEWEST_TO_CATEGORIZE;
         let gesture = state.config.gestures.iter().find(|g| g.name == name).filter(|_| categorized);
         let category = gesture.and_then(|g| gesture_category(g, &state.action_options));
-        // An app's gesture is in that app's window, with how to open it.
+        // An app's gesture is on that app's page, with how to open it.
         let app = gesture
             .filter(|_| category == Some(Category::Apps))
             .and_then(|g| match g.apps.as_slice() {
@@ -1265,6 +1262,11 @@ pub fn build_ui(app: &gtk::Application) {
 
     let header = gtk::HeaderBar::new();
     window.set_titlebar(Some(&header));
+    let back_button = gtk::Button::from_icon_name("go-previous-symbolic");
+    back_button.set_tooltip_text(Some("Back"));
+    back_button.update_property(&[gtk::accessible::Property::Label("Back")]);
+    back_button.set_visible(false);
+    header.pack_start(&back_button);
 
     // Preferences button
     let settings_btn = gtk::Button::from_icon_name("emblem-system-symbolic");
@@ -1275,8 +1277,12 @@ pub fn build_ui(app: &gtk::Application) {
     // Content VBox
     let content_vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content_vbox.add_css_class("main-window-content");
+    // A category's page, and an app's, slide in over the main page, and back out.
+    let pages = gtk::Stack::new();
+    pages.set_transition_type(gtk::StackTransitionType::SlideLeftRight);
+    pages.add_named(&content_vbox, Some(MAIN_PAGE));
     let toasts = adw::ToastOverlay::new();
-    toasts.set_child(Some(&content_vbox));
+    toasts.set_child(Some(&pages));
     window.set_child(Some(&toasts));
 
     // The search stays visible, since it's also how new gestures start. Typing anywhere in the
@@ -1385,7 +1391,43 @@ pub fn build_ui(app: &gtk::Application) {
         open_category: None,
         category_page: None,
         app_page: None,
+        pages,
+        back_button,
     }));
+
+    // Back with the header's button, Escape, Alt+Left or the mouse's back button, as in GNOME's
+    // own apps. Escape on the main page is left to its search.
+    let state_back = Rc::downgrade(&state);
+    state.borrow().back_button.connect_clicked(move |_| {
+        if let Some(state) = state_back.upgrade() {
+            go_back(&state);
+        }
+    });
+    let keys = gtk::ShortcutController::new();
+    let state_back = Rc::downgrade(&state);
+    keys.add_shortcut(gtk::Shortcut::new(
+        gtk::ShortcutTrigger::parse_string("Escape|<Alt>Left"),
+        Some(gtk::CallbackAction::new(move |_, _| match state_back.upgrade() {
+            Some(state) if go_back(&state) => glib::Propagation::Stop,
+            _ => glib::Propagation::Proceed,
+        })),
+    ));
+    state.borrow().window.add_controller(keys);
+    let mouse_back = gtk::GestureClick::new();
+    mouse_back.set_button(8);
+    let state_back = Rc::downgrade(&state);
+    mouse_back.connect_pressed(move |_, _, _, _| {
+        if let Some(state) = state_back.upgrade() {
+            go_back(&state);
+        }
+    });
+    state.borrow().window.add_controller(mouse_back);
+    let state_pages = Rc::downgrade(&state);
+    state.borrow().pages.connect_transition_running_notify(move |_| {
+        if let Some(state) = state_pages.upgrade() {
+            drop_hidden_pages(&state);
+        }
+    });
 
 
     let state_banner = Rc::clone(&state);

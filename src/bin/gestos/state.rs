@@ -40,9 +40,13 @@ pub struct AppState {
     pub extension_status: ExtensionStatus,
     /// Says when the extension running is older than this Gestos, and what updates it.
     pub extension_banner: crate::ui::main_window::ExtensionBanner,
-    /// The category of actions open, in a window of its own over the gestures.
+    /// The category of actions open, on a page of its own in place of the gestures.
     pub open_category: Option<crate::suggestions::Category>,
     pub category_page: Option<crate::ui::main_window::CategoryPage>,
-    /// An app's own shortcuts, in a window over its category's, while open.
+    /// An app's own shortcuts, on a page of their own, while open.
     pub app_page: Option<crate::ui::main_window::AppPage>,
+    /// The main page, and a category's or an app's page in its place.
+    pub pages: gtk::Stack,
+    /// In the header while a category's or an app's page is shown, back to the one before.
+    pub back_button: gtk::Button,
 }

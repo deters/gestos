@@ -21,6 +21,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- A category's page, like "Apps", and an app's page now open in the main window instead of a window of their own. Go back with the back button at the top left, Esc, Alt+Left or the mouse's back button.
 - A new gesture is now drawn first, in a window of its own that says which mouse button draws gestures. The editor opens once the gesture is drawn. Press Esc in that window to cancel.
 - To draw a gesture again, click its drawing in the editor. It no longer clears the drawing: it opens the window to draw in, and pressing Esc there keeps the old drawing.
 - Gestures now work while the gesture editor is open. They stop only while you draw a gesture.
