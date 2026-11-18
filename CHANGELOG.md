@@ -18,6 +18,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - New step "Copy" in an "Advanced Action": it copies the selected files or text for the command after it. It uses the copy shortcut the app lists, Ctrl+Shift+C in terminals, and Ctrl+C in other apps. In a window Gestos can't recognise, it copies nothing and the action stops.
 - A gesture made with one of the new file or text actions runs the steps of the installed version, so updates to Gestos change what the gesture does. Clicking "Customize Action…" in the gesture editor gives the gesture its own copy of the steps to change. Updates no longer change that copy.
 - You can add your own actions as files in `~/.local/share/gestos/action-templates`. A file there with the same name as one of Gestos's own takes its place. An action file can name an icon from the icon theme with `icon:`, which the action and its gestures are shown with.
+
 ### Changed
 
 - A new gesture is now drawn first, in a window of its own that says which mouse button draws gestures. The editor opens once the gesture is drawn. Press Esc in that window to cancel.
