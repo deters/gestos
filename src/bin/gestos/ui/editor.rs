@@ -461,10 +461,6 @@ fn open_editor(
         target_gesture.as_ref().map_or_else(|| preset_apps.to_vec(), |g| g.apps.clone()),
     ));
 
-    // Drawing it again opens the window it was drawn in, and only a drawing set there replaces
-    // this one. A button of its own below the drawing, which then shows nothing but the gesture.
-    let redraw = gtk::Button::with_mnemonic("_Record a New Gesture…");
-    redraw.set_halign(gtk::Align::Start);
     // A shape close to another gesture's that can run instead of it.
     let (similar_box, similar_label) = warning_box();
     let show_similar: Rc<dyn Fn()> = {
@@ -485,6 +481,10 @@ fn open_editor(
         })
     };
     show_similar();
+    // The keys to hold and the shape to draw are one gesture, so the keys show on the drawing.
+    let gesture_list = gtk::ListBox::new();
+    gesture_list.add_css_class("boxed-list");
+    gesture_list.set_selection_mode(gtk::SelectionMode::None);
     {
         let state_rc = Rc::clone(state_rc);
         let dialog = dialog.clone();
@@ -495,7 +495,9 @@ fn open_editor(
         let canvas = canvas.clone();
         let check = check.clone();
         let show_similar = Rc::clone(&show_similar);
-        redraw.connect_clicked(move |_| {
+        // Clicking the drawing, or pressing Enter on it, opens the window it was drawn in, and
+        // only a drawing set there replaces this one.
+        gesture_list.connect_row_activated(move |_, _| {
             let points = Rc::clone(&points);
             let toggles = toggles.clone();
             let canvas = canvas.clone();
@@ -515,19 +517,16 @@ fn open_editor(
         });
     }
 
-    // The keys to hold and the shape to draw are one gesture, so the keys show on the drawing.
-    let gesture_list = gtk::ListBox::new();
-    gesture_list.add_css_class("boxed-list");
-    gesture_list.set_selection_mode(gtk::SelectionMode::None);
     let canvas_row = gtk::ListBoxRow::new();
-    canvas_row.set_activatable(false);
+    canvas_row.set_tooltip_text(Some("Record a New Gesture"));
+    canvas_row.update_property(&[gtk::accessible::Property::Label("Record a New Gesture")]);
+    canvas_row.set_cursor_from_name(Some("pointer"));
     let canvas_overlay = gtk::Overlay::new();
     canvas_overlay.set_child(Some(&canvas));
     canvas_overlay.add_overlay(&drawing_corner(&gesture_apps.borrow(), &modifier_toggles));
     canvas_row.set_child(Some(&canvas_overlay));
     gesture_list.append(&canvas_row);
     scroll_content.append(&gesture_list);
-    scroll_content.append(&redraw);
     scroll_content.append(&similar_box);
     // The window fits what's in it again as the warning comes and goes, rather than the warning
     // taking room from the rest, which would then scroll out of sight.
