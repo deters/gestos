@@ -462,16 +462,9 @@ fn open_editor(
     ));
 
     // Drawing it again opens the window it was drawn in, and only a drawing set there replaces
-    // this one. A record button, as the shortcut steps have, quiet over the drawing, as replacing
-    // a gesture is occasional.
-    let redraw = gtk::Button::from_icon_name("media-record-symbolic");
-    redraw.set_tooltip_text(Some("Redraw"));
-    redraw.update_property(&[gtk::accessible::Property::Label("Redraw")]);
-    redraw.add_css_class("flat");
-    redraw.set_halign(gtk::Align::End);
-    redraw.set_valign(gtk::Align::Start);
-    redraw.set_margin_end(12);
-    redraw.set_margin_top(12);
+    // this one. A button of its own below the drawing, which then shows nothing but the gesture.
+    let redraw = gtk::Button::with_mnemonic("_Record a New Gesture…");
+    redraw.set_halign(gtk::Align::Start);
     // A shape close to another gesture's that can run instead of it.
     let (similar_box, similar_label) = warning_box();
     let show_similar: Rc<dyn Fn()> = {
@@ -530,11 +523,11 @@ fn open_editor(
     canvas_row.set_activatable(false);
     let canvas_overlay = gtk::Overlay::new();
     canvas_overlay.set_child(Some(&canvas));
-    canvas_overlay.add_overlay(&redraw);
     canvas_overlay.add_overlay(&drawing_corner(&gesture_apps.borrow(), &modifier_toggles));
     canvas_row.set_child(Some(&canvas_overlay));
     gesture_list.append(&canvas_row);
     scroll_content.append(&gesture_list);
+    scroll_content.append(&redraw);
     scroll_content.append(&similar_box);
     // The window fits what's in it again as the warning comes and goes, rather than the warning
     // taking room from the rest, which would then scroll out of sight.
