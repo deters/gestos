@@ -12,8 +12,8 @@ cd "$(dirname "$0")"
 
 local_root=${XDG_DATA_HOME:-$HOME/.local/share}
 local_bin=$HOME/.local/bin
-# Where your own action templates are, which Gestos reads before the system's. The ones from this
-# checkout go there too, to test them, in place of any installed with the same names.
+# Where action templates were copied for your user before. Gestos no longer reads them there:
+# its own are installed for the system, and yours are kept with your gestures.
 local_templates=$local_root/gestos/action-templates
 
 # Where each file of the build is installed for the system, as "built file<TAB>installed file".
@@ -54,14 +54,18 @@ fi
 # the build folder doesn't end up owned by root.
 make
 
-# The input service, its units and its device rules, installed for the system only when one of
-# them differs from what's there.
+# The input service, its units and its device rules, and Gestos's own action templates, installed
+# for the system only when one of them differs from what's there.
 system_changed=no
+# The templates are installed as their whole folder.
+same() {
+    if [ -d "$1" ]; then diff -rq "$1" "$2" >/dev/null 2>&1; else cmp -s "$1" "$2"; fi
+}
 installed_files > build/installed-files.tsv
 while IFS="$(printf '\t')" read -r built system; do
     [ -n "$(user_copy "$system")" ] && continue
-    case $system in */share/gestos/*|*/bin/mygestures) continue ;; esac
-    if ! cmp -s "$built" "$system"; then
+    case $system in */bin/mygestures) continue ;; esac
+    if ! same "$built" "$system"; then
         echo "Changed for the system: $system"
         system_changed=yes
     fi
@@ -83,12 +87,11 @@ while IFS="$(printf '\t')" read -r built system; do
     [ -x "$built" ] && chmod 755 "$copy.new" || chmod 644 "$copy.new"
     mv -f "$copy.new" "$copy"
 done < build/installed-files.tsv
-# Gestos leaves out templates other users can change, so the folder's permissions are set too.
-mkdir -p "$local_templates"
-chmod 755 "$local_templates"
+# The copies of this checkout's templates made for your user before, which Gestos no longer reads.
 for template in action-templates/*.yaml; do
-    install -m 644 "$template" "$local_templates/${template##*/}"
+    rm -f "${local_templates:?}/${template##*/}"
 done
+rmdir "$local_templates" 2>/dev/null || true
 systemctl --user daemon-reload 2>/dev/null || true
 update-desktop-database -q "$local_root/applications" 2>/dev/null || true
 gtk-update-icon-cache -q -t -f "$local_root/icons/hicolor" 2>/dev/null || true

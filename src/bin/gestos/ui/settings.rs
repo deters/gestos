@@ -387,7 +387,7 @@ fn action_template_row(
     export.update_property(&[gtk::accessible::Property::Label("Export…")]);
     export.add_css_class("flat");
     export.set_valign(gtk::Align::Center);
-    let from = listed.path.clone();
+    let text = listed.text.clone();
     let id = template.id.clone();
     let dialog_export = dialog.clone();
     export.connect_clicked(move |_| {
@@ -399,12 +399,12 @@ fn action_template_row(
             Some("_Cancel"),
         );
         chooser.set_current_name(&format!("{id}.yaml"));
-        let from = from.clone();
+        let text = text.clone();
         let parent = dialog_export.clone();
         chooser.connect_response(move |chooser, response| {
             if response == gtk::ResponseType::Accept {
                 if let Some(to) = chooser.file().and_then(|file| file.path()) {
-                    if let Err(e) = std::fs::copy(&from, &to) {
+                    if let Err(e) = std::fs::write(&to, &text) {
                         show_error_dialog(&parent, &format!("Couldn't export the action: {e}"));
                     }
                 }
@@ -433,15 +433,13 @@ fn action_template_row(
             let (id, state_remove, parent, refill) =
                 (id.clone(), state_remove.clone(), dialog_remove.clone(), refill.clone());
             show_confirm_dialog(&dialog_remove, &format!("Remove \u{201c}{name}\u{201d}?"), message, "Remove", true, move || {
-                if let Err(e) = gestos::action_templates::remove(&id) {
-                    show_error_dialog(&parent, &format!("Couldn't remove the action: {e}"));
-                    return;
-                }
-                if let Some(state_rc) = state_remove.upgrade() {
-                    crate::ui::main_window::load_action_options(&state_rc);
-                }
-                if let Some(refill) = &refill {
-                    refill();
+                let Some(state_rc) = state_remove.upgrade() else { return };
+                if change_own_templates(&state_rc, &parent, |own| {
+                    own.remove(&id);
+                }) {
+                    if let Some(refill) = &refill {
+                        refill();
+                    }
                 }
             });
         });
@@ -474,8 +472,31 @@ fn action_template_row(
     row
 }
 
-/// Asks for a template's file, and makes it the user's own. One of their own with the same ID is
-/// only replaced once they say so.
+/// Changes the user's own action templates in their configuration, and has the daemon and the
+/// lists of actions follow. Whether it was saved; if not, it's said why, and nothing changed.
+fn change_own_templates(
+    state_rc: &Rc<RefCell<AppState>>,
+    parent: &gtk::Window,
+    change: impl FnOnce(&mut std::collections::BTreeMap<String, String>),
+) -> bool {
+    let mut state = state_rc.borrow_mut();
+    let before = state.config.action_templates.clone();
+    change(&mut state.config.action_templates);
+    if let Err(e) = state.config.save_to_file() {
+        state.config.action_templates = before;
+        drop(state);
+        show_error_dialog(parent, &format!("Couldn't save your actions: {e}"));
+        return false;
+    }
+    let conn = state.dbus_conn.clone();
+    drop(state);
+    reload_daemon(conn.as_ref(), Some(parent));
+    crate::ui::main_window::load_action_options(state_rc);
+    true
+}
+
+/// Asks for a template's file, and makes it the user's own, in their configuration. What it runs
+/// is said first, and one of their own with the same ID is only replaced once they say so.
 fn import_action_template(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window, refill: Rc<dyn Fn()>) {
     let chooser = gtk::FileChooserNative::new(
         Some("Import Action"),
@@ -494,35 +515,57 @@ fn import_action_template(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window
         let path = (response == gtk::ResponseType::Accept).then(|| chooser.file().and_then(|file| file.path())).flatten();
         chooser.destroy();
         let Some(path) = path else { return };
-        let template = match gestos::action_templates::read_to_import(&path) {
-            Ok(template) => template,
+        let (template, text) = match gestos::action_templates::read_to_import(&path) {
+            Ok(read) => read,
             Err(why) => {
                 show_error_dialog(&parent, &format!("Couldn't import the action. {why}."));
                 return;
             }
         };
-        let (state_import, parent_import, refill) = (state_import.clone(), parent.clone(), Rc::clone(&refill));
+        let Some(state_rc) = state_import.upgrade() else { return };
+        let replaces = state_rc.borrow().config.action_templates.contains_key(&template.id);
+        // It runs what's in it only once a gesture is made with it, but that's said first, as
+        // importing a configuration does.
+        let commands: Vec<String> = template
+            .steps
+            .iter()
+            .filter_map(|step| match step {
+                gestos::key_steps::KeyStep::Run(command) => Some(command.text.clone()),
+                _ => None,
+            })
+            .collect();
+        let mut message = String::new();
+        if replaces {
+            message.push_str("An action you imported before has the same ID. It's replaced by this one.");
+        }
+        if !commands.is_empty() {
+            if !message.is_empty() {
+                message.push_str("\n\n");
+            }
+            message.push_str("Its gestures run these commands:\n");
+            for command in &commands {
+                message.push_str(&format!("\n{command}"));
+            }
+        }
+        let (parent_import, refill, id) = (parent.clone(), Rc::clone(&refill), template.id.clone());
         let import = move || {
-            if let Err(why) = gestos::action_templates::import(&path) {
-                show_error_dialog(&parent_import, &format!("Couldn't import the action. {why}."));
-                return;
+            if change_own_templates(&state_rc, &parent_import, |own| {
+                own.insert(id, text);
+            }) {
+                refill();
             }
-            if let Some(state_rc) = state_import.upgrade() {
-                crate::ui::main_window::load_action_options(&state_rc);
-            }
-            refill();
         };
-        if gestos::action_templates::is_own(&template.id) {
+        if message.is_empty() {
+            import();
+        } else {
             show_confirm_dialog(
                 &parent,
-                &format!("Replace \u{201c}{}\u{201d}?", template.name),
-                "An action you imported before has the same ID. It's replaced by this one.",
-                "Replace",
-                true,
+                &format!("Import \u{201c}{}\u{201d}?", template.name),
+                &message,
+                if replaces { "Replace" } else { "Import" },
+                replaces,
                 import,
             );
-        } else {
-            import();
         }
     });
     chooser.show();
