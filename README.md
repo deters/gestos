@@ -97,7 +97,7 @@ Everything else runs as you, with no extra rights: `gestosd`, the background pro
 
 On GNOME, apps can't draw over the screen, move other apps' windows, or see which app is in use or what you've selected in it, and GNOME offers no other way to ask. We wanted gestures that show their path, tile windows and act on the app in use, so we made the Gestos extension, which does these from inside GNOME Shell.
 
-Programs you run yourself can still ask `gestos-input` to press keys, even in other apps' windows, as tools that type for you can. On systems without systemd, like Alpine, `gestos-input` runs as its own user without the other limits.
+Programs you run yourself can still ask `gestos-input` to press keys, even in other apps' windows, as tools that type for you can. They could also ask the Gestos extension for what you've selected or copied. If that matters to you, turn the extension off in Extensions. Gestures still work without it, but without the path, tiling, gestures for one app, and the actions that use what you've selected or copied. On systems without systemd, like Alpine, `gestos-input` runs as its own user without the other limits.
 
 ## Development
 
