@@ -8,6 +8,8 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [9.0.0] - 2026-11-18
+
 ### Added
 
 - New actions for the files selected in a file manager, on its page in "Apps", above its keyboard shortcuts: "Convert to PDF", "Merge PDFs", "Compress PDFs", "Split PDF into Pages", "Convert PDF to Images", "Make a Dated Copy", "Convert Images to PNG", "Convert Images to JPG", "Make Images Half the Size", "Compress to ZIP", "Extract ZIP Files" and "Show Checksums".
@@ -475,7 +477,8 @@ Rebuilt the packages, with no changes.
 - Rewritten in Rust, and built with Meson.
 - Gestures are now recognized whatever their size or proportions.
 
-[Unreleased]: https://github.com/deters/gestos/compare/v8.1.1...HEAD
+[Unreleased]: https://github.com/deters/gestos/compare/v9.0.0...HEAD
+[9.0.0]: https://github.com/deters/gestos/compare/v8.1.1...v9.0.0
 [8.1.1]: https://github.com/deters/gestos/compare/v8.1.0...v8.1.1
 [8.1.0]: https://github.com/deters/gestos/compare/v8.0.1...v8.1.0
 [8.0.1]: https://github.com/deters/gestos/compare/v8.0.0...v8.0.1
