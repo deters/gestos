@@ -17,7 +17,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An action that needs a program you don't have says which package to install.
 - New step "Copy" in an "Advanced Action": it copies the selected files or text for the command after it. It uses the copy shortcut the app lists, Ctrl+Shift+C in terminals, and Ctrl+C in other apps. In a window Gestos can't recognise, it copies nothing and the action stops.
 - A gesture made with one of the new file or text actions runs the steps of the installed version, so updates to Gestos change what the gesture does. Clicking "Customize Action…" in the gesture editor gives the gesture its own copy of the steps to change. Updates no longer change that copy.
-- New page "Actions" in Preferences: each action made from a file, like the file and text actions, can be turned off there, so it isn't offered for new gestures. Gestures already made with it keep working. Each can also be exported to a file.
+- New page "Actions" in Preferences: each action made from a file, like the file and text actions, can be turned off there, so it isn't offered for new gestures. Gestures already made with it keep working. Each can also be exported to a file, which is then shown selected in the file manager.
 - "Import…" on the "Actions" page adds your own action from a file, after showing the commands it runs. Your actions are kept in your configuration with your gestures, so exporting the configuration includes them. Each action file has a short ID, like `id: convert-to-pdf`. One you import with the same ID as one of Gestos's takes its place until you remove it. An action file can name an icon from the icon theme with `icon:`, which the action and its gestures are shown with.
 
 ### Changed
