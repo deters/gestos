@@ -320,8 +320,9 @@ fn parse(text: &str) -> Result<ActionTemplate, String> {
     }
     let steps: Vec<KeyStep> = file.steps.into_iter().map(KeyStep::from).collect();
     for step in &steps {
+        // Only a shell reads the variables as `$@` and `$GESTOS_…`.
         if let KeyStep::Run(command) = step {
-            if let Some(variable) = unquoted_variable(command) {
+            if let Some(variable) = unquoted_variable(command).filter(|_| command.is_shell()) {
                 eprintln!("gestos: In the action template {id}, {variable} isn't in double quotes");
             }
         }
@@ -840,6 +841,8 @@ steps:
                     if command.text.contains("GESTOS_CLIPBOARD") {
                         assert!(template.steps[..i].contains(&KeyStep::Copy(CopyKind::Text)), "{id}");
                     }
+                    // Each is run by sh, which it says on its first line.
+                    assert_eq!(command.interpreter().map(|interpreter| interpreter.program), Some("/bin/sh".into()), "{id}");
                     assert_eq!(unquoted_variable(command), None, "{id}");
                     let status = std::process::Command::new("sh").arg("-n").arg("-c").arg(&command.text).status().unwrap();
                     assert!(status.success(), "{id}");

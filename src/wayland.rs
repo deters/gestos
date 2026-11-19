@@ -252,6 +252,36 @@ pub fn action_failed(why: String) {
     }
 }
 
+/// A command that runs a script with the program its first line names, as it would run from a
+/// file: the program, the line's argument, then the script. The script is read from memory, as
+/// /dev/fd/N, rather than saved to a file, and the file returned holds it until the command starts.
+fn script_command(
+    interpreter: &crate::command_variables::Interpreter,
+    script: &str,
+) -> std::io::Result<(Command, std::fs::File)> {
+    use std::io::Write;
+    use std::os::fd::FromRawFd;
+    use std::os::unix::process::CommandExt;
+    let fd = unsafe { libc::memfd_create(c"gestos-script".as_ptr(), libc::MFD_CLOEXEC) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+    file.write_all(script.as_bytes())?;
+    let mut command = Command::new(&interpreter.program);
+    command.args(&interpreter.argument).arg(format!("/dev/fd/{fd}"));
+    // Open in the command only, not in the other programs Gestos starts meanwhile.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::fcntl(fd, libc::F_SETFD, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    Ok((command, file))
+}
+
 // How many of the last lines a command printed, or wrote as errors, are shown, and how much of them.
 const SHOWN_OUTPUT_LINES: usize = 10;
 const SHOWN_ERROR_LINES: usize = 3;
@@ -1179,7 +1209,8 @@ impl WaylandContext {
         }
     }
 
-    /// Runs a command as the user would type it in a shell, and says whether it worked. The one
+    /// Runs a command as the user would type it in a shell, or a script with the program its first
+    /// line names, as a script file runs, and says whether it worked. The one
     /// place a shell belongs: Run Command and an advanced action's commands take whatever the user
     /// would type in one. One given the variables doesn't run without what's copied, as it would
     /// run with nothing in its place. `after_copy` says what a copy made right before it copies,
@@ -1192,8 +1223,30 @@ impl WaylandContext {
     ) -> bool {
         use crate::command_variables::{file_paths, too_big, variables};
         let cmd = shell_command.text.as_str();
-        let mut command = Command::new("sh");
-        command.arg("-c").arg(cmd);
+        let interpreter = shell_command.interpreter();
+        // What's said when it fails: the program its first line names, or the command.
+        let name = interpreter
+            .as_ref()
+            .map_or_else(|| crate::config::short_command(cmd), |interpreter| interpreter.name().to_string());
+        // Kept open until it has started, as it's read from there.
+        let mut script = None;
+        let mut command = match &interpreter {
+            Some(interpreter) => match script_command(interpreter, cmd) {
+                Ok((command, file)) => {
+                    script = Some(file);
+                    command
+                }
+                Err(e) => {
+                    action_failed(format!("{name} couldn't start: {e}"));
+                    return false;
+                }
+            },
+            None => {
+                let mut command = Command::new("sh");
+                command.arg("-c").arg(cmd);
+                command
+            }
+        };
         if shell_command.variables {
             let copied = match self.copied_for_command(after_copy) {
                 Ok(copied) => copied,
@@ -1202,26 +1255,33 @@ impl WaylandContext {
                     return false;
                 }
             };
-            // The copied files are its arguments, after the name the shell gives itself.
-            command.arg("gestos").args(file_paths(&uris(&copied.uri_list)));
-            for (name, value) in variables(context, &copied) {
-                if too_big(name, &value) {
-                    action_failed(format!(
-                        "What's copied is too big to give to {}",
-                        crate::config::short_command(cmd)
-                    ));
+            // The copied files are its arguments, after the name sh -c gives itself. A script
+            // started from its file has the file as that name.
+            if interpreter.is_none() {
+                command.arg("gestos");
+            }
+            command.args(file_paths(&uris(&copied.uri_list)));
+            for (variable, value) in variables(context, &copied) {
+                if too_big(variable, &value) {
+                    action_failed(format!("What's copied is too big to give to {name}"));
                     return false;
                 }
-                command.env(name, value);
+                command.env(variable, value);
             }
         }
         // What it writes still reaches the journal, and the last of it is kept to show: why it
         // failed, or what a command that shows its output printed.
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child = match command.spawn() {
+        let spawned = command.spawn();
+        drop(script);
+        let mut child = match spawned {
             Ok(child) => child,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && interpreter.is_some() => {
+                action_failed(format!("{name} isn't installed"));
+                return false;
+            }
             Err(e) => {
-                action_failed(format!("{} couldn't start: {e}", crate::config::short_command(cmd)));
+                action_failed(format!("{name} couldn't start: {e}"));
                 return false;
             }
         };
@@ -1230,13 +1290,12 @@ impl WaylandContext {
         let status = child.wait();
         let last = |kept: Option<KeptOutput>| kept.map(KeptOutput::finish).and_then(|lines| shown_lines(&lines));
         let (printed, errors) = (last(printed), last(errors));
-        // The shell says 127 when it can't find the program.
+        // sh -c says 127 when it can't find the program. In a script, it's any program the script
+        // runs, which its error names.
         let failure = match status {
-            Ok(status) if status.code() == Some(127) => {
-                Some(format!("{} isn't installed", crate::config::short_command(cmd)))
-            }
+            Ok(status) if status.code() == Some(127) && interpreter.is_none() => Some(format!("{name} isn't installed")),
             Ok(status) if !status.success() && errors.is_some() => errors,
-            status => command_failure(&crate::config::short_command(cmd), status),
+            status => command_failure(&name, status),
         };
         if let Some(failure) = &failure {
             action_failed(failure.clone());
@@ -1419,6 +1478,32 @@ mod tests {
         let kept = KeptOutput::read(child.stderr.take().unwrap(), 3, true);
         child.wait().unwrap();
         assert_eq!(kept.finish(), ["two", "three", "four"]);
+    }
+
+    /// A script run as Gestos runs it, given these files.
+    fn run_script(script: &str, files: &[&str]) -> std::io::Result<std::process::Output> {
+        let interpreter = crate::command_variables::ShellCommand::from(script).interpreter().unwrap();
+        let (mut command, file) = script_command(&interpreter, script)?;
+        let output = command.args(files).output();
+        drop(file);
+        output
+    }
+
+    #[test]
+    fn a_script_is_run_by_the_program_its_first_line_names() {
+        let printed = |output: std::process::Output| String::from_utf8_lossy(&output.stdout).into_owned();
+        let script = "#!/bin/sh\nfor file in \"$@\"; do printf '%s\\n' \"$file\"; done";
+        assert_eq!(printed(run_script(script, &["/a b/c.txt", "-n"]).unwrap()), "/a b/c.txt\n-n\n");
+        // The line's argument is given to the program: -e stops sh at the first failure.
+        let stopped = run_script("#!/bin/sh -e\nfalse\necho after", &[]).unwrap();
+        assert!(!stopped.status.success());
+        assert_eq!(printed(stopped), "");
+        if is_installed("python3") {
+            let script = "#!/usr/bin/env python3\nimport sys\nprint(sys.argv[1:])";
+            assert_eq!(printed(run_script(script, &["a b"]).unwrap()), "['a b']\n");
+        }
+        let missing = run_script("#!/nowhere/gestos-test\n", &[]).unwrap_err();
+        assert_eq!(missing.kind(), std::io::ErrorKind::NotFound);
     }
 
     #[test]

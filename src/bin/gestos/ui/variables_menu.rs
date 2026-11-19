@@ -6,8 +6,8 @@ use gtk::prelude::*;
 use gtk4 as gtk;
 
 /// What goes by a command's entry: a check box that gives it the variables, which it doesn't get
-/// otherwise, and a menu of them, which checks it when one is picked.
-pub fn variables_controls(entry: &gtk::TextView, variables: bool) -> (gtk::Box, gtk::CheckButton) {
+/// otherwise, and a button with a menu of them, which checks it when one is picked.
+pub fn variables_controls(entry: &gtk::TextView, variables: bool) -> (gtk::Box, gtk::CheckButton, gtk::MenuButton) {
     let check = gtk::CheckButton::with_label("Use Variables");
     check.set_active(variables);
     check.set_valign(gtk::Align::Center);
@@ -15,7 +15,7 @@ pub fn variables_controls(entry: &gtk::TextView, variables: bool) -> (gtk::Box, 
     let controls = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     controls.append(&check);
     controls.append(&menu);
-    (controls, check)
+    (controls, check, menu)
 }
 
 /// A button by a command's entry, whose menu lists the variables a command is given.

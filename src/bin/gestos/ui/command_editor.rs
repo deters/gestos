@@ -80,17 +80,21 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
     field.add_overlay(&placeholder);
     content.append(&field);
 
-    let (variables, check) = crate::ui::variables_menu::variables_controls(&view, command.variables);
+    let (variables, check, menu) = crate::ui::variables_menu::variables_controls(&view, command.variables);
     variables.set_halign(gtk::Align::Start);
     content.append(&variables);
+    // The menu writes the variables as a shell reads them, which a script for another program,
+    // like #!/usr/bin/python3, doesn't.
+    menu.set_visible(command.is_shell());
 
     // Only once there's a command to run.
     set_btn.set_sensitive(!command.trim().is_empty());
     let set_shown = set_btn.clone();
     view.buffer().connect_changed(move |buffer| {
-        let empty = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).trim().is_empty();
-        set_shown.set_sensitive(!empty);
+        let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
+        set_shown.set_sensitive(!text.trim().is_empty());
         placeholder.set_visible(buffer.char_count() == 0);
+        menu.set_visible(ShellCommand::from(text.as_str()).is_shell());
     });
     let shortcuts = gtk::ShortcutController::new();
     let set_with_keys = set_btn.clone();

@@ -31,6 +31,8 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Commands in "Run Command in Shell" and in the "Command" steps of an "Advanced Action" are now edited in a window of their own, with room for a script of several lines and the option "Use Variables". Open it with the edit button on the command's row. In that window, Enter starts a new line and Ctrl+Enter sets the command. Keywords, function names, quoted text, variables, comments and operators are shown in colors. A command inside the command, like `$(date)`, has colors of its own. The command's box grows with the window.
 - A new "Command" step is now added only after you click "Set" in that window.
 - When a command fails, its notification now shows the last lines of the command's error message, in place of its exit code.
+- A command in "Run Command in Shell" or in a "Command" step of an "Advanced Action" that starts with a line like `#!/usr/bin/python3` is now run by the program that line names, as a script file is. Such a command can be written in Python or another language. Other commands are still run by sh.
+- The button "Insert a Variable" in the window a command is edited in is now hidden while the command's first line names a program that isn't a shell, like Python.
 
 ## [8.1.1] - 2026-11-17
 
