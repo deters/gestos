@@ -500,6 +500,7 @@ fn spawn_gesture_actions(
                     &|app| gestos::wayland::open_app_for_steps(app, is_gnome),
                     &|command, after_copy| wayland_ctx.run_shell_cmd(command, &context, after_copy),
                     &gestos::wayland::command_output,
+                    &|text, after_copy, result| wayland_ctx.typed_text(text, &context, after_copy, result),
                     &|| wayland_ctx.clear_copied(),
                     &|| {
                         let keys = gestos::app_shortcuts::copy_keys(context.app.as_deref());
@@ -540,10 +541,12 @@ fn template_steps(action: ActionType) -> Option<ActionType> {
 fn runs_a_command(action: &ActionType) -> bool {
     match action {
         ActionType::Execute(_) => true,
-        // A copy needs it too, for the keys that copy in it.
-        ActionType::Keyboard(steps) => steps
-            .iter()
-            .any(|step| matches!(step, gestos::key_steps::KeyStep::Run(_) | gestos::key_steps::KeyStep::Copy(_))),
+        // A copy needs it too, for the keys that copy in it, and text that types it.
+        ActionType::Keyboard(steps) => steps.iter().any(|step| match step {
+            gestos::key_steps::KeyStep::Run(_) | gestos::key_steps::KeyStep::Copy(_) => true,
+            gestos::key_steps::KeyStep::Type(text) => text.variables,
+            _ => false,
+        }),
         _ => false,
     }
 }

@@ -3,14 +3,15 @@
 //! `open org.mozilla.firefox; press Control+L; type "gestos"; press Return`, as gestures keep
 //! their actions as text.
 
-use crate::command_variables::ShellCommand;
+use crate::command_variables::{ShellCommand, TypedText};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum KeyStep {
     /// Keys pressed together, like `Control+L`.
     Press(String),
-    /// Text typed one character at a time, with whatever keys the layout needs for each.
-    Type(String),
+    /// Text typed one character at a time, with whatever keys the layout needs for each, and the
+    /// variables in it filled in, if it's given them.
+    Type(TypedText),
     /// A pause, in milliseconds, for an app to catch up.
     Wait(u32),
     /// An app, by its desktop file ID, opened or brought to the front, which the steps after it
@@ -49,6 +50,9 @@ pub enum CopyWait {
 pub const MAX_WAIT_MILLIS: u32 = 60_000;
 /// The longest a result is shown, in seconds, so that a typo can't leave it over the screen.
 pub const MAX_SHOW_SECONDS: u32 = 60;
+/// The most a step types once its variables are filled in, about a minute of typing, so that a
+/// whole file copied by mistake isn't typed for hours. Anything longer isn't typed at all.
+pub const MAX_TYPED_CHARS: usize = 4000;
 
 /// Reads steps written by `format_steps`. Steps that can't be read are left out, so that one
 /// mistake in a hand-edited file doesn't lose the rest.
@@ -86,7 +90,8 @@ fn parse_step(step: &str) -> Option<KeyStep> {
     match kind.to_lowercase().as_str() {
         "press" if !rest.is_empty() => Some(KeyStep::Press(rest.to_string())),
         "open" if !rest.is_empty() => Some(KeyStep::Open(rest.to_string())),
-        "type" => unquote(rest).map(KeyStep::Type),
+        "type" => unquote(rest).map(|text| KeyStep::Type(TypedText::new(text, false))),
+        "type-with-variables" => unquote(rest).map(|text| KeyStep::Type(TypedText::new(text, true))),
         "run" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, false))),
         "run-with-variables" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, true))),
         // As commands that showed their output were written before the step that shows it.
@@ -146,6 +151,7 @@ pub fn format_steps(steps: &[KeyStep]) -> String {
         .iter()
         .map(|step| match step {
             KeyStep::Press(keys) => format!("press {keys}"),
+            KeyStep::Type(text) if text.variables => format!("type-with-variables {}", quote(text)),
             KeyStep::Type(text) => format!("type {}", quote(text)),
             KeyStep::Wait(millis) => format!("wait {millis}"),
             KeyStep::Open(app) => format!("open {app}"),
@@ -165,7 +171,7 @@ pub fn describe_steps(steps: &[KeyStep]) -> String {
         .iter()
         .map(|step| match step {
             KeyStep::Press(keys) => keys.clone(),
-            KeyStep::Type(text) => format!("type “{text}”"),
+            KeyStep::Type(text) => format!("type “{}”", text.text),
             KeyStep::Wait(millis) => format!("wait {millis} ms"),
             KeyStep::Open(app) => format!("open {}", app_name(app)),
             KeyStep::Run(command) => format!("run {}", crate::config::short_command(command)),
@@ -194,14 +200,23 @@ pub fn is_copy_shortcut(keys: &str) -> bool {
     )
 }
 
-/// The steps that copy for a command after them that's given what's copied: the last shortcut
-/// before such a command, if it copies. What was copied before is cleared first, so that the command can tell when the
+/// Whether a step reads what's copied: a command given the variables, or text to type with the
+/// variables of what's copied in it.
+fn reads_copied(step: &KeyStep) -> bool {
+    match step {
+        KeyStep::Run(command) => command.variables,
+        KeyStep::Type(text) => text.reads_copied(),
+        _ => false,
+    }
+}
+
+/// The steps that copy for a step after them that reads what's copied: the last shortcut before
+/// such a step, if it copies. What was copied before is cleared first, so that the command can tell when the
 /// copy is there, and never gets what was copied earlier when nothing is selected.
 pub fn copies_for_commands(steps: &[KeyStep]) -> Vec<usize> {
     let mut copies = Vec::new();
     for (i, step) in steps.iter().enumerate() {
-        let KeyStep::Run(command) = step else { continue };
-        if !command.variables {
+        if !reads_copied(step) {
             continue;
         }
         let last_press = steps[..i].iter().rposition(|step| matches!(step, KeyStep::Press(_)));
@@ -295,7 +310,7 @@ mod tests {
     fn steps() -> Vec<KeyStep> {
         vec![
             KeyStep::Press("Control+L".to_string()),
-            KeyStep::Type("say \"hi\"; C:\\ ok\n".to_string()),
+            KeyStep::Type("say \"hi\"; C:\\ ok\n".into()),
             KeyStep::Wait(200),
             KeyStep::Press("Return".to_string()),
         ]
@@ -350,6 +365,17 @@ mod tests {
     }
 
     #[test]
+    fn text_to_type_with_variables_survives_saving() {
+        let steps = vec![
+            KeyStep::Type(TypedText::new("Found: {{result}}", true)),
+            KeyStep::Type("{{result}}".into()),
+        ];
+        let text = format_steps(&steps);
+        assert_eq!(text, r#"type-with-variables "Found: {{result}}"; type "{{result}}""#);
+        assert_eq!(parse_steps(&text), steps);
+    }
+
+    #[test]
     fn copy_shortcuts_are_known_however_written() {
         assert!(is_copy_shortcut("Control+C"));
         assert!(is_copy_shortcut("ctrl+shift+c"));
@@ -360,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn a_copy_is_waited_for_only_by_a_command_given_the_variables() {
+    fn a_copy_is_waited_for_only_by_a_step_that_reads_whats_copied() {
         let press = |keys: &str| KeyStep::Press(keys.to_string());
         let run = |command: &str, variables| KeyStep::Run(ShellCommand::new(command, variables));
         let steps = [
@@ -372,8 +398,14 @@ mod tests {
             press("Control+C"),
             press("Return"),
             run(r#"echo "$GESTOS_CLIPBOARD""#, true),
+            press("Control+C"),
+            KeyStep::Type(TypedText::new("{{result}}", true)),
+            press("Control+C"),
+            KeyStep::Type(TypedText::new("{{clipboard}}", false)),
+            press("Control+C"),
+            KeyStep::Type(TypedText::new("{{clipboard}}", true)),
         ];
-        assert_eq!(copies_for_commands(&steps), [0]);
+        assert_eq!(copies_for_commands(&steps), [0, 12]);
     }
 
     #[test]

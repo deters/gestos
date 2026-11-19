@@ -1,25 +1,37 @@
-//! Giving a command the variables, such as what's copied, and a menu of them, which puts the one
-//! picked into the command where the cursor is.
+//! Giving a command or text to type the variables, such as what's copied, and a menu of them,
+//! which puts the one picked into the command or text where the cursor is.
 
-use gestos::command_variables::OFFERED;
+use gestos::command_variables::{OFFERED, OFFERED_FOR_TYPING};
 use gtk::prelude::*;
 use gtk4 as gtk;
 
-/// What goes by a command's entry: a check box that gives it the variables, which it doesn't get
-/// otherwise, and a button with a menu of them, which checks it when one is picked.
-pub fn variables_controls(entry: &gtk::TextView, variables: bool) -> (gtk::Box, gtk::CheckButton, gtk::MenuButton) {
+/// What the variables go into: a command, which a shell reads, or text to type, which takes them
+/// as they're written.
+#[derive(Clone, Copy, PartialEq)]
+pub enum VariablesFor {
+    Command,
+    Typing,
+}
+
+/// What goes by a command's entry, or text to type: a check box that gives it the variables, which
+/// it doesn't get otherwise, and a button with a menu of them, which checks it when one is picked.
+pub fn variables_controls(
+    entry: &gtk::TextView,
+    variables: bool,
+    target: VariablesFor,
+) -> (gtk::Box, gtk::CheckButton, gtk::MenuButton) {
     let check = gtk::CheckButton::with_label("Use Variables");
     check.set_active(variables);
     check.set_valign(gtk::Align::Center);
-    let menu = variables_button(entry, &check);
+    let menu = variables_button(entry, &check, target);
     let controls = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     controls.append(&check);
     controls.append(&menu);
     (controls, check, menu)
 }
 
-/// A button by a command's entry, whose menu lists the variables a command is given.
-fn variables_button(entry: &gtk::TextView, check: &gtk::CheckButton) -> gtk::MenuButton {
+/// A button by a command's entry, or text to type, whose menu lists the variables it can use.
+fn variables_button(entry: &gtk::TextView, check: &gtk::CheckButton, target: VariablesFor) -> gtk::MenuButton {
     let items = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let popover = gtk::Popover::new();
     popover.set_child(Some(&items));
@@ -36,7 +48,11 @@ fn variables_button(entry: &gtk::TextView, check: &gtk::CheckButton) -> gtk::Men
         note.append(&label);
         items.append(&note);
     }
-    for (name, written) in OFFERED {
+    let offered: &[(&str, &str)] = match target {
+        VariablesFor::Command => &OFFERED,
+        VariablesFor::Typing => &OFFERED_FOR_TYPING,
+    };
+    for &(name, written) in offered {
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         let label = gtk::Label::new(Some(name));
         label.set_xalign(0.0);
@@ -54,7 +70,11 @@ fn variables_button(entry: &gtk::TextView, check: &gtk::CheckButton) -> gtk::Men
         let check = check.clone();
         item.connect_clicked(move |_| {
             check.set_active(true);
-            insert_at_cursor(&entry, written);
+            match target {
+                VariablesFor::Command => insert_at_cursor(&entry, written),
+                // Typed as it's written, so nothing goes around it.
+                VariablesFor::Typing => entry.buffer().insert_at_cursor(written),
+            }
             popover.popdown();
             entry.grab_focus();
         });

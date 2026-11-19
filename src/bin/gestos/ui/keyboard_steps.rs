@@ -5,7 +5,7 @@
 //! entry, which is what the gesture saves.
 
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
-use gestos::command_variables::ShellCommand;
+use gestos::command_variables::{ShellCommand, TypedText};
 use gestos::key_steps::{format_steps, parse_steps, CopyKind, KeyStep, MAX_SHOW_SECONDS, MAX_WAIT_MILLIS};
 use gtk::prelude::*;
 use gtk4 as gtk;
@@ -135,7 +135,7 @@ pub fn append_steps_rows(
     let typing = Rc::clone(&editor);
     add_button("Type", "Type a Text").connect_clicked(move |_| {
         typing.focus_new_text.set(true);
-        typing.add(KeyStep::Type(String::new()));
+        typing.add(KeyStep::Type(TypedText::default()));
     });
     let running = Rc::clone(&editor);
     add_button("Command", "Run a Command").connect_clicked(move |_| {
@@ -240,8 +240,9 @@ impl StepsEditor {
                 record.connect_clicked(move |_| editor.record(Some(i)));
                 content.append(&record);
             }
-            // Several lines, for text like a signature. Each line break is typed as Enter.
-            KeyStep::Type(text) => {
+            // Several lines, for text like a signature. Each line break is typed as Enter. Under it,
+            // what fills in variables like what's copied or the result of the command before it.
+            KeyStep::Type(typed) => {
                 let view = gtk::TextView::new();
                 view.set_wrap_mode(gtk::WrapMode::WordChar);
                 view.set_accepts_tab(true);
@@ -251,18 +252,34 @@ impl StepsEditor {
                 view.set_bottom_margin(6);
                 // About three lines tall, so it reads as a box for several, and growing with them.
                 view.set_size_request(-1, TYPE_BOX_HEIGHT);
-                view.buffer().set_text(text);
-                let editor = Rc::clone(self);
-                view.buffer().connect_changed(move |buffer| {
-                    let (start, end) = buffer.bounds();
-                    let text = buffer.text(&start, &end, false).to_string();
-                    editor.steps.borrow_mut()[i] = KeyStep::Type(text);
-                    editor.changed();
-                });
+                view.buffer().set_text(typed);
+                let (variables, check, _) = crate::ui::variables_menu::variables_controls(
+                    &view,
+                    typed.variables,
+                    crate::ui::variables_menu::VariablesFor::Typing,
+                );
+                variables.set_halign(gtk::Align::Start);
+                let save: Rc<dyn Fn()> = {
+                    let editor = Rc::clone(self);
+                    let (view, check) = (view.clone(), check.clone());
+                    Rc::new(move || {
+                        let buffer = view.buffer();
+                        let (start, end) = buffer.bounds();
+                        let text = buffer.text(&start, &end, false).to_string();
+                        editor.steps.borrow_mut()[i] = KeyStep::Type(TypedText::new(text, check.is_active()));
+                        editor.changed();
+                    })
+                };
+                let saving = Rc::clone(&save);
+                view.buffer().connect_changed(move |_| saving());
+                check.connect_toggled(move |_| save());
                 let frame = gtk::Frame::new(None);
                 frame.set_child(Some(&view));
-                frame.set_hexpand(true);
-                content.append(&frame);
+                let text_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+                text_box.set_hexpand(true);
+                text_box.append(&frame);
+                text_box.append(&variables);
+                content.append(&text_box);
                 // Once it's on screen, which is when it can take the focus.
                 if i + 1 == count && self.focus_new_text.take() {
                     gtk::glib::idle_add_local_once(move || {

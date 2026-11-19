@@ -13,6 +13,8 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - New install script, which installs or updates Gestos with the package for your system: `curl -fsSL https://github.com/deters/gestos/releases/latest/download/install.sh | sh` (Ubuntu, Debian, Fedora, Alpine).
 - With `sh -s -- --beta` instead of `sh`, the install script installs the beta, when there's one newer than the release.
 - On other systems that install deb, rpm or apk packages, like openSUSE, the install script says Gestos wasn't tested there and asks before installing.
+- New option "Use Variables" in the "Type" step of an "Advanced Action". With it, the text to type can include `{{clipboard}}`, `{{selection}}`, `{{files}}`, `{{app}}` and `{{gesture}}`, which hold the same values as the variables a command gets. It can also include `{{result}}`, which is what the command before the step printed. For example, the steps "Copy", "Command" and "Type" with `{{result}}` replace the selected text with what a command made of it. "Insert a Variable" next to the text lists them all.
+- A "Type" step with variables types at most 4000 characters. When the text is longer, nothing is typed and Gestos says the text is too long.
 
 ## [9.0.1] - 2026-11-19
 

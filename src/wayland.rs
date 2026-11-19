@@ -213,7 +213,10 @@ pub fn action_result(text: String, icon: &'static str) {
 }
 
 /// What a command printed, shown for some seconds by the step after it.
-pub fn command_output(text: String, seconds: u32) {
+/// Shows the last lines a command printed, for a step that shows them.
+pub fn command_output(printed: String, seconds: u32) {
+    let lines: Vec<String> = printed.lines().map(str::to_string).collect();
+    let Some(text) = shown_lines(&lines, SHOWN_OUTPUT_LINES, SHOWN_OUTPUT_CHARS) else { return };
     println!("Command output: {text}");
     if let Some(report) = RESULT_REPORTER.get() {
         report(ActionResult::CommandOutput(text, seconds));
@@ -299,7 +302,10 @@ fn script_command(
 }
 
 // How many of the last lines a command printed, or wrote as errors, are shown, and how much of them:
-// as much of each printed line as fits a line of the panel, and a few words of each error.
+// as much of each printed line as fits a line of the panel, and a few words of each error. More
+// of what it printed is kept, for a step that types it, and some empty lines after its errors.
+const KEPT_OUTPUT_LINES: usize = 1000;
+const KEPT_ERROR_LINES: usize = 20;
 const SHOWN_OUTPUT_LINES: usize = 24;
 const SHOWN_ERROR_LINES: usize = 3;
 const SHOWN_OUTPUT_CHARS: usize = SHOWN_OUTPUT_LINES * 100;
@@ -308,7 +314,8 @@ const SHOWN_ERROR_CHARS: usize = 300;
 // writing to it for as long as it runs, and is then read on its own.
 const OUTPUT_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 
-/// The last lines read from a command's output, as it writes them, each passed on to the journal.
+/// The last lines read from a command's output, as it writes them, empty ones too, each passed on
+/// to the journal.
 struct KeptOutput {
     lines: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
     ended: std::sync::mpsc::Receiver<()>,
@@ -331,9 +338,6 @@ impl KeptOutput {
                 } else {
                     println!("{line}");
                 }
-                if line.trim().is_empty() {
-                    continue;
-                }
                 let mut kept = kept.lock().unwrap_or_else(|e| e.into_inner());
                 kept.push_back(line);
                 if kept.len() > keep {
@@ -352,10 +356,12 @@ impl KeptOutput {
     }
 }
 
-/// Lines as a notification shows them: together, cut short at the end past `max_chars`.
-fn shown_lines(lines: &[String], max_chars: usize) -> Option<String> {
-    let text = lines.join("\n");
-    if text.trim().is_empty() {
+/// The last `count` lines that aren't empty, as a notification shows them: together, cut short at
+/// the end past `max_chars`.
+fn shown_lines(lines: &[String], count: usize, max_chars: usize) -> Option<String> {
+    let lines: Vec<&str> = lines.iter().map(String::as_str).filter(|line| !line.trim().is_empty()).collect();
+    let text = lines[lines.len().saturating_sub(count)..].join("\n");
+    if text.is_empty() {
         return None;
     }
     let mut shown: String = text.chars().take(max_chars).collect();
@@ -1303,13 +1309,13 @@ impl WaylandContext {
                 return None;
             }
         };
-        let printed = child.stdout.take().map(|pipe| KeptOutput::read(pipe, SHOWN_OUTPUT_LINES, false));
-        let errors = child.stderr.take().map(|pipe| KeptOutput::read(pipe, SHOWN_ERROR_LINES, true));
+        let printed = child.stdout.take().map(|pipe| KeptOutput::read(pipe, KEPT_OUTPUT_LINES, false));
+        let errors = child.stderr.take().map(|pipe| KeptOutput::read(pipe, KEPT_ERROR_LINES, true));
         let status = child.wait();
-        let last = |kept: Option<KeptOutput>, max_chars| {
-            kept.map(KeptOutput::finish).and_then(|lines| shown_lines(&lines, max_chars))
-        };
-        let (printed, errors) = (last(printed, SHOWN_OUTPUT_CHARS), last(errors, SHOWN_ERROR_CHARS));
+        let printed = printed.map(KeptOutput::finish).unwrap_or_default();
+        let errors = errors
+            .map(KeptOutput::finish)
+            .and_then(|lines| shown_lines(&lines, SHOWN_ERROR_LINES, SHOWN_ERROR_CHARS));
         // sh -c says 127 when it can't find the program. In a script, it's any program the script
         // runs, which its error names.
         let failure = match status {
@@ -1321,7 +1327,37 @@ impl WaylandContext {
             action_failed(failure);
             return None;
         }
-        Some(printed.unwrap_or_default())
+        // Without the empty lines it ends with, as a typed result would press Enter for each.
+        Some(printed.join("\n").trim_end_matches(['\n', ' ', '\t']).to_string())
+    }
+
+    /// Text for a step to type, with its variables filled in: what's copied, read as a command
+    /// reads it, if it uses that, and what the command before it printed. Nothing if what's copied
+    /// can't be read, or the text is too long to type, which it says.
+    pub fn typed_text(
+        &self,
+        typed: &crate::command_variables::TypedText,
+        context: &CommandContext,
+        after_copy: crate::key_steps::CopyWait,
+        result: &str,
+    ) -> Option<String> {
+        let copied = if typed.reads_copied() {
+            match self.copied_for_command(after_copy) {
+                Ok(copied) => copied,
+                Err(why) => {
+                    action_failed(why);
+                    return None;
+                }
+            }
+        } else {
+            Copied::default()
+        };
+        let filled = typed.filled(&crate::command_variables::typed_variables(context, &copied, result));
+        if filled.chars().count() > crate::key_steps::MAX_TYPED_CHARS {
+            action_failed("The text to type is too long".to_string());
+            return None;
+        }
+        Some(filled)
     }
 
     /// What's copied, for a command that uses it, or why it can't be had. Right after a copy, it's
@@ -1543,13 +1579,19 @@ mod tests {
     #[test]
     fn long_output_is_cut_short() {
         let long = "x".repeat(SHOWN_ERROR_CHARS + 10);
-        let shown = shown_lines(&[long], SHOWN_ERROR_CHARS).unwrap();
+        let shown = shown_lines(&[long], SHOWN_ERROR_LINES, SHOWN_ERROR_CHARS).unwrap();
         assert_eq!(shown.chars().count(), SHOWN_ERROR_CHARS + 1);
         assert!(shown.ends_with('…'));
-        assert_eq!(shown_lines(&[], SHOWN_ERROR_CHARS), None);
-        // 24 lines a command printed are shown whole.
-        let printed: Vec<String> = (1..=SHOWN_OUTPUT_LINES).map(|n| format!("{n:>3}  {}", "x".repeat(70))).collect();
-        assert_eq!(shown_lines(&printed, SHOWN_OUTPUT_CHARS), Some(printed.join("\n")));
+        assert_eq!(shown_lines(&[], SHOWN_ERROR_LINES, SHOWN_ERROR_CHARS), None);
+        assert_eq!(shown_lines(&[" ".to_string()], SHOWN_ERROR_LINES, SHOWN_ERROR_CHARS), None);
+        // The last 24 lines a command printed are shown whole, without the empty ones.
+        let printed: Vec<String> = (0..=SHOWN_OUTPUT_LINES).map(|n| format!("{n:>3}  {}", "x".repeat(70))).collect();
+        let mut with_empty = printed.clone();
+        with_empty.insert(5, String::new());
+        assert_eq!(
+            shown_lines(&with_empty, SHOWN_OUTPUT_LINES, SHOWN_OUTPUT_CHARS),
+            Some(printed[1..].join("\n"))
+        );
     }
 
     use super::*;

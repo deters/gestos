@@ -1476,7 +1476,7 @@ mod tests {
     fn a_keyboard_action_survives_saving() {
         let action = ActionType::Keyboard(vec![
             KeyStep::Press("Control+L".to_string()),
-            KeyStep::Type("a; \"b\"".to_string()),
+            KeyStep::Type("a; \"b\"".into()),
             KeyStep::Wait(150),
         ]);
         assert_eq!(ActionType::from_string(&action.to_string()), Some(action));

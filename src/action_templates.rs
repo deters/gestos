@@ -29,7 +29,7 @@
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-use crate::command_variables::ShellCommand;
+use crate::command_variables::{ShellCommand, TypedText};
 use crate::key_steps::{CopyKind, KeyStep, MAX_SHOW_SECONDS, MAX_WAIT_MILLIS};
 
 /// The version of the format this Gestos reads.
@@ -115,7 +115,8 @@ impl From<StepFile> for KeyStep {
             // A template's commands are given what's copied and selected, as that's what they're for.
             StepFile::Run(command) => KeyStep::Run(ShellCommand::new(command.trim(), true)),
             StepFile::Press(keys) => KeyStep::Press(keys),
-            StepFile::Type(text) => KeyStep::Type(text),
+            // As its commands are, a template's text is filled in with what's copied and printed.
+            StepFile::Type(text) => KeyStep::Type(TypedText::new(text, true)),
             StepFile::Wait(millis) => KeyStep::Wait(millis.min(MAX_WAIT_MILLIS)),
             StepFile::Open(app) => KeyStep::Open(app),
             StepFile::Show(seconds) => KeyStep::Show(seconds.clamp(1, MAX_SHOW_SECONDS)),
@@ -440,7 +441,7 @@ steps:
             [
                 KeyStep::Open("org.gnome.TextEditor".into()),
                 KeyStep::Press("Control+N".into()),
-                KeyStep::Type("hi".into()),
+                KeyStep::Type(TypedText::new("hi", true)),
                 KeyStep::Wait(MAX_WAIT_MILLIS),
                 KeyStep::Copy(CopyKind::Text),
                 KeyStep::Show(MAX_SHOW_SECONDS),

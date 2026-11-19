@@ -150,7 +150,9 @@ impl InputClient {
     /// after it would go to some other window, so they're left out. `run` runs a command and gives
     /// what it printed, or nothing if it failed, as the steps after one that failed may count on
     /// what it does. It's also told what a copy just made for it copies, which it then waits for.
-    /// `show` shows what the command before a show step printed, for its seconds. `clear_copied`
+    /// `show` shows what the command before a show step printed, for its seconds. `fill` gives
+    /// text to type with its variables filled in, from what a copy just made for it copies and
+    /// what the command before it printed, or nothing if it can't, which stops the steps. `clear_copied`
     /// clears what was copied before such a copy, and says whether it could. `copy_keys` are the
     /// keys that copy in the app in use, if they're known: a copy step stops the steps where they
     /// aren't.
@@ -160,6 +162,7 @@ impl InputClient {
         open_app: &dyn Fn(&str) -> bool,
         run: &dyn Fn(&crate::command_variables::ShellCommand, CopyWait) -> Option<String>,
         show: &dyn Fn(String, u32),
+        fill: &dyn Fn(&crate::command_variables::TypedText, CopyWait, &str) -> Option<String>,
         clear_copied: &dyn Fn() -> bool,
         copy_keys: &dyn Fn() -> Option<String>,
     ) {
@@ -183,6 +186,13 @@ impl InputClient {
                     }
                     self.keypress_string(&keys);
                     just_copied = CopyWait::Kind(*kind);
+                }
+                KeyStep::Type(text) if text.variables => {
+                    let after_copy = std::mem::replace(&mut just_copied, CopyWait::Nothing);
+                    let Some(filled) = fill(text, after_copy, printed.as_deref().unwrap_or_default()) else {
+                        return;
+                    };
+                    self.type_text(&filled);
                 }
                 KeyStep::Type(text) => self.type_text(text),
                 KeyStep::Wait(millis) => {
@@ -279,12 +289,13 @@ mod tests {
         client.run_steps(
             &[
                 KeyStep::Wait(30),
-                KeyStep::Type("A".to_string()),
+                KeyStep::Type("A".into()),
                 KeyStep::Press("F1".to_string()),
             ],
             &|_| true,
             &|_, _| Some(String::new()),
             &|_, _| {},
+            &|_, _, _| None,
             &|| true,
             &|| Some("Control+C".to_string()),
         );
@@ -316,6 +327,7 @@ mod tests {
             },
             &|_, _| Some(String::new()),
             &|_, _| {},
+            &|_, _, _| None,
             &|| true,
             &|| Some("Control+C".to_string()),
         );
@@ -340,6 +352,7 @@ mod tests {
             &|_| true,
             &|command, _| Some(if command.text == "date" { "Today".to_string() } else { String::new() }),
             &|text, seconds| shown.borrow_mut().push((text, seconds)),
+            &|_, _, _| None,
             &|| true,
             &|| Some("Control+C".to_string()),
         );
@@ -359,6 +372,7 @@ mod tests {
                 None
             },
             &|_, _| {},
+            &|_, _, _| None,
             &|| true,
             &|| Some("Control+C".to_string()),
         );
@@ -384,6 +398,7 @@ mod tests {
                 Some(String::new())
             },
             &|_, _| {},
+            &|_, _, _| None,
             &|| {
                 cleared.set(cleared.get() + 1);
                 true
@@ -408,12 +423,52 @@ mod tests {
                 Some(String::new())
             },
             &|_, _| {},
+            &|_, _, _| None,
             &|| false,
             &|| Some("Control+C".to_string()),
         );
         assert!(!ran.get());
         client.send(&Request::QueryHeld);
         assert_eq!(received(&mut service, 1), [Request::QueryHeld]);
+    }
+
+    #[test]
+    fn text_with_variables_is_filled_from_the_copy_and_the_command_before_it() {
+        use crate::command_variables::TypedText;
+        let (client, mut service) = client();
+        let filled = std::cell::RefCell::new(Vec::new());
+        client.run_steps(
+            &[
+                KeyStep::Type(TypedText::new("{{result}}", true)),
+                KeyStep::Copy(crate::key_steps::CopyKind::Files),
+                KeyStep::Run("date".into()),
+                KeyStep::Copy(crate::key_steps::CopyKind::Text),
+                KeyStep::Type(TypedText::new("{{clipboard}} {{result}}", true)),
+                KeyStep::Type(TypedText::new("{{result}}", true)),
+                KeyStep::Press("F1".to_string()),
+            ],
+            &|_| true,
+            &|_, _| Some("Today".to_string()),
+            &|_, _| {},
+            &|text, after_copy, result| {
+                filled.borrow_mut().push((text.text.clone(), after_copy, result.to_string()));
+                // The first is typed, the second stops the steps.
+                (filled.borrow().len() == 1).then(String::new)
+            },
+            &|| true,
+            &|| Some("Control+C".to_string()),
+        );
+        assert_eq!(
+            *filled.borrow(),
+            [
+                ("{{result}}".to_string(), CopyWait::Nothing, String::new()),
+                ("{{clipboard}} {{result}}".to_string(), CopyWait::Kind(crate::key_steps::CopyKind::Text), "Today".to_string()),
+            ]
+        );
+        // Only the two copies' keys, not F1: four presses and releases each of Control and C.
+        client.send(&Request::QueryHeld);
+        let requests = received(&mut service, 9);
+        assert_eq!(requests[8], Request::QueryHeld);
     }
 
     #[test]

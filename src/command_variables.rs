@@ -91,6 +91,88 @@ impl std::fmt::Display for ShellCommand {
     }
 }
 
+/// Text an advanced action types, and whether the variables in it are filled in, written as
+/// `{{clipboard}}`. Without them, it's typed as it's written.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct TypedText {
+    pub text: String,
+    pub variables: bool,
+}
+
+impl TypedText {
+    pub fn new(text: impl Into<String>, variables: bool) -> Self {
+        Self { text: text.into(), variables }
+    }
+
+    /// Whether it types what's copied or selected, which is then read before it's typed.
+    pub fn reads_copied(&self) -> bool {
+        self.variables && self.used().any(|name| COPIED_TYPED_VARIABLES.contains(&name))
+    }
+
+    /// The names of the variables it uses, known or not.
+    fn used(&self) -> impl Iterator<Item = &str> {
+        self.text.split("{{").skip(1).filter_map(|after| Some(after.split_once("}}")?.0.trim()))
+    }
+
+    /// The text with each variable it uses written as its value. Braces around anything else are
+    /// typed as they are.
+    pub fn filled(&self, variables: &[(&str, String)]) -> String {
+        if !self.variables {
+            return self.text.clone();
+        }
+        let mut filled = String::new();
+        let mut rest = self.text.as_str();
+        while let Some(start) = rest.find("{{") {
+            filled.push_str(&rest[..start]);
+            let after = &rest[start + 2..];
+            let value = after.split_once("}}").and_then(|(name, after_name)| {
+                let (_, value) = variables.iter().find(|(known, _)| *known == name.trim())?;
+                Some((value, after_name))
+            });
+            match value {
+                Some((value, after_name)) => {
+                    filled.push_str(value);
+                    rest = after_name;
+                }
+                None => {
+                    filled.push_str("{{");
+                    rest = after;
+                }
+            }
+        }
+        filled.push_str(rest);
+        filled
+    }
+}
+
+/// What text to type can have filled in, by the names it's written with: what a command is given
+/// as its variables, and what the command before it printed.
+pub fn typed_variables(context: &CommandContext, copied: &Copied, result: &str) -> Vec<(&'static str, String)> {
+    let given = variables(context, copied);
+    let value = |name: &str| given.iter().find(|(n, _)| *n == name).map(|(_, value)| value.clone()).unwrap_or_default();
+    vec![
+        ("clipboard", value("GESTOS_CLIPBOARD")),
+        ("selection", value("GESTOS_SELECTION")),
+        ("files", value("GESTOS_FILES")),
+        ("result", result.to_string()),
+        ("app", value("GESTOS_APP")),
+        ("gesture", value("GESTOS_GESTURE")),
+    ]
+}
+
+impl From<&str> for TypedText {
+    fn from(text: &str) -> Self {
+        Self::new(text, false)
+    }
+}
+
+impl std::ops::Deref for TypedText {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.text
+    }
+}
+
 /// What a command is told about its gesture, besides what's copied when it runs.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CommandContext {
@@ -119,6 +201,20 @@ pub const OFFERED: [(&str, &str); 6] = [
     ("Copied Files, One per Line", "\"$GESTOS_FILES\""),
     ("App in Use", "\"$GESTOS_APP\""),
     ("Gesture Name", "\"$GESTOS_GESTURE\""),
+];
+
+/// The variables of text to type that hold what's copied or selected, which is only read for text
+/// that uses them.
+const COPIED_TYPED_VARIABLES: [&str; 3] = ["clipboard", "selection", "files"];
+
+/// The variables text to type can use, as offered in the editor, as `OFFERED` is for commands.
+pub const OFFERED_FOR_TYPING: [(&str, &str); 6] = [
+    ("Clipboard", "{{clipboard}}"),
+    ("Selected Text", "{{selection}}"),
+    ("Copied Files, One per Line", "{{files}}"),
+    ("Result of the Command Before", "{{result}}"),
+    ("App in Use", "{{app}}"),
+    ("Gesture Name", "{{gesture}}"),
 ];
 
 /// What Nautilus, Nemo and Caja call the files selected, when they run a script: their paths,
@@ -279,6 +375,26 @@ mod tests {
         assert_eq!(value(&variables, "GESTOS_FILES"), Some(""));
         assert_eq!(value(&variables, "GESTOS_APP"), Some(""));
         assert_eq!(value(&variables, "NAUTILUS_SCRIPT_SELECTED_URIS"), None);
+    }
+
+    #[test]
+    fn typed_text_has_its_variables_filled_in() {
+        let variables = [("result", "42".to_string()), ("app", "org.gnome.Nautilus".to_string())];
+        let typed = TypedText::new("Found {{result}}px in {{ app }}, not {{apps}}, {x} or {{result", true);
+        assert_eq!(typed.filled(&variables), "Found 42px in org.gnome.Nautilus, not {{apps}}, {x} or {{result");
+        let plain = TypedText::new("{{result}}", false);
+        assert_eq!(plain.filled(&variables), "{{result}}");
+        assert!(!TypedText::new("{{result}}", true).reads_copied());
+        assert!(TypedText::new("{{ files }}", true).reads_copied());
+        assert!(!TypedText::new("{{files}}", false).reads_copied());
+    }
+
+    #[test]
+    fn typed_text_is_given_what_a_command_is_and_the_result() {
+        let context = CommandContext { gesture: "Paste".into(), app: None };
+        let copied = Copied { clipboard: "hi".into(), uri_list: "file:///tmp/a\nfile:///tmp/b".into(), ..Default::default() };
+        let typed = TypedText::new("{{clipboard}}|{{files}}|{{result}}|{{gesture}}", true);
+        assert_eq!(typed.filled(&typed_variables(&context, &copied, "done")), "hi|/tmp/a\n/tmp/b|done|Paste");
     }
 
     #[test]

@@ -80,7 +80,11 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
     field.add_overlay(&placeholder);
     content.append(&field);
 
-    let (variables, check, menu) = crate::ui::variables_menu::variables_controls(&view, command.variables);
+    let (variables, check, menu) = crate::ui::variables_menu::variables_controls(
+        &view,
+        command.variables,
+        crate::ui::variables_menu::VariablesFor::Command,
+    );
     variables.set_halign(gtk::Align::Start);
     content.append(&variables);
     // The menu writes the variables as a shell reads them, which a script for another program,
