@@ -95,6 +95,8 @@ Mouse gestures need access to input devices, and that access normally lets a pro
 
 Everything else runs as you, with no extra rights: `gestosd`, the background process that recognizes gestures and runs their actions, and `gestos`, the graphical interface, open only while it's on the screen. `gestos-input` only answers the user at the screen, and `gestosd` ignores gestures while the screen is locked, on desktops that report it.
 
+On GNOME, apps can't draw over the screen, move other apps' windows, or see which app is in use or what you've selected in it, and GNOME offers no other way to ask. We wanted gestures that show their path, tile windows and act on the app in use, so we made the Gestos extension, which does these from inside GNOME Shell. It gives what you've selected or copied only to `gestosd`.
+
 Programs you run yourself can still ask `gestos-input` to press keys, even in other apps' windows, as tools that type for you can. On systems without systemd, like Alpine, `gestos-input` runs as its own user without the other limits.
 
 ## Development
