@@ -21,6 +21,7 @@ const RADIUS: f64 = 14.0;
 /// Wider text wraps, so a long reason stays readable.
 const MAX_TEXT_WIDTH: f64 = 560.0;
 const FONT: &str = "Sans Bold 11";
+const PRINTED_FONT: &str = "Monospace 10";
 const BACKGROUND: [f64; 4] = [0.0, 0.0, 0.0, 0.72];
 const FAILED_BACKGROUND: [f64; 4] = [0.47, 0.08, 0.08, 0.85];
 
@@ -28,6 +29,9 @@ const FAILED_BACKGROUND: [f64; 4] = [0.47, 0.08, 0.08, 0.85];
 pub struct Message {
     pub text: String,
     pub failed: bool,
+    /// Whether it's what a command printed, shown in a fixed-width font and lined up on the left,
+    /// as it printed it.
+    pub printed: bool,
 }
 
 type Error = Box<dyn std::error::Error>;
@@ -99,7 +103,7 @@ fn show(screen: &mut dyn Screen, mut message: Message, messages: &Receiver<Messa
 /// The panel as an image, at the screen's scale.
 pub fn render(message: &Message, scale: f64) -> Result<cairo::ImageSurface, cairo::Error> {
     let measure = cairo::ImageSurface::create(cairo::Format::ARgb32, 1, 1)?;
-    let layout = text_layout(&cairo::Context::new(&measure)?, &message.text, scale);
+    let layout = text_layout(&cairo::Context::new(&measure)?, message, scale);
     let (_, text) = layout.pixel_extents();
     let width = (f64::from(text.width()) + 2.0 * PADDING_X * scale).ceil() as i32;
     let height = (f64::from(text.height()) + 2.0 * PADDING_Y * scale).ceil() as i32;
@@ -110,7 +114,7 @@ pub fn render(message: &Message, scale: f64) -> Result<cairo::ImageSurface, cair
     let [r, g, b, a] = if message.failed { FAILED_BACKGROUND } else { BACKGROUND };
     cr.set_source_rgba(r, g, b, a);
     cr.fill()?;
-    let layout = text_layout(&cr, &message.text, scale);
+    let layout = text_layout(&cr, message, scale);
     cr.move_to(PADDING_X * scale - f64::from(text.x()), PADDING_Y * scale - f64::from(text.y()));
     cr.set_source_rgb(1.0, 1.0, 1.0);
     pangocairo::functions::show_layout(&cr, &layout);
@@ -119,15 +123,16 @@ pub fn render(message: &Message, scale: f64) -> Result<cairo::ImageSurface, cair
     Ok(surface)
 }
 
-fn text_layout(cr: &cairo::Context, text: &str, scale: f64) -> pango::Layout {
+fn text_layout(cr: &cairo::Context, message: &Message, scale: f64) -> pango::Layout {
     let layout = pangocairo::functions::create_layout(cr);
     pangocairo::functions::context_set_resolution(&layout.context(), 96.0 * scale);
     layout.context_changed();
-    layout.set_font_description(Some(&pango::FontDescription::from_string(FONT)));
-    layout.set_text(text);
+    let font = if message.printed { PRINTED_FONT } else { FONT };
+    layout.set_font_description(Some(&pango::FontDescription::from_string(font)));
+    layout.set_text(&message.text);
     layout.set_width((MAX_TEXT_WIDTH * scale * f64::from(pango::SCALE)) as i32);
     layout.set_wrap(pango::WrapMode::WordChar);
-    layout.set_alignment(pango::Alignment::Center);
+    layout.set_alignment(if message.printed { pango::Alignment::Left } else { pango::Alignment::Center });
     layout
 }
 
@@ -387,7 +392,7 @@ mod tests {
     use super::*;
 
     fn message(text: &str, failed: bool) -> Message {
-        Message { text: text.to_string(), failed }
+        Message { text: text.to_string(), failed, printed: false }
     }
 
     #[test]
@@ -398,6 +403,18 @@ mod tests {
         assert!(short.height() > 2 * PADDING_Y as i32);
         let double = render(&message("Back", false), 2.0).unwrap();
         assert!(double.width() > short.width() * 3 / 2);
+    }
+
+    #[test]
+    fn what_a_command_printed_is_lined_up_on_the_left_in_a_fixed_width_font() {
+        let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, 1, 1).unwrap();
+        let cr = cairo::Context::new(&surface).unwrap();
+        let printed = Message { text: "a  1\nbb 22".to_string(), failed: false, printed: true };
+        let layout = text_layout(&cr, &printed, 1.0);
+        assert_eq!(layout.alignment(), pango::Alignment::Left);
+        assert_eq!(layout.font_description().and_then(|font| font.family()).as_deref(), Some("Monospace"));
+        let said = text_layout(&cr, &message("Back", false), 1.0);
+        assert_eq!(said.alignment(), pango::Alignment::Center);
     }
 
     #[test]

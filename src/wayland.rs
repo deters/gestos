@@ -188,19 +188,34 @@ pub fn report_failures_to(reporter: impl Fn(String) + Send + Sync + 'static) {
     let _ = FAILURE_REPORTER.set(Box::new(reporter));
 }
 
-type ResultReporter = Box<dyn Fn(String, &'static str) + Send + Sync>;
+/// An action's result to show: a few words with an icon for them, as a sum's, or what a command
+/// printed, which is shown in a fixed-width font, lined up on the left as it printed it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ActionResult {
+    Message(String, &'static str),
+    CommandOutput(String),
+}
+
+type ResultReporter = Box<dyn Fn(ActionResult) + Send + Sync>;
 static RESULT_REPORTER: OnceLock<ResultReporter> = OnceLock::new();
 
-/// Where an action's result to show is told, with an icon for it, as a sum's. Set once, by the
-/// daemon.
-pub fn report_results_to(reporter: impl Fn(String, &'static str) + Send + Sync + 'static) {
+/// Where an action's result to show is told. Set once, by the daemon.
+pub fn report_results_to(reporter: impl Fn(ActionResult) + Send + Sync + 'static) {
     let _ = RESULT_REPORTER.set(Box::new(reporter));
 }
 
 pub fn action_result(text: String, icon: &'static str) {
     println!("Action result: {text}");
     if let Some(report) = RESULT_REPORTER.get() {
-        report(text, icon);
+        report(ActionResult::Message(text, icon));
+    }
+}
+
+/// What a command that shows its output printed.
+pub fn command_output(text: String) {
+    println!("Command output: {text}");
+    if let Some(report) = RESULT_REPORTER.get() {
+        report(ActionResult::CommandOutput(text));
     }
 }
 
@@ -1300,7 +1315,7 @@ impl WaylandContext {
         if let Some(failure) = &failure {
             action_failed(failure.clone());
         } else if let (true, Some(printed)) = (shell_command.shows_output, printed) {
-            action_result(printed, "utilities-terminal-symbolic");
+            command_output(printed);
         }
         failure.is_none()
     }

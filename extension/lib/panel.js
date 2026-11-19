@@ -21,12 +21,15 @@ const BOTTOM_MARGIN = 72;
 
 const STYLE = 'background-color: rgba(0, 0, 0, 0.72); border-radius: 14px; padding: 10px 18px; spacing: 10px;';
 const FAILED_STYLE = 'background-color: rgba(120, 20, 20, 0.85); border-radius: 14px; padding: 10px 18px; spacing: 10px;';
+const LABEL_STYLE = 'color: white; font-weight: bold;';
+// What a command printed, in a fixed-width font and lined up on the left, as it printed it.
+const PRINTED_STYLE = 'color: white; font-family: monospace; text-align: left;';
 
 export class ActionPanel {
     constructor() {
         this._box = new St.BoxLayout({reactive: false, visible: false, opacity: 0, style: STYLE});
         this._icon = new St.Icon({icon_size: 20, style: 'color: white;', y_align: Clutter.ActorAlign.CENTER});
-        this._label = new St.Label({style: 'color: white; font-weight: bold;', y_align: Clutter.ActorAlign.CENTER});
+        this._label = new St.Label({style: LABEL_STYLE, y_align: Clutter.ActorAlign.CENTER});
         this._box.add_child(this._icon);
         this._box.add_child(this._label);
         Main.layoutManager.uiGroup.add_child(this._box);
@@ -36,6 +39,10 @@ export class ActionPanel {
             ActionExecuted: params => {
                 const [name, , icon] = params.deepUnpack();
                 this._show(icon, name, false);
+            },
+            CommandOutput: params => {
+                const [text] = params.deepUnpack();
+                this._show('utilities-terminal-symbolic', text, false, true);
             },
             ActionFailed: params => {
                 const [reason] = params.deepUnpack();
@@ -58,9 +65,10 @@ export class ActionPanel {
         this._box.destroy();
     }
 
-    _show(iconName, text, failed) {
+    _show(iconName, text, failed, printed = false) {
         this._icon.icon_name = iconName;
         this._label.text = text;
+        this._label.style = printed ? PRINTED_STYLE : LABEL_STYLE;
         this._box.style = failed ? FAILED_STYLE : STYLE;
 
         const monitor = Main.layoutManager.monitors[global.display.get_current_monitor()] ??

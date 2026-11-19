@@ -14,6 +14,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - New actions for the selected text: "Search the Web", "Translate", "Open Link", "Read Aloud", "Calculate", "Count Words" and "Show QR Code", which shows the text or link as a QR code to scan with a phone. These actions copy the selected text, so it replaces what was in the clipboard.
 - New action "Copy Text from Screen": you select an area of the screen, and Gestos copies the text in it, including text in images and videos.
 - These actions show their result, like "Converted 3 images". When they can't do anything, they say why, like "The selected images are PNGs already" or "Select at least two PDFs to merge".
+- A result printed by a command, like the checksums from "Show Checksums", is shown in a fixed-width font, with its lines lined up on the left (GNOME, X11).
 - An action that needs a program you don't have says which package to install.
 - New step "Copy" in an "Advanced Action": it copies the selected files or text for the command after it. It uses the copy shortcut the app lists, Ctrl+Shift+C in terminals, and Ctrl+C in other apps. In a window Gestos can't recognise, it copies nothing and the action stops.
 - A gesture made with one of the new file or text actions runs the steps of the installed version, so updates to Gestos change what the gesture does. Clicking "Customize Action…" in the gesture editor gives the gesture its own copy of the steps to change. Updates no longer change that copy.

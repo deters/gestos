@@ -34,6 +34,9 @@ trait Daemon {
     fn action_executed(&self, gesture_name: String, action_desc: String, icon_name: String) -> zbus::Result<()>;
 
     #[zbus(signal)]
+    fn command_output(&self, text: String) -> zbus::Result<()>;
+
+    #[zbus(signal)]
     fn gesture_unrecognized(&self) -> zbus::Result<()>;
 }
 
@@ -363,6 +366,27 @@ pub fn build_overlay_ui(app: &gtk::Application) {
                         args.icon_name.clone(),
                         format!("Gesture: <b>{}</b>", args.gesture_name),
                         format!("<i>{}</i>", args.action_desc),
+                    ));
+                }
+            }
+        });
+
+        let mut output_stream = match proxy.receive_command_output().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to receive CommandOutput: {}", e);
+                return;
+            }
+        };
+        let tx_output = tx.clone();
+        glib::MainContext::default().spawn_local(async move {
+            while let Some(signal) = output_stream.next().await {
+                if let Ok(args) = signal.args() {
+                    // In a fixed-width font, its lines lined up on the left, as it printed them.
+                    let _ = tx_output.unbounded_send(OverlayEvent::Message(
+                        "utilities-terminal-symbolic".to_string(),
+                        format!("<tt>{}</tt>", glib::markup_escape_text(&args.text)),
+                        String::new(),
                     ));
                 }
             }
