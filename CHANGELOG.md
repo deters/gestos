@@ -16,28 +16,28 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - New actions for the selected text: "Search the Web", "Translate", "Open Link", "Read Aloud", "Calculate", "Count Words" and "Show QR Code", which shows the text or link as a QR code to scan with a phone. These actions copy the selected text, so it replaces what was in the clipboard.
 - New action "Copy Text from Screen": you select an area of the screen, and Gestos copies the text in it, including text in images and videos.
 - These actions show their result, like "Converted 3 images". When they can't do anything, they say why, like "The selected images are PNGs already" or "Select at least two PDFs to merge".
-- A result printed by a command, like the checksums from "Show Checksums", is shown in a fixed-width font, with its lines lined up on the left (GNOME, X11).
 - An action that needs a program you don't have says which package to install.
-- New step "Copy" in an "Advanced Action": it copies the selected files or text for the command after it. It uses the copy shortcut the app lists, Ctrl+Shift+C in terminals, and Ctrl+C in other apps. In a window Gestos can't recognise, it copies nothing and the action stops.
-- New step "Result" in an "Advanced Action": it shows up to the last 24 lines the command before it printed, for the number of seconds set in the step. What a command prints is shown only by this step.
 - A gesture made with one of the new file or text actions runs the steps of the installed version, so updates to Gestos change what the gesture does. Clicking "Customize Action…" in the gesture editor gives the gesture its own copy of the steps to change. Updates no longer change that copy.
 - New page "Actions" in Preferences: each action made from a file, like the file and text actions, can be turned off there, so it isn't offered for new gestures. Gestures already made with it keep working. Each can also be exported to a file, which then opens in the default text editor.
 - "Import…" on the "Actions" page adds your own action from a file, after showing the commands it runs. Your actions are kept in your configuration with your gestures, so exporting the configuration includes them. Each action file has a short ID, like `id: convert-to-pdf`. One you import with the same ID as one of Gestos's takes its place until you remove it. An action file can name an icon from the icon theme with `icon:`, which the action and its gestures are shown with.
+- New step "Copy" in an "Advanced Action": it copies the selected files or text for the command after it. It uses the copy shortcut the app lists, Ctrl+Shift+C in terminals, and Ctrl+C in other apps. In a window Gestos can't recognise, it copies nothing and the action stops.
+- New step "Result" in an "Advanced Action": it shows up to the last 24 lines the command before it printed, for the number of seconds set in the step. What a command prints is shown only by this step.
+- A result printed by a command, like the checksums from "Show Checksums", is shown in a fixed-width font, with its lines lined up on the left (GNOME, X11).
 
 ### Changed
 
 - The main page now lists your gestures above the categories. The option "Show Gestures in the Main Page" in Preferences is now "Hide Gesture List in the Main Page", which shows only the categories.
-- "Export…" in Preferences now suggests a file name with the date, like "Gestos 2026-11-18.yaml", and opens the exported file in the default text editor.
-- The configuration file now starts with the version of Gestos that saved it, like "# Gestos 9.0.0 configuration".
 - A category's page, like "Apps", and an app's page now open in the main window instead of a window of their own. Go back with the back button at the top left, Esc, Alt+Left or the mouse's back button.
 - A new gesture is now drawn first, in a window of its own that says which mouse button draws gestures. The editor opens once the gesture is drawn. Press Esc in that window to cancel.
 - To draw a gesture again, click its drawing in the editor. It no longer clears the drawing: it opens the window to draw in, and pressing Esc there keeps the old drawing.
 - Gestures now work while the gesture editor is open. They stop only while you draw a gesture.
 - Commands in "Run Command in Shell" and in the "Command" steps of an "Advanced Action" are now edited in a window of their own, with room for a script of several lines and the option "Use Variables". Open it with the edit button on the command's row. In that window, Enter starts a new line and Ctrl+Enter sets the command. Keywords, function names, quoted text, variables, comments and operators are shown in colors. A command inside the command, like `$(date)`, has colors of its own. The command's box grows with the window.
 - A new "Command" step is now added only after you click "Set" in that window.
-- When a command fails, its notification now shows the last lines of the command's error message, in place of its exit code.
 - A command in "Run Command in Shell" or in a "Command" step of an "Advanced Action" that starts with a line like `#!/usr/bin/python3` is now run by the program that line names, as a script file is. Such a command can be written in Python or another language. Other commands are still run by sh.
 - The button "Insert a Variable" in the window a command is edited in is now hidden while the command's first line names a program that isn't a shell, like Python.
+- When a command fails, its notification now shows the last lines of the command's error message, in place of its exit code.
+- "Export…" in Preferences now suggests a file name with the date, like "Gestos 2026-11-18.yaml", and opens the exported file in the default text editor.
+- The configuration file now starts with the version of Gestos that saved it, like "# Gestos 9.0.0 configuration".
 
 ## [8.1.1] - 2026-11-17
 
