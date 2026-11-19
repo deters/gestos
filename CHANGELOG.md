@@ -26,7 +26,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The main page now lists your gestures above the categories. The option "Show Gestures in the Main Page" in Preferences is now "Hide Gesture List in the Main Page", which shows only the categories.
 - "Export…" in Preferences now suggests a file name with the date, like "Gestos 2026-11-18.yaml", and opens the exported file in the default text editor.
-- The configuration file now starts with the version of Gestos that saved it, like "# Gestos 8.1.0 configuration".
+- The configuration file now starts with the version of Gestos that saved it, like "# Gestos 9.0.0 configuration".
 - A category's page, like "Apps", and an app's page now open in the main window instead of a window of their own. Go back with the back button at the top left, Esc, Alt+Left or the mouse's back button.
 - A new gesture is now drawn first, in a window of its own that says which mouse button draws gestures. The editor opens once the gesture is drawn. Press Esc in that window to cancel.
 - To draw a gesture again, click its drawing in the editor. It no longer clears the drawing: it opens the window to draw in, and pressing Esc there keeps the old drawing.
