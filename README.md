@@ -36,7 +36,13 @@ Mouse gestures for Linux.
 
 ## Install
 
-Download the package for your system from the [releases page](https://github.com/deters/gestos/releases), then install it:
+```bash
+curl -fsSL https://github.com/deters/gestos/releases/latest/download/install.sh | sh
+```
+
+This installs the package for your system, or updates it, after checking it against the release's checksums. Add `-s -- --beta` after `sh` to install the beta, when there's one newer than the release.
+
+Or download the package for your system from the [releases page](https://github.com/deters/gestos/releases), then install it:
 
 | System | Package | Install with |
 |---|---|---|

@@ -244,6 +244,15 @@ jobs:
             mv "$file" "$(dirname "$file")/$(basename "$file" | tr '~' '.')"
           done
 
+      # What install.sh checks each package against before installing it.
+      - name: Write the checksums
+        run: |
+          find packages -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.apk' \) | sort |
+            while read -r file; do
+              (cd "$(dirname "$file")" && sha256sum "$(basename "$file")")
+            done > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Write the release page
         env:
           VERSION: ${{ inputs.beta }}
@@ -264,7 +273,7 @@ jobs:
           else
             sh source/packaging/changelog.sh notes "${GITHUB_REF_NAME#v}" source/CHANGELOG.md > notes.md
           fi
-          sh source/packaging/release-body.sh notes.md packages > release-body.md
+          sh source/packaging/release-body.sh notes.md packages ${VERSION:+--beta} > release-body.md
 
       # Only one beta is kept, so its page always has the newest.
       - name: Remove the previous beta
@@ -283,6 +292,8 @@ jobs:
           make_latest: ${{ inputs.beta != '' && 'false' || 'true' }}
           body_path: release-body.md
           files: |
+            SHA256SUMS
+            source/packaging/install.sh
             packages/**/*.rpm
             packages/**/*.deb
             packages/**/*.apk

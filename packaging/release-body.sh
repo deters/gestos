@@ -1,10 +1,11 @@
 #!/bin/sh
 # Writes a release page: the release notes, then which package to install on each system.
-# Usage: release-body.sh <notes, as changelog.sh writes them> <folder with the packages>
+# Usage: release-body.sh <notes, as changelog.sh writes them> <folder with the packages> [--beta]
 set -eu
 
 notes=$1
 packages=$2
+install_options=${3:+ -s -- $3}
 
 # The package in the folder whose name matches, or nothing if there's none.
 find_package() {
@@ -25,6 +26,12 @@ row() {
 sed '1{/^# /d}' "$notes" | sed '/./,$!d' | sed 's/^### /## /'
 echo
 echo "## Install"
+echo
+echo '```bash'
+echo "curl -fsSL https://github.com/deters/gestos/releases/latest/download/install.sh | sh$install_options"
+echo '```'
+echo
+echo "Or download the package for your system and install it:"
 echo
 echo "| System | Package | Install with |"
 echo "|---|---|---|"
