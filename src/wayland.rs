@@ -298,10 +298,12 @@ fn script_command(
     Ok((command, file))
 }
 
-// How many of the last lines a command printed, or wrote as errors, are shown, and how much of them.
-const SHOWN_OUTPUT_LINES: usize = 10;
+// How many of the last lines a command printed, or wrote as errors, are shown, and how much of them:
+// as much of each printed line as fits a line of the panel, and a few words of each error.
+const SHOWN_OUTPUT_LINES: usize = 24;
 const SHOWN_ERROR_LINES: usize = 3;
-const SHOWN_OUTPUT_CHARS: usize = 300;
+const SHOWN_OUTPUT_CHARS: usize = SHOWN_OUTPUT_LINES * 100;
+const SHOWN_ERROR_CHARS: usize = 300;
 // How long the last of a command's output is waited for once it ended. An app it started can keep
 // writing to it for as long as it runs, and is then read on its own.
 const OUTPUT_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
@@ -350,13 +352,13 @@ impl KeptOutput {
     }
 }
 
-/// Lines as a notification shows them: together, cut short at the end if they're long.
-fn shown_lines(lines: &[String]) -> Option<String> {
+/// Lines as a notification shows them: together, cut short at the end past `max_chars`.
+fn shown_lines(lines: &[String], max_chars: usize) -> Option<String> {
     let text = lines.join("\n");
     if text.trim().is_empty() {
         return None;
     }
-    let mut shown: String = text.chars().take(SHOWN_OUTPUT_CHARS).collect();
+    let mut shown: String = text.chars().take(max_chars).collect();
     if shown.len() < text.len() {
         shown.push('…');
     }
@@ -1304,8 +1306,10 @@ impl WaylandContext {
         let printed = child.stdout.take().map(|pipe| KeptOutput::read(pipe, SHOWN_OUTPUT_LINES, false));
         let errors = child.stderr.take().map(|pipe| KeptOutput::read(pipe, SHOWN_ERROR_LINES, true));
         let status = child.wait();
-        let last = |kept: Option<KeptOutput>| kept.map(KeptOutput::finish).and_then(|lines| shown_lines(&lines));
-        let (printed, errors) = (last(printed), last(errors));
+        let last = |kept: Option<KeptOutput>, max_chars| {
+            kept.map(KeptOutput::finish).and_then(|lines| shown_lines(&lines, max_chars))
+        };
+        let (printed, errors) = (last(printed, SHOWN_OUTPUT_CHARS), last(errors, SHOWN_ERROR_CHARS));
         // sh -c says 127 when it can't find the program. In a script, it's any program the script
         // runs, which its error names.
         let failure = match status {
@@ -1538,11 +1542,14 @@ mod tests {
 
     #[test]
     fn long_output_is_cut_short() {
-        let long = "x".repeat(SHOWN_OUTPUT_CHARS + 10);
-        let shown = shown_lines(&[long]).unwrap();
-        assert_eq!(shown.chars().count(), SHOWN_OUTPUT_CHARS + 1);
+        let long = "x".repeat(SHOWN_ERROR_CHARS + 10);
+        let shown = shown_lines(&[long], SHOWN_ERROR_CHARS).unwrap();
+        assert_eq!(shown.chars().count(), SHOWN_ERROR_CHARS + 1);
         assert!(shown.ends_with('…'));
-        assert_eq!(shown_lines(&[]), None);
+        assert_eq!(shown_lines(&[], SHOWN_ERROR_CHARS), None);
+        // 24 lines a command printed are shown whole.
+        let printed: Vec<String> = (1..=SHOWN_OUTPUT_LINES).map(|n| format!("{n:>3}  {}", "x".repeat(70))).collect();
+        assert_eq!(shown_lines(&printed, SHOWN_OUTPUT_CHARS), Some(printed.join("\n")));
     }
 
     use super::*;
