@@ -56,3 +56,4 @@ steps:
           printf %s "$output_text" | xclip -selection clipboard >/dev/null 2>&1
       fi
       show "$output_text"
+  - show: 5

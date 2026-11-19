@@ -49,3 +49,4 @@ steps:
       else
           show "Made $# dated copies"
       fi
+  - show: 3

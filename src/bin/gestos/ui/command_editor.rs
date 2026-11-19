@@ -106,8 +106,6 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
         })),
     ));
     view.add_controller(shortcuts);
-    // Whether it shows what it prints isn't edited here, and stays as it was.
-    let shows_output = command.shows_output;
     let dialog_set = dialog.clone();
     let buffer = view.buffer();
     set_btn.connect_clicked(move |_| {
@@ -116,7 +114,7 @@ pub fn open_command_editor(parent: &gtk::Window, command: &ShellCommand, on_set:
             return;
         }
         dialog_set.destroy();
-        on_set(ShellCommand { text, variables: check.is_active(), shows_output });
+        on_set(ShellCommand { text, variables: check.is_active() });
     });
 
     dialog.set_default_widget(Some(&set_btn));

@@ -7,12 +7,16 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use gestos::protractor::Point2D;
 
+/// How long a message shows before it fades, but for a command's output, which says.
+const MESSAGE_MILLIS: u64 = 1500;
+
 enum OverlayEvent {
     Started(f64, f64),
     Updated(f64, f64),
     Ended,
-    /// A message, as its icon and its two lines of markup, the second of which can be empty.
-    Message(String, String, String),
+    /// A message, as its icon, its two lines of markup, the second of which can be empty, and how
+    /// long it shows before it fades, in milliseconds.
+    Message(String, String, String, u64),
 }
 
 #[zbus::proxy(
@@ -34,7 +38,7 @@ trait Daemon {
     fn action_executed(&self, gesture_name: String, action_desc: String, icon_name: String) -> zbus::Result<()>;
 
     #[zbus(signal)]
-    fn command_output(&self, text: String) -> zbus::Result<()>;
+    fn command_output(&self, text: String, seconds: u32) -> zbus::Result<()>;
 
     #[zbus(signal)]
     fn gesture_unrecognized(&self) -> zbus::Result<()>;
@@ -228,7 +232,7 @@ pub fn build_overlay_ui(app: &gtk::Application) {
 
                     *fade_timeout_clone.borrow_mut() = Some(source_id);
                 }
-                OverlayEvent::Message(icon_name, title, subtitle) => {
+                OverlayEvent::Message(icon_name, title, subtitle, shown_millis) => {
                     if is_osd_enabled() {
                         if let Some(source_id) = osd_timeout_clone.borrow_mut().take() {
                             source_id.remove();
@@ -249,7 +253,7 @@ pub fn build_overlay_ui(app: &gtk::Application) {
                         let trail_fade = trail_clone.clone();
 
                         let fade_val = Rc::new(RefCell::new(1.0));
-                        let source_id = glib::timeout_add_local(std::time::Duration::from_millis(1500), move || {
+                        let source_id = glib::timeout_add_local(std::time::Duration::from_millis(shown_millis), move || {
                             let osd_box_timer = osd_box_fade.clone();
                             let osd_timeout_timer = osd_timeout_fade.clone();
                             let window_timer = window_fade.clone();
@@ -366,6 +370,7 @@ pub fn build_overlay_ui(app: &gtk::Application) {
                         args.icon_name.clone(),
                         format!("Gesture: <b>{}</b>", args.gesture_name),
                         format!("<i>{}</i>", args.action_desc),
+                        MESSAGE_MILLIS,
                     ));
                 }
             }
@@ -387,6 +392,7 @@ pub fn build_overlay_ui(app: &gtk::Application) {
                         "utilities-terminal-symbolic".to_string(),
                         format!("<tt>{}</tt>", glib::markup_escape_text(&args.text)),
                         String::new(),
+                        u64::from(args.seconds) * 1000,
                     ));
                 }
             }
@@ -406,6 +412,7 @@ pub fn build_overlay_ui(app: &gtk::Application) {
                     "dialog-question-symbolic".to_string(),
                     "Gesture not recognized".to_string(),
                     String::new(),
+                    MESSAGE_MILLIS,
                 ));
             }
         });

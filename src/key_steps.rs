@@ -22,6 +22,9 @@ pub enum KeyStep {
     /// it. It's never pressed where those keys aren't known, as Control+C stops a terminal's
     /// program.
     Copy(CopyKind),
+    /// What the command before it printed, shown on the screen for this many seconds. What a
+    /// command prints is only shown with this step after it.
+    Show(u32),
 }
 
 /// What a copy step copies for the command after it: the selected files, as a file manager copies
@@ -44,6 +47,8 @@ pub enum CopyWait {
 
 /// The most a single pause can be, so that a typo can't leave a gesture running for hours.
 pub const MAX_WAIT_MILLIS: u32 = 60_000;
+/// The longest a result is shown, in seconds, so that a typo can't leave it over the screen.
+pub const MAX_SHOW_SECONDS: u32 = 60;
 
 /// Reads steps written by `format_steps`. Steps that can't be read are left out, so that one
 /// mistake in a hand-edited file doesn't lose the rest.
@@ -84,7 +89,8 @@ fn parse_step(step: &str) -> Option<KeyStep> {
         "type" => unquote(rest).map(KeyStep::Type),
         "run" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, false))),
         "run-with-variables" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, true))),
-        "run-showing-output" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, true).showing_output())),
+        // As commands that showed their output were written before the step that shows it.
+        "run-showing-output" => unquote(rest).map(|text| KeyStep::Run(ShellCommand::new(text, true))),
         "copy" => match rest {
             "files" => Some(KeyStep::Copy(CopyKind::Files)),
             "text" => Some(KeyStep::Copy(CopyKind::Text)),
@@ -93,6 +99,10 @@ fn parse_step(step: &str) -> Option<KeyStep> {
         "wait" => {
             let millis = rest.parse::<u32>().ok()?;
             Some(KeyStep::Wait(millis.min(MAX_WAIT_MILLIS)))
+        }
+        "show" => {
+            let seconds = rest.parse::<u32>().ok()?;
+            Some(KeyStep::Show(seconds.clamp(1, MAX_SHOW_SECONDS)))
         }
         _ => None,
     }
@@ -139,11 +149,11 @@ pub fn format_steps(steps: &[KeyStep]) -> String {
             KeyStep::Type(text) => format!("type {}", quote(text)),
             KeyStep::Wait(millis) => format!("wait {millis}"),
             KeyStep::Open(app) => format!("open {app}"),
-            KeyStep::Run(command) if command.shows_output => format!("run-showing-output {}", quote(command)),
             KeyStep::Run(command) if command.variables => format!("run-with-variables {}", quote(command)),
             KeyStep::Run(command) => format!("run {}", quote(command)),
             KeyStep::Copy(CopyKind::Files) => "copy files".to_string(),
             KeyStep::Copy(CopyKind::Text) => "copy text".to_string(),
+            KeyStep::Show(seconds) => format!("show {seconds}"),
         })
         .collect::<Vec<_>>()
         .join("; ")
@@ -161,6 +171,7 @@ pub fn describe_steps(steps: &[KeyStep]) -> String {
             KeyStep::Run(command) => format!("run {}", crate::config::short_command(command)),
             KeyStep::Copy(CopyKind::Files) => "copy the selected files".to_string(),
             KeyStep::Copy(CopyKind::Text) => "copy the selected text".to_string(),
+            KeyStep::Show(seconds) => format!("show the result for {seconds} s"),
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -322,16 +333,20 @@ mod tests {
     }
 
     #[test]
-    fn copy_steps_and_commands_that_show_their_output_survive_saving() {
+    fn copy_and_show_steps_survive_saving() {
         let steps = vec![
             KeyStep::Copy(CopyKind::Files),
-            KeyStep::Run(ShellCommand::new(r#"echo "$#""#, true).showing_output()),
+            KeyStep::Run(ShellCommand::new(r#"echo "$#""#, true)),
+            KeyStep::Show(5),
             KeyStep::Copy(CopyKind::Text),
         ];
         let text = format_steps(&steps);
-        assert_eq!(text, r#"copy files; run-showing-output "echo \"$#\""; copy text"#);
+        assert_eq!(text, r#"copy files; run-with-variables "echo \"$#\""; show 5; copy text"#);
         assert_eq!(parse_steps(&text), steps);
-        assert_eq!(parse_steps("copy images"), []);
+        assert_eq!(parse_steps("copy images; show soon"), []);
+        assert_eq!(parse_steps("show 3600"), [KeyStep::Show(MAX_SHOW_SECONDS)]);
+        // Written before there was a step to show it, and read as a plain command.
+        assert_eq!(parse_steps(r#"run-showing-output "date""#), [KeyStep::Run(ShellCommand::new("date", true))]);
     }
 
     #[test]

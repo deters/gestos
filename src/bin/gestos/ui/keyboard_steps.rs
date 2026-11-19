@@ -6,7 +6,7 @@
 
 use crate::ui::shortcut_recorder::open_shortcut_recorder;
 use gestos::command_variables::ShellCommand;
-use gestos::key_steps::{format_steps, parse_steps, CopyKind, KeyStep, MAX_WAIT_MILLIS};
+use gestos::key_steps::{format_steps, parse_steps, CopyKind, KeyStep, MAX_SHOW_SECONDS, MAX_WAIT_MILLIS};
 use gtk::prelude::*;
 use gtk4 as gtk;
 use std::cell::{Cell, RefCell};
@@ -16,6 +16,8 @@ use std::rc::Rc;
 const WAIT_STEP_MILLIS: f64 = 50.0;
 // The pause a new step starts with: about what an app takes to open a dialog.
 const NEW_WAIT_MILLIS: u32 = 200;
+// How long a new step shows the result: enough to read a few lines.
+const NEW_SHOW_SECONDS: u32 = 5;
 // How tall the box for text to type is before it holds more than about three lines.
 const TYPE_BOX_HEIGHT: i32 = 72;
 // The size of the icon of an app to open.
@@ -28,6 +30,7 @@ const TYPE_ICON: &str = "insert-text-symbolic";
 const WAIT_ICON: &str = "alarm-symbolic";
 const RUN_ICON: &str = "utilities-terminal-symbolic";
 const COPY_ICON: &str = "edit-copy-symbolic";
+const SHOW_ICON: &str = "view-reveal-symbolic";
 
 // How many characters wide the name of each step is, to fit the longest.
 const STEP_NAME_CHARS: i32 = 9;
@@ -40,6 +43,7 @@ fn step_name(step: &KeyStep) -> &'static str {
         KeyStep::Wait(_) => "Pause",
         KeyStep::Run(_) => "Command",
         KeyStep::Copy(_) => "Copy",
+        KeyStep::Show(_) => "Result",
     }
 }
 
@@ -53,6 +57,7 @@ pub fn step_icon(step: &KeyStep) -> &'static str {
         KeyStep::Wait(_) => WAIT_ICON,
         KeyStep::Run(_) => RUN_ICON,
         KeyStep::Copy(_) => COPY_ICON,
+        KeyStep::Show(_) => SHOW_ICON,
     }
 }
 
@@ -144,6 +149,10 @@ pub fn append_steps_rows(
     let waiting = Rc::clone(&editor);
     add_button("Pause", "Add a Pause").connect_clicked(move |_| {
         waiting.add(KeyStep::Wait(NEW_WAIT_MILLIS));
+    });
+    let showing = Rc::clone(&editor);
+    add_button("Result", "Show the Result of the Command").connect_clicked(move |_| {
+        showing.add(KeyStep::Show(NEW_SHOW_SECONDS));
     });
 
     let show: Rc<dyn Fn(bool)> = {
@@ -302,6 +311,17 @@ impl StepsEditor {
                 });
                 content.append(&spin);
                 content.append(&gtk::Label::new(Some("ms")));
+            }
+            KeyStep::Show(seconds) => {
+                let spin = gtk::SpinButton::with_range(1.0, f64::from(MAX_SHOW_SECONDS), 1.0);
+                spin.set_value(f64::from(*seconds));
+                let editor = Rc::clone(self);
+                spin.connect_value_changed(move |spin| {
+                    editor.steps.borrow_mut()[i] = KeyStep::Show(spin.value_as_int() as u32);
+                    editor.changed();
+                });
+                content.append(&spin);
+                content.append(&gtk::Label::new(Some("s")));
             }
         }
         row.append(&content);

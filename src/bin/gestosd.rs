@@ -122,7 +122,7 @@ impl DaemonDbus {
     async fn action_executed(&self, ctxt: &zbus::object_server::SignalContext<'_>, gesture_name: String, action_desc: String, icon_name: String) -> zbus::Result<()>;
 
     #[zbus(signal)]
-    async fn command_output(&self, ctxt: &zbus::object_server::SignalContext<'_>, text: String) -> zbus::Result<()>;
+    async fn command_output(&self, ctxt: &zbus::object_server::SignalContext<'_>, text: String, seconds: u32) -> zbus::Result<()>;
 }
 
 /// Whether a bit is set in a capability bitmap as sysfs shows it: hex words of the kernel's
@@ -272,8 +272,8 @@ enum DaemonSignal {
     MiddleScrolled(i32),
     MiddleDragEnded,
     ActionExecuted(String, String, String),
-    /// What a command that shows its output printed, to show as it printed it.
-    CommandOutput(String),
+    /// What a command printed, to show as it printed it, for some seconds.
+    CommandOutput(String, u32),
     /// The action that just ran couldn't, and why, in a few words.
     ActionFailed(String),
     /// The gesture drawn is none of the user's.
@@ -310,12 +310,14 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
                 }
             }
             if let Some(panel) = &panel {
-                let message = |text: &str, failed| gestos::panel::Message { text: text.to_string(), failed, printed: false };
+                let message = |text: &str, failed| gestos::panel::Message { text: text.to_string(), failed, printed: None };
                 let _ = match &signal {
                     DaemonSignal::ActionExecuted(name, _, _) => panel.send(message(name, false)),
-                    DaemonSignal::CommandOutput(text) => {
-                        panel.send(gestos::panel::Message { text: text.clone(), failed: false, printed: true })
-                    }
+                    DaemonSignal::CommandOutput(text, seconds) => panel.send(gestos::panel::Message {
+                        text: text.clone(),
+                        failed: false,
+                        printed: Some(std::time::Duration::from_secs(u64::from(*seconds))),
+                    }),
                     DaemonSignal::ActionFailed(reason) => panel.send(message(reason, true)),
                     DaemonSignal::GestureUnrecognized => panel.send(message(UNRECOGNIZED_MESSAGE, false)),
                     _ => Ok(()),
@@ -326,7 +328,7 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
                 match &signal {
                     DaemonSignal::ActionExecuted(name, _, icon) => show_kde_osd(conn, icon, name),
                     // Its on-screen display has one look for all it shows.
-                    DaemonSignal::CommandOutput(text) => show_kde_osd(conn, "utilities-terminal-symbolic", text),
+                    DaemonSignal::CommandOutput(text, _) => show_kde_osd(conn, "utilities-terminal-symbolic", text),
                     DaemonSignal::ActionFailed(reason) => show_kde_osd(conn, "dialog-warning", reason),
                     DaemonSignal::GestureUnrecognized => {
                         show_kde_osd(conn, "dialog-question", UNRECOGNIZED_MESSAGE)
@@ -359,8 +361,8 @@ fn spawn_signal_thread() -> std::sync::mpsc::SyncSender<DaemonSignal> {
                 DaemonSignal::ActionExecuted(name, desc, icon) => {
                     conn.emit_signal(dest.clone(), path, iface, "ActionExecuted", &(name, desc, icon))
                 }
-                DaemonSignal::CommandOutput(text) => {
-                    conn.emit_signal(dest.clone(), path, iface, "CommandOutput", &(text,))
+                DaemonSignal::CommandOutput(text, seconds) => {
+                    conn.emit_signal(dest.clone(), path, iface, "CommandOutput", &(text, seconds))
                 }
                 DaemonSignal::ActionFailed(reason) => {
                     conn.emit_signal(dest.clone(), path, iface, "ActionFailed", &(reason,))
@@ -497,6 +499,7 @@ fn spawn_gesture_actions(
                     steps,
                     &|app| gestos::wayland::open_app_for_steps(app, is_gnome),
                     &|command, after_copy| wayland_ctx.run_shell_cmd(command, &context, after_copy),
+                    &gestos::wayland::command_output,
                     &|| wayland_ctx.clear_copied(),
                     &|| {
                         let keys = gestos::app_shortcuts::copy_keys(context.app.as_deref());
@@ -1076,7 +1079,7 @@ fn run_grabber(
             gestos::wayland::ActionResult::Message(text, icon) => {
                 DaemonSignal::ActionExecuted(text, String::new(), icon.to_string())
             }
-            gestos::wayland::ActionResult::CommandOutput(text) => DaemonSignal::CommandOutput(text),
+            gestos::wayland::ActionResult::CommandOutput(text, seconds) => DaemonSignal::CommandOutput(text, seconds),
         };
         let _ = results.lock().unwrap().try_send(signal);
     });

@@ -38,3 +38,4 @@ steps:
       else
           show "Converted $# PDFs"
       fi
+  - show: 3

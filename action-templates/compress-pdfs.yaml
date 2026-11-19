@@ -49,3 +49,4 @@ steps:
       [ "$compressed" -gt 0 ] || fail "The selected PDFs can't be made smaller"
       [ "$compressed" -eq 1 ] || output_result="Compressed $compressed PDFs"
       show "$output_result"
+  - show: 5

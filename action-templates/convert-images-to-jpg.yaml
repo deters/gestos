@@ -29,3 +29,4 @@ steps:
 
       [ "$converted" -gt 0 ] || fail "The selected images are JPGs already"
       show "Converted $converted images"
+  - show: 3

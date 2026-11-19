@@ -288,6 +288,7 @@ fn action_summary(action: &ActionType) -> String {
                     KeyStep::Open(app) => format!("open {app}"),
                     KeyStep::Run(_) => "run (left out)".to_string(),
                     KeyStep::Copy(kind) => format!("copy {kind:?}").to_lowercase(),
+                    KeyStep::Show(seconds) => format!("show {seconds}"),
                 })
                 .collect();
             format!("keyboard [{}]", steps.join("; "))

@@ -32,3 +32,4 @@ steps:
 
       [ "$resized" -gt 0 ] || fail "The selected images have a smaller copy already"
       show "Made $resized smaller copies"
+  - show: 3

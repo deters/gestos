@@ -189,11 +189,12 @@ pub fn report_failures_to(reporter: impl Fn(String) + Send + Sync + 'static) {
 }
 
 /// An action's result to show: a few words with an icon for them, as a sum's, or what a command
-/// printed, which is shown in a fixed-width font, lined up on the left as it printed it.
+/// printed, which is shown for some seconds in a fixed-width font, lined up on the left as it
+/// printed it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ActionResult {
     Message(String, &'static str),
-    CommandOutput(String),
+    CommandOutput(String, u32),
 }
 
 type ResultReporter = Box<dyn Fn(ActionResult) + Send + Sync>;
@@ -211,11 +212,11 @@ pub fn action_result(text: String, icon: &'static str) {
     }
 }
 
-/// What a command that shows its output printed.
-pub fn command_output(text: String) {
+/// What a command printed, shown for some seconds by the step after it.
+pub fn command_output(text: String, seconds: u32) {
     println!("Command output: {text}");
     if let Some(report) = RESULT_REPORTER.get() {
-        report(ActionResult::CommandOutput(text));
+        report(ActionResult::CommandOutput(text, seconds));
     }
 }
 
@@ -1225,8 +1226,8 @@ impl WaylandContext {
     }
 
     /// Runs a command as the user would type it in a shell, or a script with the program its first
-    /// line names, as a script file runs, and says whether it worked. The one
-    /// place a shell belongs: Run Command and an advanced action's commands take whatever the user
+    /// line names, as a script file runs. Gives the last lines it printed, or nothing if it
+    /// failed. The one place a shell belongs: Run Command and an advanced action's commands take whatever the user
     /// would type in one. One given the variables doesn't run without what's copied, as it would
     /// run with nothing in its place. `after_copy` says what a copy made right before it copies,
     /// which it waits for.
@@ -1235,7 +1236,7 @@ impl WaylandContext {
         shell_command: &ShellCommand,
         context: &CommandContext,
         after_copy: crate::key_steps::CopyWait,
-    ) -> bool {
+    ) -> Option<String> {
         use crate::command_variables::{file_paths, too_big, variables};
         let cmd = shell_command.text.as_str();
         let interpreter = shell_command.interpreter();
@@ -1253,7 +1254,7 @@ impl WaylandContext {
                 }
                 Err(e) => {
                     action_failed(format!("{name} couldn't start: {e}"));
-                    return false;
+                    return None;
                 }
             },
             None => {
@@ -1267,7 +1268,7 @@ impl WaylandContext {
                 Ok(copied) => copied,
                 Err(why) => {
                     action_failed(why);
-                    return false;
+                    return None;
                 }
             };
             // The copied files are its arguments, after the name sh -c gives itself. A script
@@ -1279,13 +1280,13 @@ impl WaylandContext {
             for (variable, value) in variables(context, &copied) {
                 if too_big(variable, &value) {
                     action_failed(format!("What's copied is too big to give to {name}"));
-                    return false;
+                    return None;
                 }
                 command.env(variable, value);
             }
         }
         // What it writes still reaches the journal, and the last of it is kept to show: why it
-        // failed, or what a command that shows its output printed.
+        // failed, or what it printed, for a step that shows it.
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
         let spawned = command.spawn();
         drop(script);
@@ -1293,11 +1294,11 @@ impl WaylandContext {
             Ok(child) => child,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && interpreter.is_some() => {
                 action_failed(format!("{name} isn't installed"));
-                return false;
+                return None;
             }
             Err(e) => {
                 action_failed(format!("{name} couldn't start: {e}"));
-                return false;
+                return None;
             }
         };
         let printed = child.stdout.take().map(|pipe| KeptOutput::read(pipe, SHOWN_OUTPUT_LINES, false));
@@ -1312,12 +1313,11 @@ impl WaylandContext {
             Ok(status) if !status.success() && errors.is_some() => errors,
             status => command_failure(&name, status),
         };
-        if let Some(failure) = &failure {
-            action_failed(failure.clone());
-        } else if let (true, Some(printed)) = (shell_command.shows_output, printed) {
-            command_output(printed);
+        if let Some(failure) = failure {
+            action_failed(failure);
+            return None;
         }
-        failure.is_none()
+        Some(printed.unwrap_or_default())
     }
 
     /// What's copied, for a command that uses it, or why it can't be had. Right after a copy, it's

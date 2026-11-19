@@ -27,3 +27,4 @@ steps:
       output_pdf="$folder/$output_name"
       pdfunite "$@" "$output_pdf" || fail "Couldn't merge the PDFs"
       show "Saved $output_name"
+  - show: 3

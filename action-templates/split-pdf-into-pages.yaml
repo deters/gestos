@@ -38,3 +38,4 @@ steps:
       else
           show "Split $# PDFs"
       fi
+  - show: 3

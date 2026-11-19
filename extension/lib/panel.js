@@ -41,8 +41,8 @@ export class ActionPanel {
                 this._show(icon, name, false);
             },
             CommandOutput: params => {
-                const [text] = params.deepUnpack();
-                this._show('utilities-terminal-symbolic', text, false, true);
+                const [text, seconds] = params.deepUnpack();
+                this._show('utilities-terminal-symbolic', text, false, seconds * 1000);
             },
             ActionFailed: params => {
                 const [reason] = params.deepUnpack();
@@ -65,10 +65,11 @@ export class ActionPanel {
         this._box.destroy();
     }
 
-    _show(iconName, text, failed, printed = false) {
+    // A command's output is shown for the time given, in milliseconds.
+    _show(iconName, text, failed, printedTime = 0) {
         this._icon.icon_name = iconName;
         this._label.text = text;
-        this._label.style = printed ? PRINTED_STYLE : LABEL_STYLE;
+        this._label.style = printedTime ? PRINTED_STYLE : LABEL_STYLE;
         this._box.style = failed ? FAILED_STYLE : STYLE;
 
         const monitor = Main.layoutManager.monitors[global.display.get_current_monitor()] ??
@@ -86,7 +87,8 @@ export class ActionPanel {
 
         if (this._hideId)
             GLib.source_remove(this._hideId);
-        this._hideId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, failed ? FAILED_SHOWN_TIME : SHOWN_TIME, () => {
+        const time = printedTime || (failed ? FAILED_SHOWN_TIME : SHOWN_TIME);
+        this._hideId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, time, () => {
             this._hideId = 0;
             this._box.ease({
                 opacity: 0,

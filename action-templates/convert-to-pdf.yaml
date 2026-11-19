@@ -29,3 +29,4 @@ steps:
 
       [ "$converted" -gt 0 ] || fail "The selected files are PDFs already"
       show "Converted $converted files"
+  - show: 3

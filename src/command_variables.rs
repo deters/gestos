@@ -12,21 +12,11 @@ use std::path::PathBuf;
 pub struct ShellCommand {
     pub text: String,
     pub variables: bool,
-    /// Whether what it prints is shown once it's done, as an action template's commands print
-    /// their results.
-    #[serde(default)]
-    pub shows_output: bool,
 }
 
 impl ShellCommand {
     pub fn new(text: impl Into<String>, variables: bool) -> Self {
-        Self { text: text.into(), variables, shows_output: false }
-    }
-
-    /// The same command, with what it prints shown once it's done.
-    pub fn showing_output(mut self) -> Self {
-        self.shows_output = true;
-        self
+        Self { text: text.into(), variables }
     }
 
     /// The program its first line names to run it, as a script's `#!` line does, if it names one.

@@ -147,21 +147,25 @@ impl InputClient {
 
     /// Runs a custom action's steps in order. `open_app` opens an app or brings it to the front,
     /// which only the desktop can do, and says whether it then has focus. If it doesn't, the steps
-    /// after it would go to some other window, so they're left out. `run` runs a command and says
-    /// whether it worked, as the steps after one that failed may count on what it does. It's also
-    /// told what a copy just made for it copies, which it then waits for. `clear_copied` clears
-    /// what was copied before such a copy, and says whether it could. `copy_keys` are the keys that
-    /// copy in the app in use, if they're known: a copy step stops the steps where they aren't.
+    /// after it would go to some other window, so they're left out. `run` runs a command and gives
+    /// what it printed, or nothing if it failed, as the steps after one that failed may count on
+    /// what it does. It's also told what a copy just made for it copies, which it then waits for.
+    /// `show` shows what the command before a show step printed, for its seconds. `clear_copied`
+    /// clears what was copied before such a copy, and says whether it could. `copy_keys` are the
+    /// keys that copy in the app in use, if they're known: a copy step stops the steps where they
+    /// aren't.
     pub fn run_steps(
         &self,
         steps: &[KeyStep],
         open_app: &dyn Fn(&str) -> bool,
-        run: &dyn Fn(&crate::command_variables::ShellCommand, CopyWait) -> bool,
+        run: &dyn Fn(&crate::command_variables::ShellCommand, CopyWait) -> Option<String>,
+        show: &dyn Fn(String, u32),
         clear_copied: &dyn Fn() -> bool,
         copy_keys: &dyn Fn() -> Option<String>,
     ) {
         let copies = crate::key_steps::copies_for_commands(steps);
         let mut just_copied = CopyWait::Nothing;
+        let mut printed = None;
         for (i, step) in steps.iter().enumerate() {
             match step {
                 KeyStep::Press(keys) if copies.contains(&i) => {
@@ -190,8 +194,15 @@ impl InputClient {
                     }
                 }
                 KeyStep::Run(command) => {
-                    if !run(command, std::mem::replace(&mut just_copied, CopyWait::Nothing)) {
+                    printed = run(command, std::mem::replace(&mut just_copied, CopyWait::Nothing));
+                    if printed.is_none() {
                         return;
+                    }
+                }
+                // A command that printed nothing has nothing to show.
+                KeyStep::Show(seconds) => {
+                    if let Some(text) = printed.clone().filter(|text| !text.is_empty()) {
+                        show(text, *seconds);
                     }
                 }
             }
@@ -272,7 +283,8 @@ mod tests {
                 KeyStep::Press("F1".to_string()),
             ],
             &|_| true,
-            &|_, _| true,
+            &|_, _| Some(String::new()),
+            &|_, _| {},
             &|| true,
             &|| Some("Control+C".to_string()),
         );
@@ -302,13 +314,37 @@ mod tests {
                 opened.borrow_mut().push(app.to_string());
                 false
             },
-            &|_, _| true,
+            &|_, _| Some(String::new()),
+            &|_, _| {},
             &|| true,
             &|| Some("Control+C".to_string()),
         );
         assert_eq!(*opened.borrow(), ["org.example.Missing"]);
         client.send(&Request::QueryHeld);
         assert_eq!(received(&mut service, 1), [Request::QueryHeld]);
+    }
+
+    #[test]
+    fn a_show_step_shows_what_the_command_before_it_printed() {
+        let (client, _service) = client();
+        let shown = std::cell::RefCell::new(Vec::new());
+        client.run_steps(
+            &[
+                KeyStep::Show(3),
+                KeyStep::Run("date".into()),
+                KeyStep::Wait(0),
+                KeyStep::Show(5),
+                KeyStep::Run("true".into()),
+                KeyStep::Show(5),
+            ],
+            &|_| true,
+            &|command, _| Some(if command.text == "date" { "Today".to_string() } else { String::new() }),
+            &|text, seconds| shown.borrow_mut().push((text, seconds)),
+            &|| true,
+            &|| Some("Control+C".to_string()),
+        );
+        // Not before any command, nor after one that printed nothing.
+        assert_eq!(*shown.borrow(), [("Today".to_string(), 5)]);
     }
 
     #[test]
@@ -320,8 +356,9 @@ mod tests {
             &|_| true,
             &|command, _| {
                 ran.borrow_mut().push(command.text.clone());
-                false
+                None
             },
+            &|_, _| {},
             &|| true,
             &|| Some("Control+C".to_string()),
         );
@@ -344,8 +381,9 @@ mod tests {
             &|_| true,
             &|_, after_copy| {
                 ran.borrow_mut().push(after_copy);
-                true
+                Some(String::new())
             },
+            &|_, _| {},
             &|| {
                 cleared.set(cleared.get() + 1);
                 true
@@ -367,8 +405,9 @@ mod tests {
             &|_| true,
             &|_, _| {
                 ran.set(true);
-                true
+                Some(String::new())
             },
+            &|_, _| {},
             &|| false,
             &|| Some("Control+C".to_string()),
         );

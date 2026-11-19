@@ -31,3 +31,4 @@ steps:
 
       zip -qr "$output_zip" "$@" || fail "Couldn't make the ZIP file"
       show "Saved $output_zip"
+  - show: 3

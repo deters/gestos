@@ -27,3 +27,4 @@ steps:
           unzip -qn "$input_zip" -d "$output_folder" || fail "Couldn't extract $name"
       done
       show "Extracted $# files"
+  - show: 3

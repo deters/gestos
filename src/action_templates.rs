@@ -30,7 +30,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use crate::command_variables::ShellCommand;
-use crate::key_steps::{CopyKind, KeyStep, MAX_WAIT_MILLIS};
+use crate::key_steps::{CopyKind, KeyStep, MAX_SHOW_SECONDS, MAX_WAIT_MILLIS};
 
 /// The version of the format this Gestos reads.
 const FORMAT: u32 = 1;
@@ -97,6 +97,7 @@ enum StepFile {
     Type(String),
     Wait(u32),
     Open(String),
+    Show(u32),
 }
 
 #[derive(serde::Deserialize)]
@@ -112,12 +113,12 @@ impl From<StepFile> for KeyStep {
             StepFile::Copy(CopyFile::Files) => KeyStep::Copy(CopyKind::Files),
             StepFile::Copy(CopyFile::Text) => KeyStep::Copy(CopyKind::Text),
             // A template's commands are given what's copied and selected, as that's what they're for.
-            // and what they print is their result.
-            StepFile::Run(command) => KeyStep::Run(ShellCommand::new(command.trim(), true).showing_output()),
+            StepFile::Run(command) => KeyStep::Run(ShellCommand::new(command.trim(), true)),
             StepFile::Press(keys) => KeyStep::Press(keys),
             StepFile::Type(text) => KeyStep::Type(text),
             StepFile::Wait(millis) => KeyStep::Wait(millis.min(MAX_WAIT_MILLIS)),
             StepFile::Open(app) => KeyStep::Open(app),
+            StepFile::Show(seconds) => KeyStep::Show(seconds.clamp(1, MAX_SHOW_SECONDS)),
         }
     }
 }
@@ -422,20 +423,17 @@ steps:
             template.steps,
             [
                 KeyStep::Copy(CopyKind::Files),
-                KeyStep::Run(
-                    ShellCommand::new(
-                        r#"for f in "$@"; do libreoffice --headless --convert-to pdf "$f"; done"#,
-                        true
-                    )
-                    .showing_output()
-                ),
+                KeyStep::Run(ShellCommand::new(
+                    r#"for f in "$@"; do libreoffice --headless --convert-to pdf "$f"; done"#,
+                    true
+                )),
             ]
         );
     }
 
     #[test]
     fn every_kind_of_step_is_read() {
-        let text = "gestos-action-template: 1\nid: test\nname: All\nsteps:\n  - open: org.gnome.TextEditor\n  - press: Control+N\n  - type: hi\n  - wait: 99999999\n  - copy: text\n";
+        let text = "gestos-action-template: 1\nid: test\nname: All\nsteps:\n  - open: org.gnome.TextEditor\n  - press: Control+N\n  - type: hi\n  - wait: 99999999\n  - copy: text\n  - show: 3600\n";
         let steps = parse(text).unwrap().steps;
         assert_eq!(
             steps,
@@ -445,6 +443,7 @@ steps:
                 KeyStep::Type("hi".into()),
                 KeyStep::Wait(MAX_WAIT_MILLIS),
                 KeyStep::Copy(CopyKind::Text),
+                KeyStep::Show(MAX_SHOW_SECONDS),
             ]
         );
     }
@@ -840,6 +839,10 @@ steps:
                     assert!(!command.text.contains("GESTOS_SELECTION"), "{id}");
                     if command.text.contains("GESTOS_CLIPBOARD") {
                         assert!(template.steps[..i].contains(&KeyStep::Copy(CopyKind::Text)), "{id}");
+                    }
+                    // What it prints is only shown by a show step after it.
+                    if command.text.contains("show \"") {
+                        assert!(template.steps[i..].iter().any(|step| matches!(step, KeyStep::Show(_))), "{id}");
                     }
                     // Each is run by sh, which it says on its first line.
                     assert_eq!(command.interpreter().map(|interpreter| interpreter.program), Some("/bin/sh".into()), "{id}");

@@ -29,9 +29,9 @@ const FAILED_BACKGROUND: [f64; 4] = [0.47, 0.08, 0.08, 0.85];
 pub struct Message {
     pub text: String,
     pub failed: bool,
-    /// Whether it's what a command printed, shown in a fixed-width font and lined up on the left,
-    /// as it printed it.
-    pub printed: bool,
+    /// If it's what a command printed, for how long it shows. It's in a fixed-width font and lined
+    /// up on the left, as it was printed.
+    pub printed: Option<Duration>,
 }
 
 type Error = Box<dyn std::error::Error>;
@@ -88,7 +88,11 @@ fn show(screen: &mut dyn Screen, mut message: Message, messages: &Receiver<Messa
     let scale = screen.scale();
     screen.show(render(&message, scale)?)?;
     loop {
-        let time = if message.failed { FAILED_SHOWN_TIME } else { SHOWN_TIME };
+        let time = match message.printed {
+            Some(time) => time,
+            None if message.failed => FAILED_SHOWN_TIME,
+            None => SHOWN_TIME,
+        };
         match messages.recv_timeout(time) {
             Ok(next) => {
                 message = next;
@@ -127,12 +131,12 @@ fn text_layout(cr: &cairo::Context, message: &Message, scale: f64) -> pango::Lay
     let layout = pangocairo::functions::create_layout(cr);
     pangocairo::functions::context_set_resolution(&layout.context(), 96.0 * scale);
     layout.context_changed();
-    let font = if message.printed { PRINTED_FONT } else { FONT };
+    let font = if message.printed.is_some() { PRINTED_FONT } else { FONT };
     layout.set_font_description(Some(&pango::FontDescription::from_string(font)));
     layout.set_text(&message.text);
     layout.set_width((MAX_TEXT_WIDTH * scale * f64::from(pango::SCALE)) as i32);
     layout.set_wrap(pango::WrapMode::WordChar);
-    layout.set_alignment(if message.printed { pango::Alignment::Left } else { pango::Alignment::Center });
+    layout.set_alignment(if message.printed.is_some() { pango::Alignment::Left } else { pango::Alignment::Center });
     layout
 }
 
@@ -392,7 +396,7 @@ mod tests {
     use super::*;
 
     fn message(text: &str, failed: bool) -> Message {
-        Message { text: text.to_string(), failed, printed: false }
+        Message { text: text.to_string(), failed, printed: None }
     }
 
     #[test]
@@ -409,7 +413,7 @@ mod tests {
     fn what_a_command_printed_is_lined_up_on_the_left_in_a_fixed_width_font() {
         let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, 1, 1).unwrap();
         let cr = cairo::Context::new(&surface).unwrap();
-        let printed = Message { text: "a  1\nbb 22".to_string(), failed: false, printed: true };
+        let printed = Message { text: "a  1\nbb 22".to_string(), failed: false, printed: Some(Duration::from_secs(3)) };
         let layout = text_layout(&cr, &printed, 1.0);
         assert_eq!(layout.alignment(), pango::Alignment::Left);
         assert_eq!(layout.font_description().and_then(|font| font.family()).as_deref(), Some("Monospace"));
