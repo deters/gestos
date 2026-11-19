@@ -8,6 +8,8 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [9.0.1] - 2026-11-19
+
 ### Fixed
 
 - Gestures could stop working after waking the computer from sleep, until Gestos was started again.
@@ -481,7 +483,8 @@ Rebuilt the packages, with no changes.
 - Rewritten in Rust, and built with Meson.
 - Gestures are now recognized whatever their size or proportions.
 
-[Unreleased]: https://github.com/deters/gestos/compare/v9.0.0...HEAD
+[Unreleased]: https://github.com/deters/gestos/compare/v9.0.1...HEAD
+[9.0.1]: https://github.com/deters/gestos/compare/v9.0.0...v9.0.1
 [9.0.0]: https://github.com/deters/gestos/compare/v8.1.1...v9.0.0
 [8.1.1]: https://github.com/deters/gestos/compare/v8.1.0...v8.1.1
 [8.1.0]: https://github.com/deters/gestos/compare/v8.0.1...v8.1.0

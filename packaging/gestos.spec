@@ -1,5 +1,5 @@
 Name:           gestos
-Version:        9.0.0
+Version:        9.0.1
 Release:        1%{?dist}
 Summary:        Pure Wayland/Evdev mouse gestures for Linux
 License:        GPL-2.0-or-later
@@ -77,6 +77,8 @@ getent group input >/dev/null || groupadd -r input
 /usr/share/dbus-1/services/io.github.deters.Gestos.Daemon.service
 
 %changelog
+* Thu Nov 19 2026 Lucas Augusto Deters <lucasdeters@gmail.com> - 9.0.1-1
+- New release 9.0.1.
 * Wed Nov 18 2026 Lucas Augusto Deters <lucasdeters@gmail.com> - 9.0.0-1
 - New release 9.0.0.
 * Mon Nov 16 2026 Lucas Augusto Deters <lucasdeters@gmail.com> - 8.1.0-1
