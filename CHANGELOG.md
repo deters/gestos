@@ -17,13 +17,13 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An action that needs a program you don't have says which package to install.
 - New step "Copy" in an "Advanced Action": it copies the selected files or text for the command after it. It uses the copy shortcut the app lists, Ctrl+Shift+C in terminals, and Ctrl+C in other apps. In a window Gestos can't recognise, it copies nothing and the action stops.
 - A gesture made with one of the new file or text actions runs the steps of the installed version, so updates to Gestos change what the gesture does. Clicking "Customize Action…" in the gesture editor gives the gesture its own copy of the steps to change. Updates no longer change that copy.
-- New page "Actions" in Preferences: each action made from a file, like the file and text actions, can be turned off there, so it isn't offered for new gestures. Gestures already made with it keep working. Each can also be exported to a file, which is then shown selected in the file manager.
+- New page "Actions" in Preferences: each action made from a file, like the file and text actions, can be turned off there, so it isn't offered for new gestures. Gestures already made with it keep working. Each can also be exported to a file, which then opens in the default text editor.
 - "Import…" on the "Actions" page adds your own action from a file, after showing the commands it runs. Your actions are kept in your configuration with your gestures, so exporting the configuration includes them. Each action file has a short ID, like `id: convert-to-pdf`. One you import with the same ID as one of Gestos's takes its place until you remove it. An action file can name an icon from the icon theme with `icon:`, which the action and its gestures are shown with.
 
 ### Changed
 
 - The main page now lists your gestures above the categories. The option "Show Gestures in the Main Page" in Preferences is now "Hide Gesture List in the Main Page", which shows only the categories.
-- "Export…" in Preferences now suggests a file name with the date, like "Gestos 2026-11-18.yaml".
+- "Export…" in Preferences now suggests a file name with the date, like "Gestos 2026-11-18.yaml", and opens the exported file in the default text editor.
 - A category's page, like "Apps", and an app's page now open in the main window instead of a window of their own. Go back with the back button at the top left, Esc, Alt+Left or the mouse's back button.
 - A new gesture is now drawn first, in a window of its own that says which mouse button draws gestures. The editor opens once the gesture is drawn. Press Esc in that window to cancel.
 - To draw a gesture again, click its drawing in the editor. It no longer clears the drawing: it opens the window to draw in, and pressing Esc there keeps the old drawing.

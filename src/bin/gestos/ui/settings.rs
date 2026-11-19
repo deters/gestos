@@ -405,7 +405,7 @@ fn action_template_row(
             if response == gtk::ResponseType::Accept {
                 if let Some(to) = chooser.file().and_then(|file| file.path()) {
                     match std::fs::write(&to, &text) {
-                        Ok(()) => show_in_file_manager(&parent, &to),
+                        Ok(()) => open_in_text_editor(&parent, &to),
                         Err(e) => show_error_dialog(&parent, &format!("Couldn't export the action: {e}")),
                     }
                 }
@@ -473,48 +473,22 @@ fn action_template_row(
     row
 }
 
-/// Changes the user's own action templates in their configuration, and has the daemon and the
-/// lists of actions follow. Whether it was saved; if not, it's said why, and nothing changed.
-/// Shows a file selected in its folder, in the file manager: any that offers
-/// org.freedesktop.FileManager1, as Nautilus, Dolphin, Nemo, Caja and Thunar do. Without one, the
-/// folder is opened as it is.
-fn show_in_file_manager(parent: &gtk::Window, path: &std::path::Path) {
-    let uri = gio::File::for_path(path).uri().to_string();
-    let folder = path.parent().map(|folder| gio::File::for_path(folder).uri().to_string());
-    // The file manager is started with this, so that it comes to the front, on Wayland too.
+/// Opens a file in the default text editor: the app set to open plain text, whatever the file's
+/// own type, as a .yaml file often has no app of its own. Without one, it's said where the file is.
+fn open_in_text_editor(parent: &gtk::Window, path: &std::path::Path) {
+    // Started with this, so that it comes to the front, on Wayland too.
     let context = WidgetExt::display(parent).app_launch_context();
-    let file_manager = gio::AppInfo::default_for_type("inode/directory", false);
-    let startup_id = file_manager
-        .and_then(|app| context.startup_notify_id(Some(&app), &[]))
-        .map(|id| id.to_string())
-        .unwrap_or_default();
-    // On a thread of its own, as a file manager that isn't running yet takes a while to answer.
-    let shown = gio::spawn_blocking(move || -> zbus::Result<()> {
-        let conn = zbus::blocking::Connection::session()?;
-        conn.call_method(
-            Some("org.freedesktop.FileManager1"),
-            "/org/freedesktop/FileManager1",
-            Some("org.freedesktop.FileManager1"),
-            "ShowItems",
-            &(vec![uri], startup_id),
-        )?;
-        Ok(())
-    });
-    glib::spawn_future_local(async move {
-        match shown.await {
-            Ok(Ok(())) => {}
-            failed => {
-                if let Ok(Err(e)) = failed {
-                    eprintln!("gestos: Couldn't show the file in the file manager: {e}");
-                }
-                if let Some(folder) = folder {
-                    let _ = gio::AppInfo::launch_default_for_uri(&folder, Some(&context));
-                }
-            }
-        }
-    });
+    let opened = match gio::AppInfo::default_for_type("text/plain", false) {
+        Some(editor) => editor.launch(&[gio::File::for_path(path)], Some(&context)).map_err(|e| e.to_string()),
+        None => Err("No app is set to open text files".to_string()),
+    };
+    if let Err(why) = opened {
+        show_error_dialog(parent, &format!("Couldn't open {} in a text editor: {why}", path.display()));
+    }
 }
 
+/// Changes the user's own action templates in their configuration, and has the daemon and the
+/// lists of actions follow. Whether it was saved; if not, it's said why, and nothing changed.
 fn change_own_templates(
     state_rc: &Rc<RefCell<AppState>>,
     parent: &gtk::Window,
@@ -744,17 +718,16 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
                 if let Some(file) = c.file() {
                     if let Some(path) = file.path() {
                         let config_path = gestos::config::get_default_config_path();
-                        if config_path.exists() {
-                            if let Err(e) = std::fs::copy(&config_path, &path) {
-                                show_error_dialog(&parent_err_clone, &format!("Failed to export config: {}", e));
-                            }
+                        let saved = if config_path.exists() {
+                            std::fs::copy(&config_path, &path).map(|_| ()).map_err(|e| e.to_string())
                         } else {
-                            let default_cfg = Configuration::load_from_defaults();
-                            let mut temp_cfg = default_cfg;
-                            temp_cfg.user_config_path = path;
-                            if let Err(e) = temp_cfg.save_to_file() {
-                                show_error_dialog(&parent_err_clone, &format!("Failed to export config: {}", e));
-                            }
+                            let mut temp_cfg = Configuration::load_from_defaults();
+                            temp_cfg.user_config_path = path.clone();
+                            temp_cfg.save_to_file().map_err(|e| e.to_string())
+                        };
+                        match saved {
+                            Ok(()) => open_in_text_editor(&parent_err_clone, &path),
+                            Err(e) => show_error_dialog(&parent_err_clone, &format!("Failed to export config: {}", e)),
                         }
                     }
                 }
