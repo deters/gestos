@@ -91,11 +91,11 @@ When you [report a bug](https://github.com/deters/gestos/issues), attach the rep
 
 ## Security
 
-Reading the mouse takes access to your input devices. Only a small, sandboxed system service has it. The app itself runs as you, with no extra rights.
+Mouse gestures need access to input devices, and that access normally lets a program read every key you type. Many gesture tools get it by adding you to the `input` group, which gives that access to every program you run. We didn't want that, so Gestos keeps it in one small system service, `gestos-input`, which runs as a user of its own, with no network, no access to your home folder and no files it can write. It passes your mouse on, sends only the path you draw, and never reads what you type: right after a gesture, it only checks which of Ctrl, Alt, Shift and Super are held.
 
-The service never passes on your keystrokes and only answers the user at the screen. It ignores gestures while the screen is locked, on desktops that report it.
+Everything else runs as you, with no extra rights: `gestosd`, the background process that recognizes gestures and runs their actions, and `gestos`, the graphical interface, open only while it's on the screen. `gestos-input` only answers the user at the screen, and `gestosd` ignores gestures while the screen is locked, on desktops that report it.
 
-Programs you run can still ask it to press keys. It guards against other users and keyloggers, not against software you already trust.
+Programs you run yourself can still ask `gestos-input` to press keys, even in other apps' windows, as tools that type for you can. On systems without systemd, like Alpine, `gestos-input` runs as its own user without the other limits.
 
 ## Development
 
