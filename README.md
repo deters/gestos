@@ -40,7 +40,7 @@ Mouse gestures for Linux.
 curl -fsSL https://github.com/deters/gestos/releases/latest/download/install.sh | sh
 ```
 
-This installs the package for your system, or updates it, after checking it against the release's checksums. Add `-s -- --beta` after `sh` to install the beta, when there's one newer than the release.
+This installs the package for your system, or updates it, after checking it against the release's checksums. Add `-s -- --beta` after `sh` to install the beta, when there's one newer than the release. On a system Gestos wasn't tested on, like openSUSE, it asks before installing.
 
 Or download the package for your system from the [releases page](https://github.com/deters/gestos/releases), then install it:
 

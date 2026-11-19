@@ -12,6 +12,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - New install script, which installs or updates Gestos with the package for your system: `curl -fsSL https://github.com/deters/gestos/releases/latest/download/install.sh | sh` (Ubuntu, Debian, Fedora, Alpine).
 - With `sh -s -- --beta` instead of `sh`, the install script installs the beta, when there's one newer than the release.
+- On other systems that install deb, rpm or apk packages, like openSUSE, the install script says Gestos wasn't tested there and asks before installing.
 
 ## [9.0.1] - 2026-11-19
 
