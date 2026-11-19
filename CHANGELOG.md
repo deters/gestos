@@ -12,13 +12,13 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- Gestures could stop working after waking the computer from sleep, until Gestos was started again.
+- Gestures could stop working after waking the computer from sleep, until Gestos was started again. Thanks to @jatenlee (#27).
 
 ## [9.0.0] - 2026-11-18
 
 ### Added
 
-- New actions for the files selected in a file manager, on its page in "Apps", above its keyboard shortcuts: "Convert to PDF", "Merge PDFs", "Compress PDFs", "Split PDF into Pages", "Convert PDF to Images", "Make a Dated Copy", "Convert Images to PNG", "Convert Images to JPG", "Make Images Half the Size", "Compress to ZIP", "Extract ZIP Files" and "Show Checksums".
+- New actions for the files selected in a file manager, on its page in "Apps", above its keyboard shortcuts: "Convert to PDF", "Merge PDFs", "Compress PDFs", "Split PDF into Pages", "Convert PDF to Images", "Make a Dated Copy", "Convert Images to PNG", "Convert Images to JPG", "Make Images Half the Size", "Compress to ZIP", "Extract ZIP Files" and "Show Checksums". Thanks to @Jopp-gh (#26).
 - New actions for the selected text: "Search the Web", "Translate", "Open Link", "Read Aloud", "Calculate", "Count Words" and "Show QR Code", which shows the text or link as a QR code to scan with a phone. These actions copy the selected text, so it replaces what was in the clipboard.
 - New action "Copy Text from Screen": you select an area of the screen, and Gestos copies the text in it, including text in images and videos.
 - These actions show their result, like "Converted 3 images". When they can't do anything, they say why, like "The selected images are PNGs already" or "Select at least two PDFs to merge".
@@ -49,7 +49,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Gestos now runs two background processes instead of three.
+- Gestos now runs two background processes instead of three. Thanks to @Jopp-gh (#23).
 
 ### Fixed
 
@@ -69,7 +69,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - New option "Control Windows With the Middle Button" in Settings: drag a window with the middle button to move it, or scroll while holding the button to resize it (GNOME).
 - The action "Advanced Action" can now run commands, so one gesture can open an app, press shortcuts and run a script.
 - Each app's page can now create an "Advanced Action" that works only in that app.
-- Gestures can now run a command on the files or text you copied, or the text you selected (option "Use Variables", in the actions "Run Command in Shell" and "Advanced Action").
+- Gestures can now run a command on the files or text you copied, or the text you selected (option "Use Variables", in the actions "Run Command in Shell" and "Advanced Action"). Thanks to @Jopp-gh (#25).
 - New option "Allow Middle Click Paste" in Settings: turns pasting with the middle button on or off (GNOME).
 - New action "Toggle Middle Click Paste": turns pasting with the middle button on or off (GNOME).
 - New action "Toggle Middle Button Window Control": turns moving and resizing windows with the middle button on or off (GNOME).
@@ -83,7 +83,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- Gestures drawn while holding Ctrl, Alt, Shift or Super were saved without those keys on X11.
+- Gestures drawn while holding Ctrl, Alt, Shift or Super were saved without those keys on X11. Thanks to @Jopp-gh (#21).
 
 ## [8.0.0] - 2026-11-15
 
@@ -92,15 +92,15 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Actions are now grouped in categories, such as Windows, Navigation and Sound and Media. All your gestures can still be shown in one list, with the option "Show Gestures in the Main Page" in Settings.
 - New page for each app, with its gestures and its shortcuts. Any of those shortcuts can be made into a gesture there.
 - New panel that shows what a gesture ran, or why nothing ran (GNOME, KDE, X11).
-- Now Gestos will also show the gesture path on KDE and X11.
+- Now Gestos will also show the gesture path on KDE and X11. Thanks to @Jopp-gh (#18).
 - New action "Look Up Selection": opens the selected text as a link, works out a sum, or searches the web for it.
 - Now Gestos will also detect the app in use on Sway and Hyprland, and allow gestures per app there.
 
 ### Changed
 
-- Gestures are now matched by the directions drawn, instead of the exact shape, so quick or uneven drawings are recognized more often.
+- Gestures are now matched by the directions drawn, instead of the exact shape, so quick or uneven drawings are recognized more often. Thanks to @Jopp-gh (#24).
 - The gesture editor now shows an example of how to draw a gesture.
-- The shortcut recorder now also records shortcuts the desktop uses itself, like Ctrl+Alt+Up, and modifier keys alone.
+- The shortcut recorder now also records shortcuts the desktop uses itself, like Ctrl+Alt+Up, and modifier keys alone. Thanks to @Jopp-gh (#21).
 - Deleting a gesture no longer asks for confirmation, and can be undone instead.
 - Added keyboard shortcuts: Ctrl+W closes a window, Ctrl+Q quits, and Ctrl+? lists them all.
 
@@ -130,7 +130,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Tiling didn't start on Ubuntu.
 - Closing some windows could crash GNOME and log you out.
-- Gestures and shortcuts didn't work with swapped keys, such as Ctrl and Win.
+- Gestures and shortcuts didn't work with swapped keys, such as Ctrl and Win. Thanks to @Jopp-gh (#18).
 
 ## [6.9.0] - 2026-11-09
 
@@ -170,7 +170,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Now Gestos will also detect the app in use on KDE and X11, and allow gestures per app there.
+- Now Gestos will also detect the app in use on KDE and X11, and allow gestures per app there. Thanks to @Jopp-gh (#18).
 
 ### Fixed
 
@@ -201,7 +201,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - New "Open" action for every installed app, which also brings the app to the front if it's open.
 - New option "Show Gesture Path" in Preferences: draws each gesture on screen as you draw it (GNOME).
-- New option "Draw With" in Preferences: draws gestures with the right, middle, back or forward button. Left-handed mice use the other side.
+- New option "Draw With" in Preferences: draws gestures with the right, middle, back or forward button. Left-handed mice use the other side. Thanks to @Jopp-gh (#18).
 - New option "Debugging Information" in Preferences: creates a report to attach to a bug report.
 
 ### Changed
