@@ -1057,8 +1057,25 @@ fn run_session(
     }
 }
 
+/// What the end of a connection means: the reason to try again, or the error to stop with.
+/// A temporary refusal is tried again even before anything was opened, as after a suspend, when
+/// the seat isn't the user's again yet. A lost connection is tried again only once one has
+/// worked, so an input service that isn't running is reported instead of waited for.
+#[cfg(target_os = "linux")]
+fn after_session(end: SessionEnd, opened: bool) -> Result<String, std::io::Error> {
+    match end {
+        SessionEnd::Refused { permanent: true, message } => {
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, message))
+        }
+        SessionEnd::Refused { permanent: false, message } => Ok(message),
+        SessionEnd::Lost(message) if opened => Ok(message),
+        SessionEnd::Lost(message) => Err(std::io::Error::other(message)),
+    }
+}
+
 /// Stays connected to the input service. Once a connection has worked, losing it is temporary,
 /// as when another user takes the seat or the mouse is unplugged, so it tries again until it can.
+/// A temporary refusal is tried again from the start.
 #[cfg(target_os = "linux")]
 fn run_grabber(
     device_path: &str,
@@ -1090,7 +1107,7 @@ fn run_grabber(
 
     let mut opened = false;
     loop {
-        match run_session(
+        let end = run_session(
             gestos::input_protocol::SOCKET_PATH,
             device_path,
             trigger_button,
@@ -1100,17 +1117,8 @@ fn run_grabber(
             &signals,
             &mut wake_reader,
             &mut opened,
-        ) {
-            SessionEnd::Refused { permanent: true, message } => {
-                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, message));
-            }
-            SessionEnd::Refused { message, .. } | SessionEnd::Lost(message) => {
-                if !opened {
-                    return Err(std::io::Error::other(message));
-                }
-                eprintln!("gestosd: {message} Trying again.");
-            }
-        }
+        );
+        eprintln!("gestosd: {} Trying again.", after_session(end, opened)?);
         std::thread::sleep(INPUT_RECONNECT_INTERVAL);
     }
 }
@@ -1938,6 +1946,29 @@ mod tests {
             end,
             SessionEnd::Refused { permanent: true, message } if message == "no such button"
         ));
+    }
+
+    #[test]
+    fn a_temporary_refusal_before_anything_opened_is_tried_again() {
+        let (end, opened, _, _) = session_against(
+            "seat",
+            "refused 0 Only the user active on this seat can use gestures.\n",
+        );
+        assert!(!opened);
+        assert!(after_session(end, opened).is_ok());
+    }
+
+    #[test]
+    fn a_permanent_refusal_stops_for_good() {
+        let (end, opened, _, _) = session_against("permanent", "refused 1 no such button\n");
+        let error = after_session(end, opened).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn a_connection_lost_before_anything_opened_stops() {
+        assert!(after_session(SessionEnd::Lost("gone".to_string()), false).is_err());
+        assert!(after_session(SessionEnd::Lost("gone".to_string()), true).is_ok());
     }
 
     #[test]

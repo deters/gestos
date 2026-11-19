@@ -8,6 +8,10 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Gestures could stop working after waking the computer from sleep, until Gestos was started again.
+
 ## [9.0.0] - 2026-11-18
 
 ### Added
