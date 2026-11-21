@@ -8,6 +8,10 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- After updating Gestos, it could say "Missing permissions: the Gestos input service isn't running", and gestures stayed off until you started them again. An update restarts the input service, and gestures now wait up to a minute for it before saying it's missing.
+
 ## [9.1.0] - 2026-11-21
 
 ### Added

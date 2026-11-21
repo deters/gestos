@@ -51,6 +51,10 @@ const MODIFIER_RELEASE_POLL: Duration = Duration::from_millis(20);
 // How often to try the input service again after losing it, such as when switching users.
 #[cfg(target_os = "linux")]
 const INPUT_RECONNECT_INTERVAL: Duration = Duration::from_secs(2);
+/// How long the input service may be missing at the start before that's an error. Updating
+/// Gestos restarts it, and the daemon, which restarts itself once it's replaced, may come back
+/// first. At login it may also start after the daemon.
+const INPUT_SERVICE_GRACE: Duration = Duration::from_secs(60);
 
 const CHOOSER_EXIT_CANCELLED: i32 = 1;
 const CHOOSER_FOCUS_RETURN_DELAY_MILLIS: u64 = 400;
@@ -273,8 +277,13 @@ fn restart_when_mice_change() {
 
 /// Everything that touches input devices happens in the gestos-input service. Its socket is
 /// there whenever it's set up: systemd starts the service for each connection, OpenRC at boot.
+fn input_socket_exists() -> bool {
+    Path::new(gestos::input_protocol::SOCKET_PATH).exists()
+}
+
+/// Whether the input service is there, saying how to start it when it isn't.
 fn input_service_is_set_up() -> bool {
-    if Path::new(gestos::input_protocol::SOCKET_PATH).exists() {
+    if input_socket_exists() {
         return true;
     }
     eprintln!("\n=========================================================================");
@@ -1090,17 +1099,22 @@ fn run_session(
 
 /// What the end of a connection means: the reason to try again, or the error to stop with.
 /// A temporary refusal is tried again even before anything was opened, as after a suspend, when
-/// the seat isn't the user's again yet. A lost connection is tried again only once one has
-/// worked, so an input service that isn't running is reported instead of waited for.
+/// the seat isn't the user's again yet. A lost connection is tried again once one has worked,
+/// and before that for as long as the input service may still be starting, `waited` being how
+/// long since the first try. Only then is one that isn't running reported.
 #[cfg(target_os = "linux")]
-fn after_session(end: SessionEnd, opened: bool) -> Result<String, std::io::Error> {
+fn after_session(end: SessionEnd, opened: bool, waited: Duration) -> Result<String, std::io::Error> {
     match end {
         SessionEnd::Refused { permanent: true, message } => {
             Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, message))
         }
         SessionEnd::Refused { permanent: false, message } => Ok(message),
-        SessionEnd::Lost(message) if opened => Ok(message),
-        SessionEnd::Lost(message) => Err(std::io::Error::other(message)),
+        SessionEnd::Lost(message) if opened || waited < INPUT_SERVICE_GRACE => Ok(message),
+        SessionEnd::Lost(message) => {
+            // Says how to start it, if it's not there at all.
+            input_service_is_set_up();
+            Err(std::io::Error::other(message))
+        }
     }
 }
 
@@ -1137,6 +1151,7 @@ fn run_grabber(
     let _ = RELOAD_WAKE.set(wake_writer);
 
     let mut opened = false;
+    let started = Instant::now();
     loop {
         let end = run_session(
             gestos::input_protocol::SOCKET_PATH,
@@ -1149,7 +1164,7 @@ fn run_grabber(
             &mut wake_reader,
             &mut opened,
         );
-        eprintln!("gestosd: {} Trying again.", after_session(end, opened)?);
+        eprintln!("gestosd: {} Trying again.", after_session(end, opened, started.elapsed())?);
         std::thread::sleep(INPUT_RECONNECT_INTERVAL);
     }
 }
@@ -1685,7 +1700,7 @@ fn main() {
 
     // If multiple devices are specified, run process manager
     if devices.len() > 1 {
-        if input_service_is_set_up() && config_is_valid() {
+        if input_socket_exists() && config_is_valid() {
             stop_legacy_instance();
         }
         start_dbus_service();
@@ -1694,8 +1709,9 @@ fn main() {
     }
 
     // Single device execution
-    if !input_service_is_set_up() {
-        std::process::exit(1);
+    // Waited for once there's a mouse to open, rather than given up on, as it may be on its way.
+    if !input_socket_exists() {
+        println!("gestosd: Waiting for the input service.");
     }
 
     // Load configuration
@@ -2072,20 +2088,26 @@ mod tests {
             "refused 0 Only the user active on this seat can use gestures.\n",
         );
         assert!(!opened);
-        assert!(after_session(end, opened).is_ok());
+        assert!(after_session(end, opened, Duration::ZERO).is_ok());
     }
 
     #[test]
     fn a_permanent_refusal_stops_for_good() {
         let (end, opened, _, _) = session_against("permanent", "refused 1 no such button\n");
-        let error = after_session(end, opened).unwrap_err();
+        let error = after_session(end, opened, Duration::ZERO).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     }
 
     #[test]
-    fn a_connection_lost_before_anything_opened_stops() {
-        assert!(after_session(SessionEnd::Lost("gone".to_string()), false).is_err());
-        assert!(after_session(SessionEnd::Lost("gone".to_string()), true).is_ok());
+    fn an_input_service_that_isnt_there_yet_is_waited_for_a_while() {
+        let lost = || SessionEnd::Lost("gone".to_string());
+        // As when Gestos is being updated, or the daemon starts first at login.
+        assert!(after_session(lost(), false, Duration::ZERO).is_ok());
+        assert!(after_session(lost(), false, Duration::from_secs(30)).is_ok());
+        // Not there at all.
+        assert!(after_session(lost(), false, INPUT_SERVICE_GRACE).is_err());
+        // Once one has worked, it's always waited for.
+        assert!(after_session(lost(), true, INPUT_SERVICE_GRACE * 10).is_ok());
     }
 
     #[test]
