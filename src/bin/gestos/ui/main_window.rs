@@ -1549,9 +1549,8 @@ pub fn build_ui(app: &gtk::Application) {
          .extension-banner { padding: 6px 12px; min-height: 36px; background-color: alpha(@warning_color, 0.15); }\n\
          .keycap-small { padding: 0 4px; background-color: alpha(currentColor, 0.08); border: 1px solid alpha(currentColor, 0.15); border-radius: 4px; font-weight: bold; font-size: 0.7em; }\n\
          .keycap { padding: 6px 12px; background-color: alpha(currentColor, 0.08); border: 1px solid alpha(currentColor, 0.15); border-radius: 6px; font-weight: bold; font-size: 1.1em; }\n\
-         .drag-handle { opacity: 0.55; cursor: grab; margin-right: 4px; }\n\
+         .drag-handle { opacity: 0.55; margin-right: 4px; }\n\
          .drag-handle:hover { opacity: 1; }\n\
-         .drag-handle:active { cursor: grabbing; }\n\
          .build-your-own label { font-weight: bold; }\n\
          togglebutton.key-held, button.key-held { box-shadow: 0 0 0 3px alpha(@accent_bg_color, 0.6); }\n\
          .dialog-content scrolledwindow > undershoot.bottom { box-shadow: inset 0 -12px 12px -12px alpha(black, 0.25); }\n\

@@ -373,6 +373,8 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
 
     let drag_handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
     drag_handle.add_css_class("drag-handle");
+    // Set here, as GTK's CSS has no cursor property. While dragging, the drag's own one shows.
+    drag_handle.set_cursor_from_name(Some("grab"));
     drag_handle.set_valign(gtk::Align::Center);
     main_hbox.append(&drag_handle);
 

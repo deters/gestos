@@ -62,6 +62,11 @@ if [ "$1" = --remove ]; then
     done
     rmdir "$local_templates" 2>/dev/null || true
     systemctl --user daemon-reload 2>/dev/null || true
+    # The caches made when it was installed still list what's gone, which GTK would go on loading.
+    if [ -d "$local_root/icons/hicolor" ]; then
+        gtk-update-icon-cache -q -t -f "$local_root/icons/hicolor" 2>/dev/null || true
+    fi
+    update-desktop-database -q "$local_root/applications" 2>/dev/null || true
     if [ "$removed" = yes ]; then
         echo "Removed the copy installed for your user. Log out and back in to load the system's extension."
     else

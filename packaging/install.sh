@@ -247,7 +247,16 @@ remove_user_copy() {
 	done
 	[ -n "$removed" ] || return 0
 	systemctl --user daemon-reload 2>/dev/null || true
+	# The caches made when it was installed still list what's gone, which GTK would go on loading.
+	if [ -d "$data/icons/hicolor" ]; then
+		gtk-update-icon-cache -q -t -f "$data/icons/hicolor" 2>/dev/null || true
+	fi
+	update-desktop-database -q "$data/applications" 2>/dev/null || true
 	say "Removed an older copy of Gestos installed for your user, which would have run in place of this one:$removed"
+	# A shell that ran the removed programs remembers where they were, and goes on looking there.
+	case $removed in
+	*/.local/bin/*) say "Open a new terminal, or run hash -r in this one, before running gestos here." ;;
+	esac
 }
 
 # Everything runs from here, once the whole script is read, so nothing it runs can read the
