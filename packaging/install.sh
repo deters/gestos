@@ -220,15 +220,34 @@ main() {
 	else
 		say "The beta of Gestos $(version_of "$chosen_package") is installed."
 	fi
-	# A copy installed for this user from the source, by reinstall.sh, comes first: on PATH, and
-	# for GNOME, which loads a user's extension in place of the system's. It would go on running
-	# in place of the one just installed.
-	user_extension="$HOME/.local/share/gnome-shell/extensions/gestos@deters.github.io"
-	if [ -e "$HOME/.local/bin/gestos" ] || [ -e "$HOME/.local/bin/gestosd" ] || [ -e "$user_extension" ]; then
-		say "Another copy of Gestos is installed for your user in $HOME/.local, and runs in place of this one."
-		say "Remove it with reinstall.sh --remove in the Gestos source folder, or delete $HOME/.local/bin/gestos, $HOME/.local/bin/gestosd and $user_extension."
-	fi
+	remove_user_copy
 	say "On GNOME, log out and back in after installing, then turn on the Gestos extension in Preferences."
+}
+
+# A copy installed for this user from the source, by reinstall.sh, comes first: on PATH, for
+# D-Bus and systemd, and for GNOME, which loads a user's extension in place of the system's. It
+# would go on running in place of the one just installed, so it's removed. Action templates there
+# stay, as they may be the user's own.
+remove_user_copy() {
+	data=${XDG_DATA_HOME:-$HOME/.local/share}
+	removed=
+	for path in \
+		"$HOME/.local/bin/gestos" \
+		"$HOME/.local/bin/gestosd" \
+		"$data/applications/gestos.desktop" \
+		"$data/dbus-1/services/io.github.deters.Gestos.Daemon.service" \
+		"$data/systemd/user/gestosd.service" \
+		"$data/gnome-shell/extensions/gestos@deters.github.io" \
+		"$data"/icons/hicolor/*/apps/gestos.png \
+		"$data"/icons/hicolor/*/apps/gestos.svg; do
+		if [ -e "$path" ]; then
+			rm -rf "$path" && removed="$removed
+	$path"
+		fi
+	done
+	[ -n "$removed" ] || return 0
+	systemctl --user daemon-reload 2>/dev/null || true
+	say "Removed an older copy of Gestos installed for your user, which would have run in place of this one:$removed"
 }
 
 # Everything runs from here, once the whole script is read, so nothing it runs can read the

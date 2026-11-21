@@ -34,19 +34,39 @@ user_copy() {
 }
 
 if [ "$1" = --remove ]; then
-    installed_files | while IFS="$(printf '\t')" read -r built system; do
-        copy=$(user_copy "$system")
-        [ -n "$copy" ] && rm -f "$copy"
+    # What this script installs for your user, by name, so that it's found without a build of the
+    # same version, or any build at all. The same list as the install script's.
+    removed=no
+    for path in \
+        "$local_bin/gestos" \
+        "$local_bin/gestosd" \
+        "$local_root/applications/gestos.desktop" \
+        "$local_root/dbus-1/services/io.github.deters.Gestos.Daemon.service" \
+        "$local_root/systemd/user/gestosd.service" \
+        "$local_root/gnome-shell/extensions/gestos@deters.github.io" \
+        "$local_root"/icons/hicolor/*/apps/gestos.png \
+        "$local_root"/icons/hicolor/*/apps/gestos.svg; do
+        if [ -e "$path" ]; then
+            rm -rf "$path"
+            echo "Removed $path"
+            removed=yes
+        fi
     done
-    # Only the ones from this checkout, and not any you made.
+    # Only the templates from this checkout, and not any you made.
     for template in action-templates/*.yaml; do
-        rm -f "${local_templates:?}/${template##*/}"
+        if [ -e "$local_templates/${template##*/}" ]; then
+            rm -f "$local_templates/${template##*/}"
+            echo "Removed $local_templates/${template##*/}"
+            removed=yes
+        fi
     done
     rmdir "$local_templates" 2>/dev/null || true
-    rmdir -p "$local_root/gnome-shell/extensions/gestos@deters.github.io/schemas" \
-        "$local_root/gnome-shell/extensions/gestos@deters.github.io/lib" 2>/dev/null || true
     systemctl --user daemon-reload 2>/dev/null || true
-    echo "Removed the copy installed for your user. Log out and back in to load the system's extension."
+    if [ "$removed" = yes ]; then
+        echo "Removed the copy installed for your user. Log out and back in to load the system's extension."
+    else
+        echo "There's no copy installed for your user."
+    fi
     exit 0
 fi
 

@@ -8,6 +8,10 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The install script now removes an older copy of Gestos installed for your user in `~/.local`, which ran in place of the one it installed, and lists the files it removed. Before, it only warned about that copy. Action templates of your own in `~/.local/share/gestos/action-templates` stay.
+
 ## [9.1.2] - 2026-11-21
 
 ### Changed
