@@ -8,6 +8,8 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [9.1.0] - 2026-11-21
+
 ### Added
 
 - New install script, which installs or updates Gestos with the package for your system: `curl -fsSL https://github.com/deters/gestos/releases/latest/download/install.sh | sh` (Ubuntu, Debian, Fedora, Alpine).
@@ -495,7 +497,8 @@ Rebuilt the packages, with no changes.
 - Rewritten in Rust, and built with Meson.
 - Gestures are now recognized whatever their size or proportions.
 
-[Unreleased]: https://github.com/deters/gestos/compare/v9.0.1...HEAD
+[Unreleased]: https://github.com/deters/gestos/compare/v9.1.0...HEAD
+[9.1.0]: https://github.com/deters/gestos/compare/v9.0.1...v9.1.0
 [9.0.1]: https://github.com/deters/gestos/compare/v9.0.0...v9.0.1
 [9.0.0]: https://github.com/deters/gestos/compare/v8.1.1...v9.0.0
 [8.1.1]: https://github.com/deters/gestos/compare/v8.1.0...v8.1.1
