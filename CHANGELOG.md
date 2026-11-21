@@ -16,6 +16,10 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - New option "Use Variables" in the "Type" step of an "Advanced Action". With it, the text to type can include `{{clipboard}}`, `{{selection}}`, `{{files}}`, `{{app}}` and `{{gesture}}`, which hold the same values as the variables a command gets. It can also include `{{result}}`, which is what the command before the step printed. For example, the steps "Copy", "Command" and "Type" with `{{result}}` replace the selected text with what a command made of it. "Insert a Variable" next to the text lists them all.
 - A "Type" step with variables types at most 4000 characters. When the text is longer, nothing is typed and Gestos says the text is too long.
 
+### Fixed
+
+- Gestos restarts its gestures when the mice change, when the mouse buttons are swapped, and after an update. Each restart left one finished process behind for each mouse, and these stayed until you logged out. Thanks to @jatenlee (#29).
+
 ## [9.0.1] - 2026-11-19
 
 ### Fixed

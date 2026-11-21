@@ -21,6 +21,15 @@ use zbus::interface;
 static RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
 static IS_MANAGER: AtomicBool = AtomicBool::new(false);
 static RELOAD_MANAGER: AtomicBool = AtomicBool::new(false);
+/// The mice listened to and the button they draw with, as they are now.
+static CURRENT_DEVICES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+static CURRENT_BUTTON: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+/// The button picked in the app, before it's turned to the one a left hand uses.
+static PICKED_BUTTON: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+/// Whether the mice were found, rather than given on the command line, and so change.
+static DEVICES_FOUND: AtomicBool = AtomicBool::new(false);
+/// Listeners the manager is to start in place of the ones it has: their mice and button.
+static NEW_LISTENERS: std::sync::Mutex<Option<(Vec<String>, i32)>> = std::sync::Mutex::new(None);
 static CHILD_PIDS: once_cell::sync::Lazy<std::sync::Mutex<Vec<u32>>> =
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new(Vec::new()));
 
@@ -212,10 +221,28 @@ fn usable_pointer_devices(trigger_code: u16) -> Vec<String> {
         .collect()
 }
 
-/// Starts over once the devices to draw gestures with aren't the ones it started with: a mouse
+/// Listens to these mice with this button from now on. The manager only starts new listeners in
+/// place of its own, as long as there are several mice still. Otherwise how the daemon runs
+/// changes, as it reads a single mouse itself, so it starts over.
+fn listen_with(why: &str, devices: Vec<String>, button: i32) {
+    if IS_MANAGER.load(Ordering::Relaxed) && devices.len() > 1 {
+        println!("gestosd: {why}. Restarting the listeners...");
+        *CURRENT_DEVICES.lock().unwrap() = devices.clone();
+        CURRENT_BUTTON.store(button, Ordering::Relaxed);
+        *NEW_LISTENERS.lock().unwrap() = Some((devices, button));
+    } else {
+        restart(why);
+    }
+}
+
+fn current_trigger_code() -> u16 {
+    gestos::uinput::trigger_button_code(CURRENT_BUTTON.load(Ordering::Relaxed)).unwrap_or_default()
+}
+
+/// Listens to other mice once the devices to draw gestures with aren't the ones in use: a mouse
 /// was plugged in or taken out, came back as another device, or a touchpad is the only one left.
 /// Only once udev has set a new one up, so that it can be opened. Watched in a thread of its own.
-fn restart_when_mice_change(started: Vec<String>, trigger_code: u16) {
+fn restart_when_mice_change() {
     std::thread::spawn(move || {
         use gio::prelude::*;
         let context = gio::glib::MainContext::new();
@@ -225,8 +252,9 @@ fn restart_when_mice_change(started: Vec<String>, trigger_code: u16) {
                 return;
             };
             let check = move || {
-                if usable_pointer_devices(trigger_code) != started {
-                    restart("The mice changed");
+                let found = usable_pointer_devices(current_trigger_code());
+                if found != *CURRENT_DEVICES.lock().unwrap() {
+                    listen_with("The mice changed", found, CURRENT_BUTTON.load(Ordering::Relaxed));
                 }
             };
             // One may have come or gone while it was starting.
@@ -1278,22 +1306,34 @@ fn spawn_device_process(
 }
 
 /// Runs one child process per device, restarting any that fail with an increasing delay.
-fn run_manager(devices: &[String], button: i32, sensitivity: i32, custom_config: Option<&str>) {
+fn run_manager(devices: &[String], mut button: i32, sensitivity: i32, custom_config: Option<&str>) {
     IS_MANAGER.store(true, Ordering::Relaxed);
     let exe = std::env::current_exe().unwrap();
-    let now = Instant::now();
-    let mut children: Vec<ManagedChild> = devices
-        .iter()
-        .map(|device| ManagedChild {
-            device: device.clone(),
-            process: None,
-            started_at: now,
-            restart_at: Some(now),
-            restart_delay: CHILD_RESTART_MIN_DELAY,
-        })
-        .collect();
+    let listeners = |devices: &[String], now: Instant| -> Vec<ManagedChild> {
+        devices
+            .iter()
+            .map(|device| ManagedChild {
+                device: device.clone(),
+                process: None,
+                started_at: now,
+                restart_at: Some(now),
+                restart_delay: CHILD_RESTART_MIN_DELAY,
+            })
+            .collect()
+    };
+    let mut children = listeners(devices, Instant::now());
 
     loop {
+        // Other mice, or the buttons swapped: the listeners there were are waited for, so that
+        // none is left a zombie or still holds a mouse, and new ones start in their place.
+        if let Some((devices, new_button)) = NEW_LISTENERS.lock().unwrap().take() {
+            let pids: Vec<u32> = children.iter().filter_map(|c| c.process.as_ref().map(Child::id)).collect();
+            end_and_reap(&pids, CHILDREN_STOP_TIMEOUT);
+            // Their IDs may be other programs' now, which a reload mustn't signal.
+            CHILD_PIDS.lock().unwrap().clear();
+            button = new_button;
+            children = listeners(&devices, Instant::now());
+        }
         let now = Instant::now();
         for child in &mut children {
             if let Some(process) = child.process.as_mut() {
@@ -1392,19 +1432,63 @@ fn physical_button(button: i32, left_handed: bool) -> i32 {
 /// mice that have it are only found at the start. Watched here, rather than by a program of its
 /// own, which would be one more process running for as long as Gestos does.
 fn restart_when_hand_changes(started_left_handed: bool) {
-    when_hand_changes(started_left_handed, || restart("The mouse buttons were swapped"));
+    when_hand_changes(started_left_handed, |left_handed| {
+        let button = physical_button(PICKED_BUTTON.load(Ordering::Relaxed), left_handed);
+        // The mice with that button, if they're found rather than given.
+        let devices = if DEVICES_FOUND.load(Ordering::Relaxed) {
+            usable_pointer_devices(gestos::uinput::trigger_button_code(button).unwrap_or_default())
+        } else {
+            CURRENT_DEVICES.lock().unwrap().clone()
+        };
+        listen_with("The mouse buttons were swapped", devices, button);
+    });
 }
 
 /// Starts over as it was started the first time, in place of this process, so whatever started
 /// it still has it.
 fn restart(why: &str) -> ! {
     println!("gestosd: {why}. Restarting...");
-    kill_children();
+    // The new program keeps this process's ID, and with it the listeners as its children, which it
+    // doesn't know about. Unless they're waited for first, each one stays a zombie until the
+    // session ends.
+    let pids = CHILD_PIDS.lock().unwrap().clone();
+    end_and_reap(&pids, CHILDREN_STOP_TIMEOUT);
     let mut args = std::env::args_os();
     let program = args.next().unwrap_or_else(|| "gestosd".into());
     let error = std::os::unix::process::CommandExt::exec(Command::new(program).args(args));
     eprintln!("gestosd: Could not restart: {error}");
     std::process::exit(1);
+}
+
+/// How long listeners get to stop on their own before a restart stops them.
+const CHILDREN_STOP_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Asks these children to stop, and waits for each, stopping any still running after `timeout`.
+/// Only a process still this one's child is ever stopped, as an ID another process reaped may
+/// have gone to some other program since.
+fn end_and_reap(pids: &[u32], timeout: Duration) {
+    use nix::sys::signal::{kill, Signal};
+    use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
+    let still_running = |pid: nix::unistd::Pid| matches!(waitpid(pid, Some(WaitPidFlag::WNOHANG)), Ok(WaitStatus::StillAlive));
+    // Waited for already, or not a child of this process any more, as when the manager's loop has
+    // waited for it: either way its ID may be another program's now, which mustn't be stopped.
+    let mut running: Vec<nix::unistd::Pid> =
+        pids.iter().map(|&pid| nix::unistd::Pid::from_raw(pid as i32)).filter(|&pid| still_running(pid)).collect();
+    for &pid in &running {
+        let _ = kill(pid, Signal::SIGTERM);
+    }
+    let deadline = Instant::now() + timeout;
+    while !running.is_empty() {
+        running.retain(|&pid| still_running(pid));
+        if running.is_empty() || Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    for pid in running {
+        let _ = kill(pid, Signal::SIGKILL);
+        let _ = waitpid(pid, None);
+    }
 }
 
 /// How long the program file must stay unchanged before the new one is run, as an update replaces
@@ -1464,17 +1548,19 @@ fn is_executable(path: &std::path::Path) -> bool {
     std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
 }
 
-/// Calls `changed` whenever the buttons stop being as they were at the start.
-fn when_hand_changes(started_left_handed: bool, changed: impl Fn() + Send + 'static) {
+/// Calls `changed` with the hand the buttons are for whenever they're swapped.
+fn when_hand_changes(started_left_handed: bool, changed: impl Fn(bool) + Send + 'static) {
     std::thread::spawn(move || {
         use gio::prelude::SettingsExt;
         let context = gio::glib::MainContext::new();
         // Changes come to the context the settings were opened in.
         let _ = context.with_thread_default(|| {
             let Some(settings) = mouse_settings() else { return };
+            let current = std::cell::Cell::new(started_left_handed);
             settings.connect_changed(Some("left-handed"), move |settings, key| {
-                if settings.boolean(key) != started_left_handed {
-                    changed();
+                let left_handed = settings.boolean(key);
+                if left_handed != current.replace(left_handed) {
+                    changed(left_handed);
                 }
             });
             gio::glib::MainLoop::new(Some(&context), false).run();
@@ -1555,8 +1641,10 @@ fn main() {
         let picked = Configuration::load_from_file(&config_path)
             .and_then(|config| config.button)
             .unwrap_or(DEFAULT_BUTTON);
+        PICKED_BUTTON.store(picked, Ordering::Relaxed);
         physical_button(picked, left_handed == Some(true))
     });
+    CURRENT_BUTTON.store(button, Ordering::Relaxed);
 
     if gestos::uinput::trigger_button_code(button).is_none() {
         eprintln!("Error: trigger {} is not a mouse button.", button);
@@ -1586,9 +1674,13 @@ fn main() {
     if devices.is_empty() {
         let trigger_code = gestos::uinput::trigger_button_code(button).unwrap_or_default();
         devices = usable_pointer_devices(trigger_code);
+        DEVICES_FOUND.store(true, Ordering::Relaxed);
+        *CURRENT_DEVICES.lock().unwrap() = devices.clone();
         if std::env::var("GESTOS_CHILD").is_err() {
-            restart_when_mice_change(devices.clone(), trigger_code);
+            restart_when_mice_change();
         }
+    } else {
+        *CURRENT_DEVICES.lock().unwrap() = devices.clone();
     }
 
     // If multiple devices are specified, run process manager
@@ -1662,6 +1754,28 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listeners_are_waited_for_before_a_restart_even_one_that_ignores_being_asked_to_stop() {
+        let polite = Command::new("sleep").arg("30").spawn().unwrap();
+        let stubborn = Command::new("sh").args(["-c", "trap '' TERM; sleep 30 & wait; sleep 30"]).spawn().unwrap();
+        let pids = [polite.id(), stubborn.id()];
+        // As the manager's loop has them: only their IDs.
+        std::mem::forget(polite);
+        std::mem::forget(stubborn);
+        std::thread::sleep(Duration::from_millis(200));
+        let started = Instant::now();
+        end_and_reap(&pids, Duration::from_millis(500));
+        assert!(started.elapsed() < Duration::from_secs(3));
+        for pid in pids {
+            // Reaped: neither running nor a zombie, so no longer a child to wait for.
+            let pid = nix::unistd::Pid::from_raw(pid as i32);
+            assert_eq!(
+                nix::sys::wait::waitpid(pid, Some(nix::sys::wait::WaitPidFlag::WNOHANG)),
+                Err(nix::errno::Errno::ECHILD)
+            );
+        }
+    }
 
     #[test]
     fn a_program_replaced_as_an_update_does_is_noticed_once_it_settles() {
@@ -1809,7 +1923,7 @@ mod tests {
         }
         let (tx, rx) = std::sync::mpsc::channel();
         let tx = std::sync::Mutex::new(tx);
-        when_hand_changes(false, move || {
+        when_hand_changes(false, move |_| {
             let _ = tx.lock().unwrap().send(());
         });
         // Until the watch is set, a change wouldn't be seen.
