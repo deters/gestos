@@ -40,6 +40,7 @@ Now written in Rust and completely independent of X11 and legacy drivers.
 
 %install
 %meson_install
+install -D -m 644 build-aux/90-gestos.preset %{buildroot}%{_presetdir}/90-gestos.preset
 
 %pre
 # Ensure the 'input' group exists before installing the files
@@ -48,6 +49,9 @@ getent group input >/dev/null || groupadd -r input
 %post
 %udev_rules_update
 %systemd_post gestos-input.socket
+# The preset only turns it on for a first install, and doesn't start it. It's also turned on
+# again where an earlier install's preset turned it off, as Gestos can't read the mouse without it.
+systemctl enable --now gestos-input.socket >/dev/null 2>&1 || :
 
 %preun
 %systemd_preun gestos-input.socket
@@ -74,6 +78,7 @@ getent group input >/dev/null || groupadd -r input
 /usr/lib/systemd/user/gestosd.service
 %{_unitdir}/gestos-input.socket
 %{_unitdir}/gestos-input@.service
+%{_presetdir}/90-gestos.preset
 /usr/share/dbus-1/services/io.github.deters.Gestos.Daemon.service
 
 %changelog

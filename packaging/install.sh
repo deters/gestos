@@ -220,6 +220,14 @@ main() {
 	else
 		say "The beta of Gestos $(version_of "$chosen_package") is installed."
 	fi
+	# A copy installed for this user from the source, by reinstall.sh, comes first: on PATH, and
+	# for GNOME, which loads a user's extension in place of the system's. It would go on running
+	# in place of the one just installed.
+	user_extension="$HOME/.local/share/gnome-shell/extensions/gestos@deters.github.io"
+	if [ -e "$HOME/.local/bin/gestos" ] || [ -e "$HOME/.local/bin/gestosd" ] || [ -e "$user_extension" ]; then
+		say "Another copy of Gestos is installed for your user in $HOME/.local, and runs in place of this one."
+		say "Remove it with reinstall.sh --remove in the Gestos source folder, or delete $HOME/.local/bin/gestos, $HOME/.local/bin/gestosd and $user_extension."
+	fi
 	say "On GNOME, log out and back in after installing, then turn on the Gestos extension in Preferences."
 }
 

@@ -8,6 +8,14 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The install script now warns when another copy of Gestos installed for your user, in `~/.local`, runs in place of the one it installed, and says how to remove it.
+
+### Fixed
+
+- On Fedora, installing or updating Gestos could leave the input service turned off. Gestures then didn't start, and Gestos said "Missing permissions: the Gestos input service isn't running". Installing Gestos now turns it on and starts it.
+
 ## [9.1.1] - 2026-11-21
 
 ### Fixed

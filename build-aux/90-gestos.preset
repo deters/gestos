@@ -1,0 +1,3 @@
+# Turns on the input service, which Gestos needs to read the mouse. Fedora turns off the services
+# a package installs unless a preset says otherwise.
+enable gestos-input.socket
