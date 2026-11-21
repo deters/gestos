@@ -8,6 +8,8 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [9.1.2] - 2026-11-21
+
 ### Changed
 
 - The install script now warns when another copy of Gestos installed for your user, in `~/.local`, runs in place of the one it installed, and says how to remove it.
@@ -511,7 +513,8 @@ Rebuilt the packages, with no changes.
 - Rewritten in Rust, and built with Meson.
 - Gestures are now recognized whatever their size or proportions.
 
-[Unreleased]: https://github.com/deters/gestos/compare/v9.1.1...HEAD
+[Unreleased]: https://github.com/deters/gestos/compare/v9.1.2...HEAD
+[9.1.2]: https://github.com/deters/gestos/compare/v9.1.1...v9.1.2
 [9.1.1]: https://github.com/deters/gestos/compare/v9.1.0...v9.1.1
 [9.1.0]: https://github.com/deters/gestos/compare/v9.0.1...v9.1.0
 [9.0.1]: https://github.com/deters/gestos/compare/v9.0.0...v9.0.1
