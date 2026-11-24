@@ -221,7 +221,57 @@ main() {
 		say "The beta of Gestos $(version_of "$chosen_package") is installed."
 	fi
 	remove_user_copy
+	remove_local_copy
 	say "On GNOME, log out and back in after installing, then turn on the Gestos extension in Preferences."
+}
+
+# A copy installed from the source for the whole system, as meson does by default, is in
+# /usr/local, which comes before the package everywhere: on PATH, for systemd and D-Bus, and for
+# GNOME, which loads the first extension it finds. It would go on running in place of the one
+# just installed, so it's removed, as root, like the package was installed.
+remove_local_copy() {
+	local_root=/usr/local
+	set --
+	for path in \
+		"$local_root/bin/gestos" \
+		"$local_root/bin/gestosd" \
+		"$local_root/libexec/gestos-input" \
+		"$local_root/lib/systemd/system/gestos-input.socket" \
+		"$local_root/lib/systemd/system/gestos-input@.service" \
+		"$local_root/lib/systemd/user/gestosd.service" \
+		"$local_root/share/applications/gestos.desktop" \
+		"$local_root/share/dbus-1/services/io.github.deters.Gestos.Daemon.service" \
+		"$local_root/share/gestos" \
+		"$local_root/share/gnome-shell/extensions/gestos@deters.github.io" \
+		"$local_root"/share/icons/hicolor/*/apps/gestos.png \
+		"$local_root"/share/icons/hicolor/*/apps/gestos.svg; do
+		[ -e "$path" ] && set -- "$@" "$path"
+	done
+	# Only Gestos's own wrapper, as MyGestures, which Gestos was before, also installed one here.
+	old_name="$local_root/bin/mygestures"
+	if [ -f "$old_name" ] && grep -q gestosd "$old_name" 2>/dev/null; then
+		set -- "$@" "$old_name"
+	fi
+	[ "$#" -gt 0 ] || return 0
+	as_root rm -rf "$@" </dev/null
+	as_root systemctl daemon-reload </dev/null 2>/dev/null || true
+	systemctl --user daemon-reload 2>/dev/null || true
+	# The caches made when it was installed still list what's gone, which GTK would go on loading.
+	if [ -d "$local_root/share/icons/hicolor" ]; then
+		as_root gtk-update-icon-cache -q -t -f "$local_root/share/icons/hicolor" </dev/null 2>/dev/null || true
+	fi
+	if [ -d "$local_root/share/applications" ]; then
+		as_root update-desktop-database -q "$local_root/share/applications" </dev/null 2>/dev/null || true
+	fi
+	removed=
+	for path in "$@"; do
+		removed="$removed
+	$path"
+	done
+	say "Removed an older copy of Gestos installed in $local_root, which would have run in place of this one:$removed"
+	case $removed in
+	*/bin/*) say "Open a new terminal, or run hash -r in this one, before running gestos here." ;;
+	esac
 }
 
 # A copy installed for this user from the source, by reinstall.sh, comes first: on PATH, for
