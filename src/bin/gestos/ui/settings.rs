@@ -1142,6 +1142,16 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     debug_btn.connect_clicked(move |_| crate::debug_info::open(&debug_parent));
     debug_box.append(&debug_btn);
     troubleshooting_list.add(&debug_row);
+    let (report_row, report_box, _) = settings_row(
+        "Report a Problem",
+        "Opens a new issue on GitHub, with the debugging information copied to paste in it",
+    );
+    let report_btn = gtk::Button::with_mnemonic("_Report…");
+    report_btn.set_valign(gtk::Align::Center);
+    let report_parent = dialog.clone();
+    report_btn.connect_clicked(move |_| crate::debug_info::report_problem(&report_parent));
+    report_box.append(&report_btn);
+    troubleshooting_list.add(&report_row);
 
     let about_btn = gtk::Button::with_label("About Gestos");
     about_btn.add_css_class("flat");
