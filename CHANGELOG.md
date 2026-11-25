@@ -12,6 +12,10 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The install script now also removes an older copy of Gestos installed from the source in `/usr/local`, which ran in place of the one it installed, and lists the files it removed.
 
+### Fixed
+
+- The category "Navigation" showed a broken icon when the icon theme didn't have its icon. Other categories whose icon could be missing in the same way now also show another one instead.
+
 ## [9.1.3] - 2026-11-21
 
 ### Changed

@@ -308,22 +308,28 @@ impl Category {
         }
     }
 
-    pub fn icon_name(self) -> &'static str {
+    /// Its icon's names, the first the icon theme has being shown. Those from Adwaita's legacy
+    /// icons, which some distributions package apart and other themes may lack, come with one
+    /// from the icon naming spec after them.
+    pub fn icon_names(self) -> &'static [&'static str] {
         match self {
-            Category::Windows => "focus-windows-symbolic",
-            Category::Navigation => "preferences-desktop-multitasking-symbolic",
-            Category::Screenshots => "camera-photo-symbolic",
-            Category::SoundAndMedia => "audio-volume-high-symbolic",
-            Category::Launchers => "system-run-symbolic",
-            Category::Apps => "view-app-grid-symbolic",
-            Category::KeyboardShortcuts => "input-keyboard-symbolic",
-            Category::System => "emblem-system-symbolic",
-            Category::Accessibility => "preferences-desktop-accessibility-symbolic",
-            Category::Typing => "preferences-desktop-locale-symbolic",
-            Category::Advanced => "utilities-terminal-symbolic",
-            Category::CustomShortcuts => "utilities-terminal-symbolic",
-            Category::Other => "view-more-symbolic",
+            Category::Windows => &["focus-windows-symbolic"],
+            Category::Navigation => &["preferences-desktop-multitasking-symbolic", "go-jump-symbolic"],
+            Category::Screenshots => &["camera-photo-symbolic"],
+            Category::SoundAndMedia => &["audio-volume-high-symbolic"],
+            Category::Launchers => &["system-run-symbolic"],
+            Category::Apps => &["view-app-grid-symbolic"],
+            Category::KeyboardShortcuts => &["input-keyboard-symbolic"],
+            Category::System => &["emblem-system-symbolic", "preferences-system-symbolic"],
+            Category::Accessibility => &["preferences-desktop-accessibility-symbolic", "preferences-system-symbolic"],
+            Category::Typing => &["preferences-desktop-locale-symbolic", "input-keyboard-symbolic"],
+            Category::Advanced | Category::CustomShortcuts => &["utilities-terminal-symbolic", "system-run-symbolic"],
+            Category::Other => &["view-more-symbolic"],
         }
+    }
+
+    pub fn icon(self) -> gtk4::Image {
+        gtk4::Image::from_gicon(&gtk4::gio::ThemedIcon::from_names(self.icon_names()))
     }
 }
 

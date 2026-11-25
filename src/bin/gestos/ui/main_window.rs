@@ -77,7 +77,7 @@ impl PageHeading {
         area.set_margin_top(12);
         area.set_margin_bottom(18);
         area.set_halign(gtk::Align::Center);
-        let icon = gtk::Image::from_icon_name(category.icon_name());
+        let icon = category.icon();
         icon.set_pixel_size(64);
         icon.add_css_class("dim-label");
         area.append(&icon);
@@ -710,7 +710,7 @@ fn category_row(category: Category, count: usize) -> gtk::ListBoxRow {
     row_box.set_margin_end(16);
     row_box.set_margin_top(12);
     row_box.set_margin_bottom(12);
-    row_box.append(&gtk::Image::from_icon_name(category.icon_name()));
+    row_box.append(&category.icon());
     let name = gtk::Label::new(Some(category.name()));
     name.set_xalign(0.0);
     name.set_hexpand(true);
