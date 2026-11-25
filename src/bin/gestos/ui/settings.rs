@@ -405,7 +405,7 @@ fn action_template_row(
             if response == gtk::ResponseType::Accept {
                 if let Some(to) = chooser.file().and_then(|file| file.path()) {
                     match std::fs::write(&to, &text) {
-                        Ok(()) => open_in_text_editor(&parent, &to),
+                        Ok(()) => open_in_text_editor(&parent, &to, "Action Exported"),
                         Err(e) => show_error_dialog(&parent, &format!("Couldn't export the action: {e}")),
                     }
                 }
@@ -473,9 +473,11 @@ fn action_template_row(
     row
 }
 
-/// Opens a file in the default text editor: the app set to open plain text, whatever the file's
-/// own type, as a .yaml file often has no app of its own. Without one, it's said where the file is.
-fn open_in_text_editor(parent: &gtk::Window, path: &std::path::Path) {
+/// Opens a file just exported in the default text editor: the app set to open plain text,
+/// whatever the file's own type, as a .yaml file often has no app of its own. Without one, as on a
+/// system with no text editor, it's said where the file was saved, which is no error, as the
+/// export worked: `saved` is the dialog's heading, like "Action Exported".
+fn open_in_text_editor(parent: &gtk::Window, path: &std::path::Path, saved: &str) {
     // Started with this, so that it comes to the front, on Wayland too.
     let context = WidgetExt::display(parent).app_launch_context();
     let opened = match gio::AppInfo::default_for_type("text/plain", false) {
@@ -483,7 +485,15 @@ fn open_in_text_editor(parent: &gtk::Window, path: &std::path::Path) {
         None => Err("No app is set to open text files".to_string()),
     };
     if let Err(why) = opened {
-        show_error_dialog(parent, &format!("Couldn't open {} in a text editor: {why}", path.display()));
+        eprintln!("gestos: Couldn't open {} in a text editor: {why}", path.display());
+        let dialog = adw::MessageDialog::new(Some(parent), Some(saved), Some(&path.display().to_string()));
+        dialog.add_response("close", "Close");
+        dialog.add_response("copy", "Copy Path");
+        dialog.set_default_response(Some("close"));
+        dialog.set_close_response("close");
+        let copied = path.display().to_string();
+        dialog.connect_response(Some("copy"), move |dialog, _| dialog.clipboard().set_text(&copied));
+        dialog.present();
     }
 }
 
@@ -688,7 +698,7 @@ fn program_row(
             if response == gtk::ResponseType::Accept {
                 if let Some(to) = chooser.file().and_then(|file| file.path()) {
                     match std::fs::write(&to, &text) {
-                        Ok(()) => open_in_text_editor(&parent, &to),
+                        Ok(()) => open_in_text_editor(&parent, &to, "App Exported"),
                         Err(e) => show_error_dialog(&parent, &format!("Couldn't export the app: {e}")),
                     }
                 }
@@ -976,7 +986,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
                             temp_cfg.save_to_file().map_err(|e| e.to_string())
                         };
                         match saved {
-                            Ok(()) => open_in_text_editor(&parent_err_clone, &path),
+                            Ok(()) => open_in_text_editor(&parent_err_clone, &path, "Configuration Exported"),
                             Err(e) => show_error_dialog(&parent_err_clone, &format!("Failed to export config: {}", e)),
                         }
                     }
