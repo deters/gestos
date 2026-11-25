@@ -8,6 +8,8 @@ use std::path::Path;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Process {
     pub pid: i32,
+    /// The process that started it, or 0 when it's unknown.
+    pub ppid: i32,
     /// The name it runs as, cut to 15 characters, as the kernel keeps it.
     pub name: String,
     /// Its command line, its program first.
@@ -38,15 +40,22 @@ pub fn running() -> Vec<Process> {
             let dir = entry.path();
             let uid = std::fs::metadata(&dir).ok()?.uid();
             let name = std::fs::read_to_string(dir.join("comm")).ok()?.trim_end().to_string();
+            let ppid = std::fs::read_to_string(dir.join("stat")).ok().as_deref().and_then(parent_in_stat).unwrap_or(0);
             let cmdline = std::fs::read(dir.join("cmdline")).unwrap_or_default();
             let args = cmdline
                 .split(|&b| b == 0)
                 .filter(|arg| !arg.is_empty())
                 .map(|arg| String::from_utf8_lossy(arg).into_owned())
                 .collect();
-            Some(Process { pid, name, args, uid })
+            Some(Process { pid, ppid, name, args, uid })
         })
         .collect()
+}
+
+/// The parent's ID in a process's `/proc/<pid>/stat`. Its fields follow the name, which is in
+/// parentheses and may itself hold spaces and parentheses, so they're counted from the last `)`.
+fn parent_in_stat(stat: &str) -> Option<i32> {
+    stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.parse().ok()
 }
 
 /// Whether a process runs as this name, for anyone.
@@ -67,6 +76,14 @@ mod tests {
         assert!(exe.file_name().unwrap().to_str().unwrap().starts_with(&found.name));
         assert!(is_running(&found.name));
         assert!(!is_running("gestos-no-such-program"));
+        assert_eq!(found.ppid as u32, std::os::unix::process::parent_id());
+    }
+
+    #[test]
+    fn the_parent_is_read_after_the_name_whatever_it_holds() {
+        assert_eq!(parent_in_stat("9693 (gestosd) S 1 9693 9693 0 -1"), Some(1));
+        assert_eq!(parent_in_stat("42 (a) b (c) R 7 42 42 0 -1"), Some(7));
+        assert_eq!(parent_in_stat("42 (gestosd"), None);
     }
 
     // Checked against pgrep itself, the one place it's run.

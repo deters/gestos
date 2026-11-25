@@ -8,6 +8,10 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- "Debugging Information" in Settings now lists the Gestos processes that are running, each with the process that started it and its command line. When Gestos runs one process per mouse, this shows which mouse each one reads.
+
 ### Changed
 
 - The install script now also removes an older copy of Gestos installed from the source in `/usr/local`, which ran in place of the one it installed, and lists the files it removed.

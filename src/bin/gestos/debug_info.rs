@@ -40,6 +40,17 @@ pub fn report() -> String {
         yes_no(crate::system::get_autostart_file_path().is_some_and(|path| path.exists())),
     );
 
+    // gestosd runs a listener for each mouse when there are several, started by the one that
+    // manages them, so which is which is seen by their parents and devices.
+    section(&mut out, "Processes");
+    let processes = gestos_processes();
+    if processes.is_empty() {
+        line(&mut out, "Running", "none");
+    }
+    for process in &processes {
+        line(&mut out, &process.name, &describe_process(process));
+    }
+
     section(&mut out, "System");
     line(&mut out, "Distribution", &os_name());
     line(&mut out, "Kernel", read_trimmed("/proc/sys/kernel/osrelease").as_str());
@@ -249,6 +260,31 @@ fn device_access(path: &str) -> String {
         }
         Err(e) => e.to_string(),
     }
+}
+
+/// Gestos's own processes, for every user, as the input service has a user of its own: the app,
+/// the daemon and its listeners, and the input service. Oldest first.
+fn gestos_processes() -> Vec<gestos::processes::Process> {
+    let mut found: Vec<_> = gestos::processes::running()
+        .into_iter()
+        .filter(|process| matches!(process.name.as_str(), "gestos" | "gestosd" | "gestos-input"))
+        .collect();
+    found.sort_by_key(|process| process.pid);
+    found
+}
+
+/// Its ID, its parent's, the user it runs as unless it's this one, and its command line.
+fn describe_process(process: &gestos::processes::Process) -> String {
+    let user = if process.is_own() {
+        String::new()
+    } else {
+        let name = nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(process.uid))
+            .ok()
+            .flatten()
+            .map_or_else(|| process.uid.to_string(), |user| user.name);
+        format!(", user {name}")
+    };
+    format!("pid {}, parent {}{user}: {}", process.pid, process.ppid, process.args.join(" "))
 }
 
 /// The input devices the kernel lists as mice.
