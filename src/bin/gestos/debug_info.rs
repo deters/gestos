@@ -6,7 +6,6 @@ use crate::extension;
 use adw::prelude::*;
 use gestos::config::{ActionType, Configuration};
 use gestos::key_steps::KeyStep;
-use gtk4::gio;
 use gtk4::glib;
 use std::fmt::Write;
 use std::path::Path;
@@ -378,98 +377,18 @@ fn log(out: &mut String, matches: &[&str], lines: usize, filter: Option<&str>) {
 }
 
 /// Where problems are reported: a new issue in Gestos's repository.
-const NEW_ISSUE: &str = "https://github.com/deters/gestos/issues/new";
+pub const NEW_ISSUE: &str = "https://github.com/deters/gestos/issues/new";
 
-/// What a new issue starts with. The report is too long for a link, so it's copied for the user to
-/// paste in it, once they've read it.
-const ISSUE_TEMPLATE: &str = "**What happened**\n\n\n**What you expected**\n\n\n**Debugging information**\n\n<details>\n\n```\nPaste the report here. Gestos copied it for you.\n```\n\n</details>\n";
+/// What a new issue starts with, which says where the report copied in Settings goes, as it's too
+/// long for the link.
+const ISSUE_TEMPLATE: &str = "**What happened**\n\n\n**What you expected**\n\n\n**Debugging information**\n\n<details>\n\n```\nPaste the debugging information here: \"Copy\" in Gestos's Settings copies it.\n```\n\n</details>\n";
 
 /// The link that opens a new issue with the template filled in.
-fn new_issue_link() -> String {
+pub fn new_issue_link() -> String {
     format!("{NEW_ISSUE}?body={}", glib::Uri::escape_string(ISSUE_TEMPLATE, None, false))
 }
 
-/// Saves the report where it's kept, and says where.
-fn save(text: &str) -> std::io::Result<std::path::PathBuf> {
-    let path = glib::user_cache_dir().join("gestos").join("gestos-debug.txt");
-    path.parent().map_or(Ok(()), std::fs::create_dir_all)?;
-    std::fs::write(&path, text)?;
-    Ok(path)
-}
-
-/// Reports a problem: the report is saved and copied, and a new issue opens in the browser, for the
-/// user to paste it in, say what happened, and submit it, as nothing is sent without them seeing
-/// it. Without a browser, the link is shown to copy.
-pub fn report_problem(parent: &impl IsA<gtk4::Window>) {
-    let parent: &gtk4::Window = parent.upcast_ref();
-    let text = report();
-    let saved = save(&text);
-    if let Err(e) = &saved {
-        eprintln!("gestos: Couldn't save the debugging information: {e}");
-    }
-    parent.clipboard().set_text(&text);
-    let link = new_issue_link();
-    let context = WidgetExt::display(parent).app_launch_context();
-    let opened = gio::AppInfo::launch_default_for_uri(&link, Some(&context)).is_ok();
-
-    let mut body = if opened {
-        "Paste it in the issue that opened in your browser, and say what happened.".to_string()
-    } else {
-        // The short link, which can be read and typed. "Copy Link" copies the one with the template.
-        format!("Open {NEW_ISSUE} in a browser, paste the report in the new issue, and say what happened.")
-    };
-    body.push_str(" Read it before you submit it: it lists your apps, your gestures and some of your files.");
-    if let Ok(path) = &saved {
-        body.push_str(&format!("\n\nIt's also saved in {}.", path.display()));
-    }
-    let dialog = adw::MessageDialog::new(Some(parent), Some("Report Copied"), Some(&body));
-    dialog.add_response("close", "Close");
-    if !opened {
-        dialog.add_response("link", "Copy Link");
-        dialog.connect_response(Some("link"), move |dialog, _| dialog.clipboard().set_text(&link));
-    }
-    dialog.add_response("copy", "Copy Report");
-    dialog.set_default_response(Some("close"));
-    dialog.set_close_response("close");
-    dialog.connect_response(Some("copy"), move |dialog, _| dialog.clipboard().set_text(&text));
-    dialog.present();
-}
-
-/// Writes the report to a file and opens it in the user's text editor, to read or attach.
-pub fn open(parent: &impl IsA<gtk4::Window>) {
-    let text = report();
-    let written = save(&text);
-    if let Err(e) = written.as_ref() {
-        crate::ui::components::show_error_dialog(
-            parent,
-            &format!("Could not save the debugging information: {e}"),
-        );
-        return;
-    }
-    let Ok(path) = written else { return };
-    let opened = gio::AppInfo::launch_default_for_uri(
-        &gio::File::for_path(&path).uri(),
-        gio::AppLaunchContext::NONE,
-    );
-    // With no app for text files, as on a bare system, say where it is and let it be copied.
-    if opened.is_err() {
-        show_saved(parent, &path, text);
-    }
-}
-
-fn show_saved(parent: &impl IsA<gtk4::Window>, path: &Path, text: String) {
-    let dialog = adw::MessageDialog::new(
-        Some(parent),
-        Some("Report Saved"),
-        Some(&path.display().to_string()),
-    );
-    dialog.add_response("close", "Close");
-    dialog.add_response("copy", "Copy Report");
-    dialog.set_response_appearance("copy", adw::ResponseAppearance::Suggested);
-    dialog.set_default_response(Some("copy"));
-    dialog.set_close_response("close");
-    dialog.connect_response(Some("copy"), move |dialog, _| {
-        dialog.clipboard().set_text(&text);
-    });
-    dialog.present();
+/// Copies the report, to paste in a new issue.
+pub fn copy(widget: &impl IsA<gtk4::Widget>) {
+    widget.clipboard().set_text(&report());
 }

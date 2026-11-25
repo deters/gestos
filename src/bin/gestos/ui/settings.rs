@@ -1136,20 +1136,36 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     let troubleshooting_list = append_section(&page, "Troubleshooting");
     let (debug_row, debug_box, _) =
         settings_row("Debugging Information", "Details about your setup for a bug report");
-    let debug_btn = gtk::Button::with_mnemonic("_Create Report");
-    debug_btn.set_valign(gtk::Align::Center);
-    let debug_parent = dialog.clone();
-    debug_btn.connect_clicked(move |_| crate::debug_info::open(&debug_parent));
-    debug_box.append(&debug_btn);
+    let copy_btn = gtk::Button::with_mnemonic("_Copy");
+    copy_btn.set_valign(gtk::Align::Center);
+    copy_btn.connect_clicked(|button| {
+        crate::debug_info::copy(button);
+        // Said on the button for a moment, as copying shows nothing else.
+        button.set_label("Copied");
+        let button = button.downgrade();
+        glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
+            if let Some(button) = button.upgrade() {
+                button.set_label("_Copy");
+            }
+        });
+    });
+    debug_box.append(&copy_btn);
     troubleshooting_list.add(&debug_row);
-    let (report_row, report_box, _) = settings_row(
-        "Report a Problem",
-        "Opens a new issue on GitHub, with the debugging information copied to paste in it",
-    );
-    let report_btn = gtk::Button::with_mnemonic("_Report…");
+    let (report_row, report_box, _) =
+        settings_row("Report a Problem", "Open a new issue on GitHub, and paste the debugging information in it");
+    let report_btn = gtk::Button::with_mnemonic("_Open GitHub");
     report_btn.set_valign(gtk::Align::Center);
     let report_parent = dialog.clone();
-    report_btn.connect_clicked(move |_| crate::debug_info::report_problem(&report_parent));
+    report_btn.connect_clicked(move |_| {
+        let context = WidgetExt::display(&report_parent).app_launch_context();
+        let link = crate::debug_info::new_issue_link();
+        if let Err(e) = gio::AppInfo::launch_default_for_uri(&link, Some(&context)) {
+            show_error_dialog(
+                &report_parent,
+                &format!("Couldn't open your browser: {e}. To report a problem, open {} in a browser.", crate::debug_info::NEW_ISSUE),
+            );
+        }
+    });
     report_box.append(&report_btn);
     troubleshooting_list.add(&report_row);
 

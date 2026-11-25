@@ -10,13 +10,14 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New option "Report a Problem" in Settings, under "Troubleshooting". It copies the debugging information and opens a new issue for Gestos on GitHub in your browser, where you paste it, say what happened, and submit it. Nothing is sent before you do.
+- New option "Report a Problem" in Settings, under "Troubleshooting". Its button "Open GitHub" opens a new issue for Gestos in your browser, where you can paste the debugging information.
 - "Debugging Information" in Settings now lists the Gestos processes that are running, each with the process that started it and its command line. When Gestos runs one process per mouse, this shows which mouse each one reads.
 - New page "Apps" in Preferences, for apps that Gestos recognizes by their windows, such as games, which aren't in the list of installed apps. Gestos comes with "Steam Games" and "Windows Programs", turned off. One you turn on is listed in Apps with your other apps, where you can pause gestures in it or make gestures that only work in it. These apps can be exported to a file and imported, like actions. On GNOME, "Steam Games" only recognizes the Windows games that Steam runs with Proton. (GNOME, KDE, Sway, Hyprland, X11)
 - New option "Pause Gestures" at the end of each app's page in Apps. Gestures are then paused automatically whenever that app is in use. On X11, the app gets the mouse button you draw with, as it would without Gestos. On other desktops, gestures drawn in the app don't run, but drawing still takes the button. Apps where gestures are paused are marked "Paused" in Apps, and their page has "Resume" at the top. (GNOME, KDE, Sway, Hyprland, X11)
 
 ### Changed
 
+- "Debugging Information" in Settings now copies the report with the button "Copy", to paste in an issue. Before, "Create Report" saved it to a file and opened it in a text editor.
 - The install script now also removes an older copy of Gestos installed from the source in `/usr/local`, which ran in place of the one it installed, and lists the files it removed.
 
 ### Fixed
