@@ -220,8 +220,10 @@ pub struct AppPage {
     /// the page.
     paused_notice: gtk::ListBox,
     pause_switch: (gtk::ListBox, gtk::Switch),
-    /// Everything after the notice: the gestures, what can be made, and the switch. While
-    /// gestures are paused in the app, it's hidden, so the page has only the way to resume them.
+    /// What's hidden while gestures are paused in the app, so that the page has only the way to
+    /// resume them and the gestures that open it, which run from any app: the gestures only for
+    /// it, and after opening it, what can be made only for it, and the switch.
+    inside: gtk::Box,
     body: gtk::Box,
 }
 
@@ -296,6 +298,7 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
     *page.shown.borrow_mut() = (ids(only_here), ids(everywhere));
     let paused = state.config.gestures_paused.contains(&page.app);
     page.paused_notice.set_visible(paused);
+    page.inside.set_visible(!paused);
     page.body.set_visible(!paused);
     let (_, switch) = &page.pause_switch;
     if !paused && switch.is_active() {
@@ -352,6 +355,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
         shown: Default::default(),
         paused_notice: list(),
         pause_switch: (list(), gtk::Switch::new()),
+        inside: gtk::Box::new(gtk::Orientation::Vertical, 0),
         body: gtk::Box::new(gtk::Orientation::Vertical, 0),
     };
 
@@ -371,9 +375,8 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
         }
     });
     page.paused_notice.append(&titled_row(&format!("Gestures are automatically paused in {name}"), &what_it_does, &resume));
-    page.paused_notice.set_margin_bottom(0);
+    page.paused_notice.set_margin_bottom(18);
     content.append(&page.paused_notice);
-    content.append(&page.body);
 
     // Those for every app first, then those only for this one.
     for (index, (heading, list)) in [(1, &page.everywhere), (0, &page.only_here)] {
@@ -391,8 +394,12 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
                 open_gesture_editor(&state_rc, gesture);
             }
         });
-        page.body.append(heading);
-        page.body.append(list);
+        let shown_in = if index == 0 { &page.inside } else { &content };
+        shown_in.append(heading);
+        shown_in.append(list);
+        if index == 1 {
+            content.append(&page.inside);
+        }
     }
 
     // What can be made for the app, after the gestures it already has, set well apart from them:
@@ -401,7 +408,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
     if let Some(open) = open {
         let (create, opens) = page.opens.clone();
         create.set_margin_top(24);
-        page.body.append(&create);
+        content.append(&create);
         opens.append(&suggestion_row(&open, &state_rc.borrow().extension_status, ""));
         let state_open = Rc::downgrade(state_rc);
         opens.connect_row_activated(move |_, _| {
@@ -409,8 +416,9 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
                 open_gesture_editor_for_action(&state_rc, open.clone());
             }
         });
-        page.body.append(&opens);
+        content.append(&opens);
     }
+    content.append(&page.body);
     let inside = heading(&format!("Create a New Gesture Inside {name}"));
     inside.set_margin_top(if opens_shown { 12 } else { 24 });
     page.body.append(&inside);
