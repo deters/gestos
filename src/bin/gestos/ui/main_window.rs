@@ -216,9 +216,13 @@ pub struct AppPage {
     /// The gestures each list shows, by row, for when one is activated.
     shown: Rc<RefCell<(Vec<String>, Vec<String>)>>,
     /// While gestures are paused in the app, an exception, a notice at the top says so, with a way
-    /// to resume them. Otherwise the switch that pauses them is last on the page.
+    /// to resume them, and nothing else is shown. Otherwise the switch that pauses them is last on
+    /// the page.
     paused_notice: gtk::ListBox,
     pause_switch: (gtk::ListBox, gtk::Switch),
+    /// Everything after the notice: the gestures, what can be made, and the switch. While
+    /// gestures are paused in the app, it's hidden, so the page has only the way to resume them.
+    body: gtk::Box,
 }
 
 /// How many gestures are made for an app.
@@ -292,8 +296,8 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
     *page.shown.borrow_mut() = (ids(only_here), ids(everywhere));
     let paused = state.config.gestures_paused.contains(&page.app);
     page.paused_notice.set_visible(paused);
-    let (switch_list, switch) = &page.pause_switch;
-    switch_list.set_visible(!paused);
+    page.body.set_visible(!paused);
+    let (_, switch) = &page.pause_switch;
     if !paused && switch.is_active() {
         switch.set_active(false);
     }
@@ -348,6 +352,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
         shown: Default::default(),
         paused_notice: list(),
         pause_switch: (list(), gtk::Switch::new()),
+        body: gtk::Box::new(gtk::Orientation::Vertical, 0),
     };
 
     // Where the desktop says when the app in use changes, the button is left to the app before
@@ -368,6 +373,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
     page.paused_notice.append(&titled_row(&format!("Gestures are automatically paused in {name}"), &what_it_does, &resume));
     page.paused_notice.set_margin_bottom(0);
     content.append(&page.paused_notice);
+    content.append(&page.body);
 
     // Those for every app first, then those only for this one.
     for (index, (heading, list)) in [(1, &page.everywhere), (0, &page.only_here)] {
@@ -385,8 +391,8 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
                 open_gesture_editor(&state_rc, gesture);
             }
         });
-        content.append(heading);
-        content.append(list);
+        page.body.append(heading);
+        page.body.append(list);
     }
 
     // What can be made for the app, after the gestures it already has, set well apart from them:
@@ -395,7 +401,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
     if let Some(open) = open {
         let (create, opens) = page.opens.clone();
         create.set_margin_top(24);
-        content.append(&create);
+        page.body.append(&create);
         opens.append(&suggestion_row(&open, &state_rc.borrow().extension_status, ""));
         let state_open = Rc::downgrade(state_rc);
         opens.connect_row_activated(move |_, _| {
@@ -403,11 +409,11 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
                 open_gesture_editor_for_action(&state_rc, open.clone());
             }
         });
-        content.append(&opens);
+        page.body.append(&opens);
     }
     let inside = heading(&format!("Create a New Gesture Inside {name}"));
     inside.set_margin_top(if opens_shown { 12 } else { 24 });
-    content.append(&inside);
+    page.body.append(&inside);
 
     // First, the action templates for this app, by its ID or its kind, like a file manager's, as
     // they do more than one of its shortcuts.
@@ -435,7 +441,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
             };
             crate::ui::editor::open_gesture_editor_in_apps(&state_rc, option.clone(), &[app_template.clone()]);
         });
-        content.append(&rows);
+        page.body.append(&rows);
     }
 
     let mut sections: Vec<(&str, Vec<&gestos::app_shortcuts::AppShortcut>)> = Vec::new();
@@ -457,7 +463,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
             label
         });
         if let Some(label) = &label {
-            content.append(label);
+            page.body.append(label);
         }
         let rows = list();
         let mut shown_rows = Vec::new();
@@ -475,7 +481,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
                 crate::ui::editor::open_gesture_editor_for_app_shortcut(&state_rc, &app, keys);
             }
         });
-        content.append(&rows);
+        page.body.append(&rows);
     }
 
     // Last, after the shortcuts the app lists, for one it doesn't, and for an advanced action.
@@ -513,7 +519,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
             };
             crate::ui::editor::open_gesture_editor_in_apps(&state_rc, option.clone(), &[app_own.clone()]);
         });
-        content.append(&own);
+        page.body.append(&own);
     }
 
     // Last, as pausing gestures in an app is an exception, for apps that use the button
@@ -534,7 +540,7 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
         "For apps that use the mouse button you draw with themselves, such as games",
         &switch,
     ));
-    content.append(&switch_list);
+    page.body.append(&switch_list);
 
     state_rc.borrow_mut().app_page = Some(page);
     refresh_app_page(state_rc, None);
