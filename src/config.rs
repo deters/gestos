@@ -584,6 +584,12 @@ pub struct YamlConfig {
     /// The user's own action templates, imported, by ID, each as its file's text.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub action_templates: std::collections::BTreeMap<String, String>,
+    /// The IDs of the programs turned on, which show with the apps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub programs_on: Vec<String>,
+    /// The user's own programs, imported, by ID, each as its text.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub own_programs: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -651,6 +657,20 @@ pub struct Configuration {
     /// The user's own action templates, imported, by ID, each as its file's text. They take the
     /// place of those that come with Gestos with the same ID.
     pub action_templates: std::collections::BTreeMap<String, String>,
+    /// The IDs of the programs turned on, which show with the apps, and that windows are told
+    /// apart by. Those that come with Gestos are off until they're here.
+    pub programs_on: Vec<String>,
+    /// The user's own programs, imported, by ID, each as its text. They take the place of those
+    /// that come with Gestos with the same ID.
+    pub own_programs: std::collections::BTreeMap<String, String>,
+}
+
+impl Configuration {
+    /// Makes its action templates and programs the ones windows and gestures are looked up in.
+    fn share_own(&self) {
+        crate::action_templates::set_own(&self.action_templates);
+        crate::programs::set_from_config(&self.own_programs, &self.programs_on);
+    }
 }
 
 pub fn parse_points(expr: &str) -> Vec<Point2D> {
@@ -985,7 +1005,7 @@ impl Configuration {
         }
         let config = Self::load_from_file(path)
             .ok_or_else(|| format!("Failed to load config from: {}", path.display()))?;
-        crate::action_templates::set_own(&config.action_templates);
+        config.share_own();
         Ok(config)
     }
 
@@ -1001,6 +1021,8 @@ impl Configuration {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
 
         if user_path.exists() {
@@ -1008,7 +1030,7 @@ impl Configuration {
                 config.parse_and_merge(&content, true);
             }
         }
-        crate::action_templates::set_own(&config.action_templates);
+        config.share_own();
         config
     }
 
@@ -1024,6 +1046,8 @@ impl Configuration {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         config.parse_and_merge(&content, true).then_some(config)
     }
@@ -1044,6 +1068,8 @@ impl Configuration {
         self.hide_gestures = parsed.hide_gestures;
         self.disabled_templates = parsed.disabled_templates;
         self.action_templates = parsed.action_templates;
+        self.programs_on = parsed.programs_on;
+        self.own_programs = parsed.own_programs;
 
         if let Some(global) = parsed.global {
             for (key, val) in global {
@@ -1183,6 +1209,8 @@ impl Configuration {
             hide_gestures: self.hide_gestures,
             disabled_templates: self.disabled_templates.clone(),
             action_templates: self.action_templates.clone(),
+            programs_on: self.programs_on.clone(),
+            own_programs: self.own_programs.clone(),
         };
         Ok(format!("{}\n\n{}", file_header(), serde_yaml::to_string(&yaml)?))
     }
@@ -1210,7 +1238,7 @@ impl Configuration {
         if result.is_err() {
             let _ = fs::remove_file(&temp_path);
         } else {
-            crate::action_templates::set_own(&self.action_templates);
+            self.share_own();
         }
         result
     }
@@ -1468,6 +1496,23 @@ mod tests {
     }
 
     #[test]
+    fn the_programs_turned_on_and_the_users_own_are_kept() {
+        let program = "gestos-app: 1\nid: my-game\nname: My Game\nwindows:\n  classes: [MyGame]\n";
+        let file = TempConfig::new("programs", "");
+        let mut config = Configuration::load_from_file(&file.0).unwrap();
+        assert!(!config.to_yaml().unwrap().contains("programs"));
+        config.own_programs.insert("my-game".into(), program.into());
+        config.programs_on = vec!["steam-games".into(), "my-game".into()];
+        let written = config.to_yaml().unwrap();
+        let read = TempConfig::new("programs-read", &written);
+        let config = Configuration::load_from_file(&read.0).unwrap();
+        assert_eq!(config.own_programs.get("my-game").map(String::as_str), Some(program));
+        assert_eq!(config.programs_on, ["steam-games", "my-game"]);
+        // A program runs nothing, so importing a configuration has no more commands to show.
+        assert!(config.commands().is_empty());
+    }
+
+    #[test]
     fn load_rejects_a_missing_file() {
         assert!(Configuration::load_from_file("/nonexistent/gestos.yaml").is_none());
     }
@@ -1593,6 +1638,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         assert_eq!(config.commands(), ["backup.sh", "upload.sh \"$@\""]);
     }
@@ -1613,6 +1660,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         let name = |app: &str| app.rsplit('.').next().unwrap().to_string();
         assert!(config.split_gestures_for_several_apps(name));
@@ -1637,6 +1686,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         config.save_to_file().unwrap();
         Configuration::load_from_file(&file.0).expect("saved config must be valid YAML")
@@ -1736,6 +1787,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         config.save_to_file().unwrap();
 
@@ -1849,6 +1902,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         config.save_to_file().unwrap();
         assert_eq!(fs::metadata(&file.0).unwrap().permissions().mode() & 0o777, 0o644);
@@ -1868,6 +1923,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         config.save_to_file().unwrap();
         assert!(!fs::read_to_string(&file.0).unwrap().contains("overview_click"));
@@ -1896,6 +1953,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         config.save_to_file().unwrap();
         assert!(!fs::read_to_string(&file.0).unwrap().contains("middle_button_windows"));
@@ -1920,6 +1979,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         config.save_to_file().unwrap();
 
@@ -1987,6 +2048,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         config.save_to_file().unwrap();
         assert_eq!(Configuration::load_from_file(&file.0).unwrap().button, Some(2));

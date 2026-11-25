@@ -11,6 +11,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - "Debugging Information" in Settings now lists the Gestos processes that are running, each with the process that started it and its command line. When Gestos runs one process per mouse, this shows which mouse each one reads.
+- New page "Apps" in Preferences, for apps that Gestos recognizes by their windows, such as games, which aren't in the list of installed apps. Gestos comes with "Steam Games" and "Windows Programs", turned off. One you turn on is listed in Apps with your other apps, where you can make gestures that only work in it. These apps can be exported to a file and imported, like actions. On GNOME, "Steam Games" only recognizes the Windows games that Steam runs with Proton. (GNOME, KDE, Sway, Hyprland, X11)
 
 ### Changed
 

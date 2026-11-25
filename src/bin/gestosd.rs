@@ -637,7 +637,8 @@ fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> (Option<
 /// is.
 fn ask_focused_app(wayland_ctx: &WaylandContext) -> Option<Option<String>> {
     if wayland_ctx.is_gnome {
-        gestos::wayland::focused_app_in_gnome_extension().ok()
+        // A window no installed app has is named by its class, which may be a program's.
+        gestos::wayland::focused_app_in_gnome_extension().ok().map(|app| app.map(gestos::active_app::gnome_app))
     } else if wayland_ctx.is_kde {
         gestos::active_app::kde_active_app()
     } else if wayland_ctx.is_sway || wayland_ctx.is_hypr {
@@ -2034,6 +2035,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         let (signals, received) = std::sync::mpsc::sync_channel(16);
         let (mut wake_reader, _wake_writer) = UnixStream::pair().unwrap();
@@ -2134,6 +2137,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         let names = |modifiers: &str| -> Vec<String> {
             gesture_templates(&config, Modifiers::parse(modifiers), None)
@@ -2161,6 +2166,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         let names = |app: Option<&str>| -> Vec<String> {
             gesture_templates(&config, Modifiers::default(), app)
@@ -2195,6 +2202,8 @@ mod tests {
             hide_gestures: false,
             disabled_templates: Vec::new(),
             action_templates: Default::default(),
+            programs_on: Vec::new(),
+            own_programs: Default::default(),
         };
         assert!(matches_app_gesture(&line(10.0), &config, Modifiers::default()));
         assert!(!matches_app_gesture(&line(0.0), &config, Modifiers::default()));

@@ -58,6 +58,22 @@ fn parent_in_stat(stat: &str) -> Option<i32> {
     stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.parse().ok()
 }
 
+/// Whether a process has an environment variable set, to anything but `0`, as programs started
+/// for something set one to say which, and some set it to `0` for none. Only this user's
+/// processes can be read.
+pub fn has_variable(pid: i32, name: &str) -> bool {
+    std::fs::read(format!("/proc/{pid}/environ")).is_ok_and(|environ| environ_has(&environ, name))
+}
+
+fn environ_has(environ: &[u8], name: &str) -> bool {
+    environ.split(|&b| b == 0).any(|entry| {
+        entry
+            .strip_prefix(name.as_bytes())
+            .and_then(|rest| rest.strip_prefix(b"="))
+            .is_some_and(|value| !value.is_empty() && value != b"0")
+    })
+}
+
 /// Whether a process runs as this name, for anyone.
 pub fn is_running(name: &str) -> bool {
     running().iter().any(|process| process.name == name)
@@ -77,6 +93,18 @@ mod tests {
         assert!(is_running(&found.name));
         assert!(!is_running("gestos-no-such-program"));
         assert_eq!(found.ppid as u32, std::os::unix::process::parent_id());
+    }
+
+    #[test]
+    fn a_variable_counts_once_it_is_set_to_something_but_0() {
+        let environ = b"HOME=/home/a\0SteamAppId=1091500\0WINEPREFIX=\0GAME=0\0";
+        assert!(environ_has(environ, "SteamAppId"));
+        assert!(!environ_has(environ, "Steam"));
+        assert!(!environ_has(environ, "WINEPREFIX"));
+        assert!(!environ_has(environ, "GAME"));
+        assert!(!environ_has(environ, "USER"));
+        assert!(has_variable(std::process::id() as i32, "PATH"));
+        assert!(!has_variable(std::process::id() as i32, "GESTOS_NO_SUCH_VARIABLE"));
     }
 
     #[test]

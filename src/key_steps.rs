@@ -273,6 +273,9 @@ fn distinct_names(mut apps: Vec<(String, String)>) -> Vec<(String, String)> {
 /// An app's name, as installed_apps has it, or its ID if it isn't installed.
 pub fn app_name(id: &str) -> String {
     use gio::prelude::AppInfoExt;
+    if let Some(program) = crate::programs::find(id) {
+        return program.name;
+    }
     installed_apps()
         .into_iter()
         .find(|(_, app)| app == id)

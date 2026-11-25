@@ -103,7 +103,13 @@ pub struct CategoryPage {
     actions: gtk::ListBox,
     /// What the lists show, by row, for when one is activated.
     shown: Rc<RefCell<(Vec<String>, Vec<crate::state::EditorActionOption>, Vec<Suggestion>)>>,
+    /// On the Apps page, the apps the lists show instead, by row, with what opens each, which an
+    /// app Gestos tells by its windows doesn't have.
+    shown_apps: Rc<RefCell<(Vec<ListedApp>, Vec<ListedApp>)>>,
 }
+
+/// An app as the Apps page lists it: as gestures name it, and the action that opens it, if any.
+type ListedApp = (String, Option<crate::state::EditorActionOption>);
 
 /// The window the editor and other dialogs open over: the main window, whichever page it shows.
 pub fn dialog_parent(state: &AppState) -> gtk::Window {
@@ -283,8 +289,9 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
 }
 
 /// Opens an app's own page in place of its category's: opening the app first, then each of the
-/// shortcuts its Keyboard Shortcuts window lists, under their groups, if it has that window.
-fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorActionOption, app: &str) {
+/// shortcuts its Keyboard Shortcuts window lists, under their groups, if it has that window. A
+/// program has nothing that opens it.
+fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::EditorActionOption>, app: &str) {
     // One app's at a time, in place of its category's, never of another app's.
     state_rc.borrow_mut().app_page = None;
     let shortcuts = gestos::app_shortcuts::shortcuts_of(app);
@@ -351,19 +358,22 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorAct
 
     // What can be made for the app, after the gestures it already has, set well apart from them:
     // opening it, a gesture for every app, then the gestures only for it.
-    let (create, opens) = page.opens.clone();
-    create.set_margin_top(24);
-    content.append(&create);
-    opens.append(&suggestion_row(&open, &state_rc.borrow().extension_status, ""));
-    let state_open = Rc::downgrade(state_rc);
-    opens.connect_row_activated(move |_, _| {
-        if let Some(state_rc) = state_open.upgrade() {
-            open_gesture_editor_for_action(&state_rc, open.clone());
-        }
-    });
-    content.append(&opens);
+    let opens_shown = open.is_some();
+    if let Some(open) = open {
+        let (create, opens) = page.opens.clone();
+        create.set_margin_top(24);
+        content.append(&create);
+        opens.append(&suggestion_row(&open, &state_rc.borrow().extension_status, ""));
+        let state_open = Rc::downgrade(state_rc);
+        opens.connect_row_activated(move |_, _| {
+            if let Some(state_rc) = state_open.upgrade() {
+                open_gesture_editor_for_action(&state_rc, open.clone());
+            }
+        });
+        content.append(&opens);
+    }
     let inside = heading(&format!("Create a New Gesture Inside {name}"));
-    inside.set_margin_top(12);
+    inside.set_margin_top(if opens_shown { 12 } else { 24 });
     content.append(&inside);
 
     // First, the action templates for this app, by its ID or its kind, like a file manager's, as
@@ -478,6 +488,16 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: crate::state::EditorAct
     show_page(state_rc, &scrolled.upcast());
 }
 
+/// The apps Gestos tells by their windows that the Apps page lists: those turned on, and those
+/// with gestures made for them, so that turning one off doesn't hide its gestures.
+fn apps_told_by_windows(state: &AppState) -> Vec<gestos::programs::Program> {
+    gestos::programs::list()
+        .into_iter()
+        .filter(|listed| listed.on || gestures_for_app(state, &listed.program.app_id()) > 0)
+        .map(|listed| listed.program)
+        .collect()
+}
+
 /// An app, which opens its own page, with how many gestures are made for it, if any.
 fn app_row(app: &str, count: usize) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
@@ -571,7 +591,22 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
         apart,
         actions,
         shown: Default::default(),
+        shown_apps: Default::default(),
     };
+    // On the Apps page, each row is an app, which opens its own page.
+    for (index, list) in [(0, &page.apart), (1, &page.actions)] {
+        let state_rc = Rc::downgrade(state_rc);
+        let shown_apps = Rc::clone(&page.shown_apps);
+        list.connect_row_activated(move |_, row| {
+            let shown_apps = shown_apps.borrow();
+            let apps = if index == 0 { &shown_apps.0 } else { &shown_apps.1 };
+            let app = apps.get(row.index() as usize).cloned();
+            drop(shown_apps);
+            if let (Some(state_rc), Some((app, open))) = (state_rc.upgrade(), app) {
+                open_app_page(&state_rc, open, &app);
+            }
+        });
+    }
     {
         let state_rc = Rc::downgrade(state_rc);
         let shown = Rc::clone(&page.shown);
@@ -593,7 +628,7 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
             let option = shown.borrow().1.get(row.index() as usize).cloned();
             if let (Some(state_rc), Some(option)) = (state_rc.upgrade(), option) {
                 match crate::ui::app_picker::opened_app(&option.action_type).map(str::to_string) {
-                    Some(app) => open_app_page(&state_rc, option, &app),
+                    Some(app) => open_app_page(&state_rc, Some(option), &app),
                     None => open_gesture_editor_for_action(&state_rc, option),
                 }
             }
@@ -610,7 +645,7 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
                 Some(Suggestion::Action(option)) => {
                     let app = crate::ui::app_picker::opened_app(&option.action_type).map(str::to_string);
                     match app {
-                        Some(app) => open_app_page(&state_rc, option, &app),
+                        Some(app) => open_app_page(&state_rc, Some(option), &app),
                         None => open_gesture_editor_for_action(&state_rc, option),
                     }
                 }
@@ -655,22 +690,37 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
     let found = find_suggestions(&state.action_options, &state.config.gestures, "");
     let gestures_in = gestures_by_category(&state.config.gestures, &state.action_options);
     let (mut apart, mut found) = arrange_suggestions(found, false, Some(category), &gestures_in);
-    // Every app, as each opens its own page, even one already opened by a gesture, by name.
-    // Those with gestures come first, apart from the rest.
+    // Every app, as each opens its own page, even one already opened by a gesture, by name, with
+    // those Gestos tells by their windows among them. Those with gestures come first, apart from
+    // the rest.
+    let mut shown_apps = (Vec::new(), Vec::new());
     if category == Category::Apps {
-        let mut apps: Vec<_> = state
+        // By the names they're shown with, rather than their actions', "Open …", read once.
+        let names: std::collections::HashMap<String, String> =
+            gestos::key_steps::installed_apps().into_iter().map(|(name, id)| (id, name)).collect();
+        let mut apps: Vec<(String, ListedApp)> = state
             .action_options
             .iter()
-            .filter(|option| crate::ui::app_picker::opened_app(&option.action_type).is_some())
-            .cloned()
+            .filter_map(|option| {
+                let app = crate::ui::app_picker::opened_app(&option.action_type)?.to_string();
+                let name = names.get(&app).cloned().unwrap_or_else(|| option.name.clone());
+                Some((name.to_lowercase(), (app, Some(option.clone()))))
+            })
+            .chain(apps_told_by_windows(&state).into_iter().map(|program| {
+                (program.name.to_lowercase(), (program.app_id(), None))
+            }))
             .collect();
-        apps.sort_by_cached_key(|option| option.name.to_lowercase());
-        let (with_gestures, without): (Vec<_>, Vec<_>) = apps.into_iter().partition(|option| {
-            crate::ui::app_picker::opened_app(&option.action_type)
-                .is_some_and(|app| gestures_for_app(&state, app) > 0)
-        });
-        apart = with_gestures;
-        found = without.into_iter().map(Suggestion::Action).collect();
+        apps.sort_by(|a, b| a.0.cmp(&b.0));
+        let (with_gestures, without): (Vec<_>, Vec<_>) =
+            apps.into_iter().map(|(_, app)| app).partition(|(app, _)| gestures_for_app(&state, app) > 0);
+        for (list, apps) in [(&page.apart, &with_gestures), (&page.actions, &without)] {
+            for (app, _) in apps {
+                list.append(&app_row(app, gestures_for_app(&state, app)));
+            }
+        }
+        shown_apps = (with_gestures, without);
+        apart = Vec::new();
+        found = Vec::new();
     }
     for option in &apart {
         let row = match crate::ui::app_picker::opened_app(&option.action_type) {
@@ -683,7 +733,7 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
         };
         page.apart.append(&row);
     }
-    page.apart.set_visible(!apart.is_empty());
+    page.apart.set_visible(!apart.is_empty() || !shown_apps.0.is_empty());
     for suggestion in &found {
         let row = match suggestion {
             Suggestion::Action(option) => match crate::ui::app_picker::opened_app(&option.action_type) {
@@ -694,12 +744,13 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
         };
         page.actions.append(&row);
     }
-    page.actions.set_visible(!found.is_empty());
+    page.actions.set_visible(!found.is_empty() || !shown_apps.1.is_empty());
     // The Apps page lists apps, which aren't gestures or actions, so it needs neither heading.
     let headed = category != Category::Apps;
     page.gestures_heading.set_visible(headed && page.gestures.get_visible());
     page.create_heading.set_visible(headed && !(apart.is_empty() && found.is_empty()));
     *page.shown.borrow_mut() = (gestures.into_iter().map(|g| g.id).collect(), apart, found);
+    *page.shown_apps.borrow_mut() = shown_apps;
 }
 
 /// A category, with how many gestures there are in it, if any, which opens its page.
@@ -980,10 +1031,14 @@ pub fn show_new_gesture(state_rc: &Rc<RefCell<AppState>>, name: &str) {
                 _ => g.actions.first().and_then(crate::ui::app_picker::first_app).map(str::to_string),
             })
             .and_then(|app| {
+                // A program has no action that opens it, and its page is shown all the same.
+                if gestos::programs::find(&app).is_some() {
+                    return Some((app, None));
+                }
                 let open = state.action_options.iter().find(|option| {
                     crate::ui::app_picker::opened_app(&option.action_type) == Some(app.as_str())
                 });
-                open.cloned().map(|open| (app, open))
+                open.cloned().map(|open| (app, Some(open)))
             });
         (category, app)
     };
@@ -1474,7 +1529,7 @@ pub fn build_ui(app: &gtk::Application) {
             match suggestion {
                 Some(Suggestion::Action(option)) => {
                     match crate::ui::app_picker::opened_app(&option.action_type).map(str::to_string) {
-                        Some(app) => open_app_page(&state_suggestion, option, &app),
+                        Some(app) => open_app_page(&state_suggestion, Some(option), &app),
                         None => open_gesture_editor_for_action(&state_suggestion, option),
                     }
                 }

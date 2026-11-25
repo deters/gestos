@@ -26,7 +26,7 @@ gtk4 = { version = "0.9", features = ["v4_6"] }
 # Only what libadwaita 1.2 offers, the version Debian 12 has.
 adw = { version = "0.7", package = "libadwaita", features = ["v1_2"] }
 gio = "0.20"
-x11rb = { version = "0.13", features = ["shape", "randr"] }
+x11rb = { version = "0.13", features = ["shape", "randr", "res"] }
 # What the panel saying what a gesture did is drawn with, where Gestos draws it itself.
 cairo-rs = "0.20"
 pangocairo = "0.20"
