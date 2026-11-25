@@ -215,6 +215,10 @@ pub struct AppPage {
     shortcut_groups: Rc<RefCell<Vec<(Option<gtk::Label>, gtk::ListBox, Vec<(gtk::ListBoxRow, String)>)>>>,
     /// The gestures each list shows, by row, for when one is activated.
     shown: Rc<RefCell<(Vec<String>, Vec<String>)>>,
+    /// While gestures are paused in the app, an exception, a notice at the top says so, with a way
+    /// to resume them. Otherwise the switch that pauses them is last on the page.
+    paused_notice: gtk::ListBox,
+    pause_switch: (gtk::ListBox, gtk::Switch),
 }
 
 /// How many gestures are made for an app.
@@ -286,6 +290,13 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
     }
     let ids = |gestures: Vec<Gesture>| gestures.into_iter().map(|g| g.id).collect();
     *page.shown.borrow_mut() = (ids(only_here), ids(everywhere));
+    let paused = state.config.gestures_paused.contains(&page.app);
+    page.paused_notice.set_visible(paused);
+    let (switch_list, switch) = &page.pause_switch;
+    switch_list.set_visible(!paused);
+    if !paused && switch.is_active() {
+        switch.set_active(false);
+    }
 }
 
 /// Opens an app's own page in place of its category's: opening the app first, then each of the
@@ -335,7 +346,29 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
         opens: (heading("Create New Gesture"), list()),
         shortcut_groups: Default::default(),
         shown: Default::default(),
+        paused_notice: list(),
+        pause_switch: (list(), gtk::Switch::new()),
     };
+
+    // Where the desktop says when the app in use changes, the button is left to the app before
+    // it's pressed. Elsewhere, only the gesture drawn isn't run.
+    let what_it_does = if gestos::active_app::is_x11_session() {
+        format!("{name} gets the mouse button you draw with, as it would without Gestos.")
+    } else {
+        "Gestures you draw in it don't run.".to_string()
+    };
+    let resume = gtk::Button::with_mnemonic("_Resume");
+    let state_resume = Rc::downgrade(state_rc);
+    let app_resume = app.to_string();
+    resume.connect_clicked(move |_| {
+        if let Some(state_rc) = state_resume.upgrade() {
+            set_gestures_paused(&state_rc, &app_resume, false);
+        }
+    });
+    page.paused_notice.append(&titled_row(&format!("Gestures are automatically paused in {name}"), &what_it_does, &resume));
+    page.paused_notice.set_margin_bottom(0);
+    content.append(&page.paused_notice);
+
     // Those for every app first, then those only for this one.
     for (index, (heading, list)) in [(1, &page.everywhere), (0, &page.only_here)] {
         let state_edit = Rc::downgrade(state_rc);
@@ -483,6 +516,26 @@ fn open_app_page(state_rc: &Rc<RefCell<AppState>>, open: Option<crate::state::Ed
         content.append(&own);
     }
 
+    // Last, as pausing gestures in an app is an exception, for apps that use the button
+    // themselves, like games.
+    let (switch_list, switch) = page.pause_switch.clone();
+    switch.update_property(&[gtk::accessible::Property::Label(&format!("Pause Gestures in {name}"))]);
+    let state_switch = Rc::downgrade(state_rc);
+    let app_switch = app.to_string();
+    switch.connect_state_set(move |_, on| {
+        if let Some(state_rc) = state_switch.upgrade() {
+            set_gestures_paused(&state_rc, &app_switch, on);
+        }
+        glib::Propagation::Proceed
+    });
+    switch_list.set_margin_top(12);
+    switch_list.append(&titled_row(
+        "Pause Gestures",
+        "For apps that use the mouse button you draw with themselves, such as games",
+        &switch,
+    ));
+    content.append(&switch_list);
+
     state_rc.borrow_mut().app_page = Some(page);
     refresh_app_page(state_rc, None);
     show_page(state_rc, &scrolled.upcast());
@@ -499,7 +552,7 @@ fn apps_told_by_windows(state: &AppState) -> Vec<gestos::programs::Program> {
 }
 
 /// An app, which opens its own page, with how many gestures are made for it, if any.
-fn app_row(app: &str, count: usize) -> gtk::ListBoxRow {
+fn app_row(app: &str, count: usize, paused: bool) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row_box.set_margin_start(16);
@@ -512,11 +565,68 @@ fn app_row(app: &str, count: usize) -> gtk::ListBoxRow {
     name.set_hexpand(true);
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
     row_box.append(&name);
-    let count_label = gtk::Label::new(Some(&count.to_string()));
+    // Where gestures are paused, that's what matters about it, rather than how many it has.
+    let count_label = gtk::Label::new(Some(&if paused { "Paused".to_string() } else { count.to_string() }));
     count_label.add_css_class("dim-label");
-    count_label.set_visible(count > 0);
+    count_label.set_visible(paused || count > 0);
     row_box.append(&count_label);
     row_box.append(&gtk::Image::from_icon_name("go-next-symbolic"));
+    row.set_child(Some(&row_box));
+    row
+}
+
+/// Pauses or resumes gestures in an app, and has the daemon and the pages follow. If it can't be
+/// saved, it's said why, and nothing changes.
+fn set_gestures_paused(state_rc: &Rc<RefCell<AppState>>, app: &str, paused: bool) {
+    // Busy only while a page is refreshed to show what's saved, which already is this.
+    let Ok(mut state) = state_rc.try_borrow_mut() else { return };
+    if state.config.gestures_paused.iter().any(|other| other == app) == paused {
+        return;
+    }
+    let before = state.config.gestures_paused.clone();
+    state.config.gestures_paused.retain(|other| other != app);
+    if paused {
+        state.config.gestures_paused.push(app.to_string());
+    }
+    let parent = dialog_parent(&state);
+    if let Err(e) = state.config.save_to_file() {
+        state.config.gestures_paused = before;
+        drop(state);
+        crate::ui::components::show_error_dialog(&parent, &format!("Couldn't save the change: {e}"));
+        refresh_gesture_list(state_rc, None);
+        return;
+    }
+    let conn = state.dbus_conn.clone();
+    drop(state);
+    crate::daemon::reload_daemon(conn.as_ref(), Some(&parent));
+    refresh_gesture_list(state_rc, None);
+}
+
+/// A row with a title and a smaller, dimmer line under it, and a widget at its end.
+fn titled_row(title: &str, subtitle: &str, suffix: &impl IsA<gtk::Widget>) -> gtk::ListBoxRow {
+    let row = gtk::ListBoxRow::new();
+    row.set_activatable(false);
+    let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row_box.set_margin_start(16);
+    row_box.set_margin_end(16);
+    row_box.set_margin_top(12);
+    row_box.set_margin_bottom(12);
+    let texts = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    texts.set_hexpand(true);
+    texts.set_valign(gtk::Align::Center);
+    let title = gtk::Label::new(Some(title));
+    title.set_xalign(0.0);
+    title.set_wrap(true);
+    texts.append(&title);
+    let subtitle = gtk::Label::new(Some(subtitle));
+    subtitle.set_xalign(0.0);
+    subtitle.set_wrap(true);
+    subtitle.add_css_class("dim-label");
+    subtitle.add_css_class("caption");
+    texts.append(&subtitle);
+    row_box.append(&texts);
+    suffix.set_valign(gtk::Align::Center);
+    row_box.append(suffix);
     row.set_child(Some(&row_box));
     row
 }
@@ -715,7 +825,7 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
             apps.into_iter().map(|(_, app)| app).partition(|(app, _)| gestures_for_app(&state, app) > 0);
         for (list, apps) in [(&page.apart, &with_gestures), (&page.actions, &without)] {
             for (app, _) in apps {
-                list.append(&app_row(app, gestures_for_app(&state, app)));
+                list.append(&app_row(app, gestures_for_app(&state, app), state.config.gestures_paused.contains(&app.to_string())));
             }
         }
         shown_apps = (with_gestures, without);
@@ -724,7 +834,7 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
     }
     for option in &apart {
         let row = match crate::ui::app_picker::opened_app(&option.action_type) {
-            Some(app) => app_row(app, gestures_for_app(&state, app)),
+            Some(app) => app_row(app, gestures_for_app(&state, app), state.config.gestures_paused.contains(&app.to_string())),
             None => {
                 let row = suggestion_row(option, &state.extension_status, "");
                 row.add_css_class("build-your-own");
@@ -737,7 +847,7 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
     for suggestion in &found {
         let row = match suggestion {
             Suggestion::Action(option) => match crate::ui::app_picker::opened_app(&option.action_type) {
-                Some(app) => app_row(app, gestures_for_app(&state, app)),
+                Some(app) => app_row(app, gestures_for_app(&state, app), state.config.gestures_paused.contains(&app.to_string())),
                 None => suggestion_row(option, &state.extension_status, ""),
             },
             Suggestion::Category(category, count) => category_row(*category, *count),
@@ -972,7 +1082,7 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
         let row = match suggestion {
             // An app is its page, which opening it is on.
             Suggestion::Action(option) => match crate::ui::app_picker::opened_app(&option.action_type) {
-                Some(app) => app_row(app, gestures_for_app(&state, app)),
+                Some(app) => app_row(app, gestures_for_app(&state, app), state.config.gestures_paused.contains(&app.to_string())),
                 None => suggestion_row(option, &state.extension_status, &query),
             },
             Suggestion::Category(category, count) => category_row(*category, *count),

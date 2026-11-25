@@ -46,6 +46,10 @@ pub enum Request {
     /// Whether dragging or scrolling with the middle button held is reported, as `Drag…`, instead
     /// of reaching the app under the pointer.
     SetWheelDrag(bool),
+    /// Whether Gestos stands aside, as the app in use is one where gestures are off: the button
+    /// that draws doesn't, and a grabbed mouse is let go of, so the app gets it as it would without
+    /// Gestos. It changes only once no mouse button is held.
+    SetPaused(bool),
     Key { code: u16, pressed: bool },
     QueryHeld,
 }
@@ -96,6 +100,7 @@ impl Request {
             Request::SetKeyboards(on) => format!("keyboards {}\n", flag(*on)),
             Request::SetChord(on) => format!("chord {}\n", flag(*on)),
             Request::SetWheelDrag(on) => format!("wheeldrag {}\n", flag(*on)),
+            Request::SetPaused(on) => format!("pause {}\n", flag(*on)),
             Request::Key { code, pressed } => format!("key {code} {}\n", flag(*pressed)),
             Request::QueryHeld => "held\n".to_string(),
         }
@@ -116,6 +121,7 @@ impl Request {
             "keyboards" => Some(Request::SetKeyboards(parse_flag(rest)?)),
             "chord" => Some(Request::SetChord(parse_flag(rest)?)),
             "wheeldrag" => Some(Request::SetWheelDrag(parse_flag(rest)?)),
+            "pause" => Some(Request::SetPaused(parse_flag(rest)?)),
             "key" => {
                 let (code, pressed) = rest.split_once(' ')?;
                 Some(Request::Key {
@@ -254,6 +260,8 @@ mod tests {
             Request::SetKeyboards(false),
             Request::SetChord(true),
             Request::SetWheelDrag(true),
+            Request::SetPaused(true),
+            Request::SetPaused(false),
             Request::Key { code: 29, pressed: true },
             Request::QueryHeld,
         ] {

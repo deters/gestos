@@ -34,6 +34,12 @@ static CHILD_PIDS: once_cell::sync::Lazy<std::sync::Mutex<Vec<u32>>> =
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new(Vec::new()));
 
 static CONFIG_PATH: OnceLock<PathBuf> = OnceLock::new();
+/// The app in use, where the desktop says when it changes, and the apps where gestures are
+/// paused: in those, the input service is asked to stand aside, so the app gets the button that
+/// draws.
+static FOCUSED_APP: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static GESTURES_PAUSED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+static STAND_ASIDE: AtomicBool = AtomicBool::new(false);
 // Written to by the D-Bus thread to wake the event loop, which may be waiting for input.
 static RELOAD_WAKE: OnceLock<UnixStream> = OnceLock::new();
 
@@ -617,7 +623,8 @@ fn prefer_app_gestures(candidates: Vec<Gesture>) -> Vec<Gesture> {
 /// second part says that it couldn't be asked.
 #[cfg(target_os = "linux")]
 fn focused_app(config: &Configuration, wayland_ctx: &WaylandContext) -> (Option<String>, bool) {
-    let limited = config.gestures.iter().any(|g| !g.is_deleted && !g.apps.is_empty());
+    let limited = config.gestures.iter().any(|g| !g.is_deleted && !g.apps.is_empty())
+        || !config.gestures_paused.is_empty();
     if !limited {
         return (None, false);
     }
@@ -691,6 +698,18 @@ fn session_is_locked(conn: &zbus::blocking::Connection, service: &str) -> zbus::
 
 /// Whether the desktop has reported its screen as locked. Not every lock screen does, as with
 /// some on Sway, and if there's no telling, gestures keep working rather than stop for good.
+/// Whether the input service should stand aside, as the app in use is one where gestures are
+/// paused. A change wakes the session, which asks it.
+fn update_standing_aside() {
+    let app = FOCUSED_APP.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let paused = app.is_some_and(|app| GESTURES_PAUSED.lock().unwrap_or_else(|e| e.into_inner()).contains(&app));
+    if STAND_ASIDE.swap(paused, Ordering::Relaxed) != paused {
+        if let Some(mut wake) = RELOAD_WAKE.get() {
+            let _ = wake.write(&[1]);
+        }
+    }
+}
+
 /// Bounded by a timeout, so a hung bus can't hold up the daemon.
 #[cfg(target_os = "linux")]
 fn screen_is_locked() -> bool {
@@ -725,6 +744,11 @@ fn dispatch_gesture(
     let (app, app_unknown) = focused_app(config, wayland_ctx);
     if let Some(app) = &app {
         println!("App in use: {app}");
+        // Where the desktop says when the app in use changes, the button doesn't draw there at all.
+        if config.gestures_paused.contains(app) {
+            println!("Not running the gesture, as gestures are paused in {app}.");
+            return;
+        }
     }
     // A gesture for an app that can't be told is one of the user's, and that's what's said.
     let needs_extension =
@@ -971,6 +995,8 @@ fn run_session(
     let mut points = Vec::new();
     let mut updates = UpdateThrottle::default();
     let mut drags = UpdateThrottle::<()>::default();
+    // Only asked for once it's on, so an input service from before it existed still serves.
+    let mut standing_aside = false;
     loop {
         if RELOAD_REQUESTED.swap(false, Ordering::Relaxed) {
             println!("gestosd: Reloading configuration dynamically...");
@@ -984,11 +1010,19 @@ fn run_session(
                     }
                     *config = new_config;
                     SHOW_PATH.store(config.show_path, Ordering::Relaxed);
+                    *GESTURES_PAUSED.lock().unwrap_or_else(|e| e.into_inner()) = config.gestures_paused.clone();
+                    update_standing_aside();
                     input.send(&Request::SetKeyboards(config.uses_modifiers()));
                     println!("gestosd: Configuration reloaded successfully.");
                 }
                 Err(problem) => eprintln!("gestosd: Failed to reload configuration: {problem}"),
             }
+        }
+        let stand_aside = STAND_ASIDE.load(Ordering::Relaxed);
+        if stand_aside != standing_aside {
+            input.send(&Request::SetPaused(stand_aside));
+            standing_aside = stand_aside;
+            println!("gestosd: {}", if stand_aside { "Standing aside in this app." } else { "Drawing again." });
         }
 
         let mut poll_fds = [
@@ -1150,6 +1184,16 @@ fn run_grabber(
     let (mut wake_reader, wake_writer) = UnixStream::pair()?;
     wake_writer.set_nonblocking(true)?;
     let _ = RELOAD_WAKE.set(wake_writer);
+
+    *GESTURES_PAUSED.lock().unwrap_or_else(|e| e.into_inner()) = config.gestures_paused.clone();
+    // On X11, the app in use is known as it changes, so the button can be left to it before it's
+    // pressed.
+    if gestos::active_app::is_x11_session() {
+        gestos::active_app::watch_x11_active_app(|app| {
+            *FOCUSED_APP.lock().unwrap_or_else(|e| e.into_inner()) = app;
+            update_standing_aside();
+        });
+    }
 
     let mut opened = false;
     let started = Instant::now();
@@ -2037,6 +2081,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         let (signals, received) = std::sync::mpsc::sync_channel(16);
         let (mut wake_reader, _wake_writer) = UnixStream::pair().unwrap();
@@ -2139,6 +2184,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         let names = |modifiers: &str| -> Vec<String> {
             gesture_templates(&config, Modifiers::parse(modifiers), None)
@@ -2168,6 +2214,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         let names = |app: Option<&str>| -> Vec<String> {
             gesture_templates(&config, Modifiers::default(), app)
@@ -2204,6 +2251,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         assert!(matches_app_gesture(&line(10.0), &config, Modifiers::default()));
         assert!(!matches_app_gesture(&line(0.0), &config, Modifiers::default()));

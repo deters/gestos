@@ -590,6 +590,9 @@ pub struct YamlConfig {
     /// The user's own programs, imported, by ID, each as its text.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub own_programs: std::collections::BTreeMap<String, String>,
+    /// The apps where gestures are paused, by their IDs, as gestures name them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gestures_paused: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -663,6 +666,10 @@ pub struct Configuration {
     /// The user's own programs, imported, by ID, each as its text. They take the place of those
     /// that come with Gestos with the same ID.
     pub own_programs: std::collections::BTreeMap<String, String>,
+    /// The apps where gestures are paused, as an exception, by their IDs, as gestures name them.
+    /// In one, gestures don't run, and the button that draws them works as it would without
+    /// Gestos.
+    pub gestures_paused: Vec<String>,
 }
 
 impl Configuration {
@@ -1023,6 +1030,7 @@ impl Configuration {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
 
         if user_path.exists() {
@@ -1048,6 +1056,7 @@ impl Configuration {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         config.parse_and_merge(&content, true).then_some(config)
     }
@@ -1070,6 +1079,7 @@ impl Configuration {
         self.action_templates = parsed.action_templates;
         self.programs_on = parsed.programs_on;
         self.own_programs = parsed.own_programs;
+        self.gestures_paused = parsed.gestures_paused;
 
         if let Some(global) = parsed.global {
             for (key, val) in global {
@@ -1211,6 +1221,7 @@ impl Configuration {
             action_templates: self.action_templates.clone(),
             programs_on: self.programs_on.clone(),
             own_programs: self.own_programs.clone(),
+            gestures_paused: self.gestures_paused.clone(),
         };
         Ok(format!("{}\n\n{}", file_header(), serde_yaml::to_string(&yaml)?))
     }
@@ -1496,6 +1507,17 @@ mod tests {
     }
 
     #[test]
+    fn the_apps_where_gestures_are_paused_are_kept() {
+        let file = TempConfig::new("gestures-paused", "");
+        let mut config = Configuration::load_from_file(&file.0).unwrap();
+        assert!(!config.to_yaml().unwrap().contains("gestures_paused"));
+        config.gestures_paused = vec!["program:steam-games".into(), "org.blender.Blender".into()];
+        let read = TempConfig::new("gestures-paused-read", &config.to_yaml().unwrap());
+        let config = Configuration::load_from_file(&read.0).unwrap();
+        assert_eq!(config.gestures_paused, ["program:steam-games", "org.blender.Blender"]);
+    }
+
+    #[test]
     fn the_programs_turned_on_and_the_users_own_are_kept() {
         let program = "gestos-app: 1\nid: my-game\nname: My Game\nwindows:\n  classes: [MyGame]\n";
         let file = TempConfig::new("programs", "");
@@ -1508,6 +1530,7 @@ mod tests {
         let config = Configuration::load_from_file(&read.0).unwrap();
         assert_eq!(config.own_programs.get("my-game").map(String::as_str), Some(program));
         assert_eq!(config.programs_on, ["steam-games", "my-game"]);
+        assert!(config.gestures_paused.is_empty());
         // A program runs nothing, so importing a configuration has no more commands to show.
         assert!(config.commands().is_empty());
     }
@@ -1640,6 +1663,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         assert_eq!(config.commands(), ["backup.sh", "upload.sh \"$@\""]);
     }
@@ -1662,6 +1686,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         let name = |app: &str| app.rsplit('.').next().unwrap().to_string();
         assert!(config.split_gestures_for_several_apps(name));
@@ -1688,6 +1713,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         config.save_to_file().unwrap();
         Configuration::load_from_file(&file.0).expect("saved config must be valid YAML")
@@ -1789,6 +1815,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         config.save_to_file().unwrap();
 
@@ -1904,6 +1931,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         config.save_to_file().unwrap();
         assert_eq!(fs::metadata(&file.0).unwrap().permissions().mode() & 0o777, 0o644);
@@ -1925,6 +1953,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         config.save_to_file().unwrap();
         assert!(!fs::read_to_string(&file.0).unwrap().contains("overview_click"));
@@ -1955,6 +1984,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         config.save_to_file().unwrap();
         assert!(!fs::read_to_string(&file.0).unwrap().contains("middle_button_windows"));
@@ -1981,6 +2011,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         config.save_to_file().unwrap();
 
@@ -2050,6 +2081,7 @@ mod tests {
             action_templates: Default::default(),
             programs_on: Vec::new(),
             own_programs: Default::default(),
+            gestures_paused: Vec::new(),
         };
         config.save_to_file().unwrap();
         assert_eq!(Configuration::load_from_file(&file.0).unwrap().button, Some(2));

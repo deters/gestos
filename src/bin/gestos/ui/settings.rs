@@ -607,7 +607,7 @@ fn programs_page(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window) -> adw:
         .build();
     let group = adw::PreferencesGroup::builder()
         .title("Apps")
-        .description("Apps that Gestos recognizes by their windows, such as games. Those you turn on are listed with your other apps.")
+        .description("Apps that Gestos recognizes by their windows, such as games, so you can pause gestures in them or make gestures for them. Those you turn on are listed with your other apps.")
         .build();
     let import = gtk::Button::with_mnemonic("_Import…");
     import.set_valign(gtk::Align::Center);

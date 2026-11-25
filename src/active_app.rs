@@ -58,6 +58,16 @@ pub fn x11_active_app() -> Option<Option<String>> {
     Some(window.and_then(|window| app_for(&window)))
 }
 
+/// Calls `changed` with the app of the active window on X11 when watching starts, and then each
+/// time another becomes active, in a thread of its own, for as long as the X server runs.
+pub fn watch_x11_active_app(changed: impl Fn(Option<String>) + Send + 'static) {
+    std::thread::spawn(move || {
+        if let Err(e) = x11::watch_active_window(&|| changed(x11_active_app().flatten())) {
+            eprintln!("gestos: Stopped watching the active window: {e}");
+        }
+    });
+}
+
 /// The app of Sway's focused window, from its tree as `swaymsg -t get_tree` prints it. `None` means
 /// the tree couldn't be read; `Some(None)` that no window has focus, or its app isn't installed.
 pub fn sway_active_app(tree: &str) -> Option<Option<String>> {
@@ -223,6 +233,25 @@ mod x11 {
                 .map(|class| String::from_utf8_lossy(class).into_owned())
                 .collect(),
         }))
+    }
+
+    /// Calls `changed` once, and then each time the root window says another window is active.
+    pub fn watch_active_window(changed: &dyn Fn()) -> Result<(), Error> {
+        use x11rb::protocol::xproto::{ChangeWindowAttributesAux, EventMask};
+        use x11rb::protocol::Event;
+        let (conn, screen) = x11rb::connect(None)?;
+        let root = conn.setup().roots[screen].root;
+        let active = conn.intern_atom(false, b"_NET_ACTIVE_WINDOW")?.reply()?.atom;
+        conn.change_window_attributes(root, &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE))?
+            .check()?;
+        changed();
+        loop {
+            if let Event::PropertyNotify(event) = conn.wait_for_event()? {
+                if event.atom == active {
+                    changed();
+                }
+            }
+        }
     }
 
     /// The process of the client that made a window, as the X server knows it from its
