@@ -412,7 +412,7 @@ fn action_template_row(
             }
             chooser.destroy();
         });
-        chooser.show();
+        show_until_answered(chooser);
     });
     row.add_suffix(&export);
 
@@ -485,6 +485,17 @@ fn open_in_text_editor(parent: &gtk::Window, path: &std::path::Path) {
     if let Err(why) = opened {
         show_error_dialog(parent, &format!("Couldn't open {} in a text editor: {why}", path.display()));
     }
+}
+
+/// Shows a file chooser and holds it until it's answered. GTK doesn't hold it: through the portal,
+/// the portal's request does, but GTK's own window, used without a portal, closes as soon as
+/// nothing holds the chooser.
+fn show_until_answered(chooser: gtk::FileChooserNative) {
+    let held = RefCell::new(Some(chooser.clone()));
+    chooser.connect_response(move |_, _| {
+        held.borrow_mut().take();
+    });
+    chooser.show();
 }
 
 /// Changes the user's own action templates in their configuration, and has the daemon and the
@@ -583,7 +594,7 @@ fn import_action_template(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window
             );
         }
     });
-    chooser.show();
+    show_until_answered(chooser);
 }
 
 pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
@@ -734,7 +745,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
             }
             c.destroy();
         });
-        chooser.show();
+        show_until_answered(chooser);
     });
     export_box.append(&export_btn);
     config_list.add(&export_row);
@@ -828,7 +839,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
             }
             c.destroy();
         });
-        chooser.show();
+        show_until_answered(chooser);
     });
     import_box.append(&import_btn);
     config_list.add(&import_row);

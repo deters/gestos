@@ -14,6 +14,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- On desktops that don't provide their own window for choosing files, the window that "Export…" and "Import…" in Settings open could close as soon as it opened.
 - The category "Navigation" showed a broken icon when the icon theme didn't have its icon. Other categories whose icon could be missing in the same way now also show another one instead.
 
 ## [9.1.3] - 2026-11-21
