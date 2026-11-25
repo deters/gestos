@@ -35,7 +35,13 @@ fn add_close_keys(window: &impl IsA<gtk::Window>, escape: bool) {
     });
 }
 
+/// Shows an error's message, which can be copied, to paste in a bug report.
 pub fn show_error_dialog<W: IsA<gtk::Window>>(parent: &W, message: &str) {
+    show_error_dialog_titled(parent, None, message);
+}
+
+/// Shows an error, under a title that says what failed, if it isn't plain from the message.
+pub fn show_error_dialog_titled<W: IsA<gtk::Window>>(parent: &W, title: Option<&str>, message: &str) {
     let dialog = gtk::Window::new();
     dialog.set_transient_for(Some(parent));
     dialog.set_modal(true);
@@ -63,10 +69,13 @@ pub fn show_error_dialog<W: IsA<gtk::Window>>(parent: &W, message: &str) {
     let text_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
     text_box.set_hexpand(true);
 
-    let title_label = gtk::Label::new(None);
-    title_label.set_markup("<b>Failed to start Gestos daemon</b>");
-    title_label.set_halign(gtk::Align::Start);
-    text_box.append(&title_label);
+    if let Some(title) = title {
+        let title_label = gtk::Label::new(Some(title));
+        title_label.add_css_class("heading");
+        title_label.set_wrap(true);
+        title_label.set_halign(gtk::Align::Start);
+        text_box.append(&title_label);
+    }
 
     let label = gtk::Label::new(Some(message));
     label.set_wrap(true);
@@ -78,9 +87,17 @@ pub fn show_error_dialog<W: IsA<gtk::Window>>(parent: &W, message: &str) {
     content_box.append(&text_box);
     vbox.append(&content_box);
 
-    let button_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let button_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     button_box.set_halign(gtk::Align::End);
     button_box.set_margin_top(12);
+    // So that it needn't be typed, to look it up or to report it.
+    let copy_button = gtk::Button::with_mnemonic("_Copy Message");
+    let copied = match title {
+        Some(title) => format!("{title}\n{message}"),
+        None => message.to_string(),
+    };
+    copy_button.connect_clicked(move |button| button.clipboard().set_text(&copied));
+    button_box.append(&copy_button);
     let ok_button = gtk::Button::with_mnemonic("_OK");
     ok_button.set_width_request(80);
     ok_button.set_receives_default(true);
