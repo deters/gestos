@@ -591,11 +591,14 @@ pub fn open_category(state_rc: &Rc<RefCell<AppState>>, category: Option<Category
         let shown = Rc::clone(&page.shown);
         page.apart.connect_row_activated(move |_, row| {
             let option = shown.borrow().1.get(row.index() as usize).cloned();
-            if let (Some(state_rc), Some(option)) = (state_rc.upgrade(), option) {
-                match crate::ui::app_picker::opened_app(&option.action_type).map(str::to_string) {
+            let Some(state_rc) = state_rc.upgrade() else { return };
+            match option {
+                Some(option) => match crate::ui::app_picker::opened_app(&option.action_type).map(str::to_string) {
                     Some(app) => open_app_page(&state_rc, option, &app),
                     None => open_gesture_editor_for_action(&state_rc, option),
-                }
+                },
+                // The row after them, on the Keyboard Shortcuts page, leads to the apps.
+                None => open_category(&state_rc, Some(Category::Apps)),
             }
         });
     }
@@ -672,10 +675,6 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
         apart = with_gestures;
         found = without.into_iter().map(Suggestion::Action).collect();
     }
-    // The apps' own shortcuts are on their pages, which the Apps page leads to.
-    if category == Category::KeyboardShortcuts {
-        found.push(Suggestion::Category(Category::Apps, 0));
-    }
     for option in &apart {
         let row = match crate::ui::app_picker::opened_app(&option.action_type) {
             Some(app) => app_row(app, gestures_for_app(&state, app)),
@@ -687,14 +686,21 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
         };
         page.apart.append(&row);
     }
-    page.apart.set_visible(!apart.is_empty());
+    // The apps' own shortcuts are on their pages, which the Apps page leads to, after the custom
+    // shortcut, as both are for shortcuts this page doesn't list.
+    let to_apps = category == Category::KeyboardShortcuts;
+    if to_apps {
+        let row = category_row_named(Category::Apps, "Shortcuts in Apps", 0);
+        row.add_css_class("build-your-own");
+        page.apart.append(&row);
+    }
+    page.apart.set_visible(!apart.is_empty() || to_apps);
     for suggestion in &found {
         let row = match suggestion {
             Suggestion::Action(option) => match crate::ui::app_picker::opened_app(&option.action_type) {
                 Some(app) => app_row(app, gestures_for_app(&state, app)),
                 None => suggestion_row(option, &state.extension_status, ""),
             },
-            Suggestion::Category(Category::Apps, _) => category_row_named(Category::Apps, "Shortcuts in Apps", 0),
             Suggestion::Category(category, count) => category_row(*category, *count),
         };
         page.actions.append(&row);
