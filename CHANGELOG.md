@@ -15,11 +15,12 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - New row "Shortcuts in Apps" on the "Keyboard Shortcuts" page: opens the list of apps, where each app's page has its own shortcuts.
 - New option "Report a Problem" in Settings, under "Troubleshooting". Its button "Open GitHub" opens a new issue for Gestos in your browser, where you can paste the debugging information.
 - "Debugging Information" in Settings now lists the Gestos processes that are running, each with the process that started it and its command line. When Gestos runs one process per mouse, this shows which mouse each one reads.
-- New page "Apps" in Preferences, for apps that Gestos recognizes by their windows, such as games, which aren't in the list of installed apps. Gestos comes with "Steam Games" and "Windows Programs", turned off. One you turn on is listed in "Actions inside Apps" with your other apps, where you can pause gestures in it or make gestures that only work in it. These apps can be exported to a file and imported, like actions. On GNOME, "Steam Games" only recognizes the Windows games that Steam runs with Proton. (GNOME, KDE, Sway, Hyprland, X11)
+- New page "Custom Apps" in Preferences, for apps that Gestos recognizes by their windows, such as games, which aren't in the list of installed apps. Gestos comes with "Steam Games" and "Windows Programs", turned off. One you turn on is listed in "Actions inside Apps" with your other apps, where you can pause gestures in it or make gestures that only work in it. These apps can be exported to a file and imported, like actions. On GNOME, "Steam Games" only recognizes the Windows games that Steam runs with Proton. (GNOME, KDE, Sway, Hyprland, X11)
 - New option "Pause Gestures" at the end of each app's page in "Actions inside Apps". Gestures are then paused automatically whenever that app is in use. On X11, the app gets the mouse button you draw with, as it would without Gestos. On other desktops, gestures drawn in the app don't run, but drawing still takes the button. Apps where gestures are paused are marked "Paused", and their page shows only "Resume". (GNOME, KDE, Sway, Hyprland, X11)
 
 ### Changed
 
+- Renamed the page "Actions" in Preferences to "Custom Actions".
 - A category's page and an app's page now list each action once, with its gesture's drawing at the end of its row. Before, the gestures were listed apart, above the actions without one.
 - The "Apps" category now only has the actions that open each app, each with its gesture's drawing. What works inside an app moved to "Actions inside Apps".
 - Starting a gesture for an action that already has one, in the same apps, now opens that gesture.

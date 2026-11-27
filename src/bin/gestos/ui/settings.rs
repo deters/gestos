@@ -323,8 +323,8 @@ fn append_extension_row(
 /// a file. Imported ones are the user's own, and can be removed; one with the ID of an action that
 /// came with Gestos takes its place.
 fn actions_page(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder().title("Actions").icon_name("system-run-symbolic").build();
-    let group = adw::PreferencesGroup::builder().title("Actions").build();
+    let page = adw::PreferencesPage::builder().title("Custom Actions").icon_name("system-run-symbolic").build();
+    let group = adw::PreferencesGroup::builder().title("Custom Actions").build();
     let import = gtk::Button::with_mnemonic("_Import…");
     import.set_valign(gtk::Align::Center);
     group.set_header_suffix(Some(&import));
@@ -542,7 +542,7 @@ fn import_action_template(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window
         Some("_Cancel"),
     );
     let filter = gtk::FileFilter::new();
-    filter.set_name(Some("Actions"));
+    filter.set_name(Some("Custom Actions"));
     filter.add_pattern("*.yaml");
     chooser.add_filter(&filter);
     let state_import = Rc::downgrade(state_rc);
@@ -612,11 +612,11 @@ fn import_action_template(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window
 /// user's own, and can be removed; one with the ID of one that came with Gestos takes its place.
 fn programs_page(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Apps")
+        .title("Custom Apps")
         .icon_name("view-app-grid-symbolic")
         .build();
     let group = adw::PreferencesGroup::builder()
-        .title("Apps")
+        .title("Custom Apps")
         .description("Apps that Gestos recognizes by their windows, such as games, so you can pause gestures in them or make gestures for them. Those you turn on are listed with your other apps.")
         .build();
     let import = gtk::Button::with_mnemonic("_Import…");
@@ -800,7 +800,7 @@ fn import_program(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window, refill
         Some("_Cancel"),
     );
     let filter = gtk::FileFilter::new();
-    filter.set_name(Some("Apps"));
+    filter.set_name(Some("Custom Apps"));
     filter.add_pattern("*.yaml");
     chooser.add_filter(&filter);
     let state_import = Rc::downgrade(state_rc);
