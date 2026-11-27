@@ -198,6 +198,8 @@ pub fn find_suggestions(
 pub enum Suggestion {
     Action(EditorActionOption),
     Category(Category, usize),
+    /// An app's page, of what's done inside it, by its desktop file ID.
+    App(String),
 }
 
 /// How the actions found are offered: as they are, or in their categories when there are many and
@@ -484,6 +486,7 @@ mod tests {
             .map(|suggestion| match suggestion {
                 Suggestion::Action(option) => option.name.clone(),
                 Suggestion::Category(category, count) => format!("{} {count}", category.name()),
+                Suggestion::App(app) => app.clone(),
             })
             .collect()
     }

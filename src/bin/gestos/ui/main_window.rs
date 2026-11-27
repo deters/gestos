@@ -369,6 +369,11 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
 
 /// An app, which opens its own page, with how many gestures are made for it, if any.
 fn app_row(app: &str, count: usize) -> gtk::ListBoxRow {
+    app_row_named(app, &crate::ui::app_picker::app_name(app), count)
+}
+
+/// An app's row under a name of its own, where the page it's on doesn't say what it leads to.
+fn app_row_named(app: &str, title: &str, count: usize) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row_box.set_margin_start(16);
@@ -376,7 +381,7 @@ fn app_row(app: &str, count: usize) -> gtk::ListBoxRow {
     row_box.set_margin_top(12);
     row_box.set_margin_bottom(12);
     row_box.append(&crate::ui::app_picker::app_icon(app, 16));
-    let name = gtk::Label::new(Some(&crate::ui::app_picker::app_name(app)));
+    let name = gtk::Label::new(Some(title));
     name.set_xalign(0.0);
     name.set_hexpand(true);
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -597,6 +602,10 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
                 Suggestion::Category(category, count) => {
                     page.actions.append(&category_row(*category, *count));
                     actions_shown.push(Entry::Category(*category));
+                }
+                Suggestion::App(app) => {
+                    page.actions.append(&app_row(app, gestures_inside(&state, app).count()));
+                    actions_shown.push(Entry::AppPage(app.clone()));
                 }
             }
         }
@@ -833,7 +842,33 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
     let found = find_suggestions(&state.action_options, &state.config.gestures, &query);
     let searching = !query.trim().is_empty();
     let gestures_in = gestures_by_category(&state.config.gestures, &state.action_options);
-    let (apart, found) = arrange_suggestions(found, searching, None, &gestures_in);
+    let (apart, mut found) = arrange_suggestions(found, searching, None, &gestures_in);
+    // An app searched for by its name leads to what's done inside it, after opening it, if that's
+    // still offered, or first.
+    if searching {
+        let apps = state
+            .action_options
+            .iter()
+            .filter_map(|option| crate::ui::app_picker::opened_app(&option.action_type))
+            // By a word of its name starting with what's searched, so that a letter or two don't
+            // bring every app.
+            .filter(|app| {
+                let name = crate::ui::app_picker::app_name(app).to_lowercase();
+                let first = query.trim().to_lowercase();
+                let first = first.split_whitespace().next().unwrap_or_default().to_string();
+                search_matches(&name, &query)
+                    && name.split(|c: char| !c.is_alphanumeric()).any(|word| word.starts_with(&first))
+            })
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        for (index, app) in apps.into_iter().enumerate() {
+            let opens = found.iter().position(|suggestion| {
+                matches!(suggestion, Suggestion::Action(option)
+                    if crate::ui::app_picker::opened_app(&option.action_type) == Some(app.as_str()))
+            });
+            found.insert(opens.map_or(index, |opens| opens + 1), Suggestion::App(app));
+        }
+    }
     for option in &apart {
         let row = suggestion_row(option, &state.extension_status, &query);
         row.add_css_class("build-your-own");
@@ -844,6 +879,10 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
         let row = match suggestion {
             Suggestion::Action(option) => suggestion_row(option, &state.extension_status, &query),
             Suggestion::Category(category, count) => category_row(*category, *count),
+            Suggestion::App(app) => {
+                let title = format!("Actions inside {}", crate::ui::app_picker::app_name(app));
+                app_row_named(app, &title, gestures_inside(&state, app).count())
+            }
         };
         state.suggestion_list.append(&row);
     }
@@ -1382,6 +1421,10 @@ pub fn build_ui(app: &gtk::Application) {
                 .cloned();
             match suggestion {
                 Some(Suggestion::Action(option)) => open_gesture_editor_for_action(&state_suggestion, option),
+                Some(Suggestion::App(app)) => {
+                    open_category(&state_suggestion, Some(Category::InsideApps));
+                    open_app_page(&state_suggestion, &app);
+                }
                 Some(Suggestion::Category(category, _)) => {
                     open_category(&state_suggestion, Some(category))
                 }
