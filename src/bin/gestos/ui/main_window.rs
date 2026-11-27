@@ -1560,11 +1560,8 @@ pub fn build_ui(app: &gtk::Application) {
     provider.load_from_data(
         "headerbar { background: @window_bg_color; border: none; box-shadow: none; }\n\
          .main-window-content, .dialog-content { background-color: @window_bg_color; }\n\
-         .gesture-preview-frame { background: @window_bg_color; border-radius: 6px; }\n\
          searchentry, entry.search { border-radius: 18px; }\n\
          .context-title { font-size: 1.5em; font-weight: bold; }\n\
-         .gesture-row { padding: 6px; }\n\
-         .icon-holder { padding: 4px; }\n\
          .icon-purple { color: @purple_2; }\n\
          .action-label { font-size: 0.9em; opacity: 0.7; }\n\
          .settings-row { padding: 8px; }\n\
@@ -1574,6 +1571,7 @@ pub fn build_ui(app: &gtk::Application) {
          .warning-label { color: @warning_color; font-size: 0.95em; }\n\
          .extension-banner { padding: 6px 12px; min-height: 36px; background-color: alpha(@warning_color, 0.15); }\n\
          .keycap-small { padding: 0 4px; background-color: alpha(currentColor, 0.08); border: 1px solid alpha(currentColor, 0.15); border-radius: 4px; font-weight: bold; font-size: 0.7em; }\n\
+         .keycap-row { padding: 0 6px; background-color: alpha(currentColor, 0.08); border: 1px solid alpha(currentColor, 0.15); border-radius: 4px; font-weight: bold; font-size: 0.85em; }\n\
          .keycap { padding: 6px 12px; background-color: alpha(currentColor, 0.08); border: 1px solid alpha(currentColor, 0.15); border-radius: 6px; font-weight: bold; font-size: 1.1em; }\n\
          .drag-handle { opacity: 0.55; margin-right: 4px; }\n\
          .drag-handle:hover { opacity: 1; }\n\

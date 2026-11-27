@@ -35,7 +35,7 @@ fn entry_button(index: usize, entry: &ChooserEntry) -> gtk::Button {
     preview.set_content_height(48);
     let points = entry.points.clone();
     preview.set_draw_func(move |_, cr, width, height| {
-        draw_gesture_path(cr, &points, width as f64, height as f64, false, true);
+        draw_gesture_path(cr, &points, width as f64, height as f64, None, true);
     });
     content.append(&preview);
 

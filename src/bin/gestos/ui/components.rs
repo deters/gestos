@@ -153,12 +153,14 @@ fn kind_icon(action: &ActionType) -> (&'static str, &'static str) {
         _ => (action.own_icon_name(), "icon-bg-blue"),
     }
 }
+/// Draws a gesture's path, in violet to pink, or with `ink`, in that one color, dimmed, as in a
+/// list of them, where it's one of many.
 pub fn draw_gesture_path(
     cr: &cairo::Context,
     points: &[Point2D],
     width: f64,
     height: f64,
-    _draw_bg: bool,
+    ink: Option<(f64, f64, f64)>,
     fit_to_canvas: bool,
 ) {
     // Background is transparent to naturally display the theme-dependent container background (e.g. @view_bg_color)
@@ -193,8 +195,10 @@ pub fn draw_gesture_path(
     let max_dim = w.max(h);
     let scale = if fit_to_canvas {
         let size = width.min(height);
+        // Small in a row, it fills more of its room.
+        let fill = if ink.is_some() { 0.8 } else { 0.62 };
         if max_dim > 1.0 {
-            (size * 0.62) / max_dim
+            (size * fill) / max_dim
         } else {
             1.0
         }
@@ -212,15 +216,22 @@ pub fn draw_gesture_path(
         cr.translate(-cx, -cy);
     }
 
-    cr.set_line_width(4.0 / scale);
+    // In a row, thinner, and with a smaller arrowhead, as it's drawn smaller.
+    let thin = if ink.is_some() { 0.5 } else { 1.0 };
+    cr.set_line_width(4.0 * thin / scale);
     cr.set_line_cap(cairo::LineCap::Round);
     cr.set_line_join(cairo::LineJoin::Round);
 
-    // Draw stroke gradient (violet to pink)
-    let pat = cairo::LinearGradient::new(min_x, min_y, max_x, max_y);
-    pat.add_color_stop_rgba(0.0, 0.49, 0.27, 0.90, 0.9);
-    pat.add_color_stop_rgba(1.0, 0.98, 0.72, 0.80, 0.9);
-    cr.set_source(&pat).unwrap();
+    match ink {
+        Some((r, g, b)) => cr.set_source_rgba(r, g, b, 0.7),
+        // Draw stroke gradient (violet to pink)
+        None => {
+            let pat = cairo::LinearGradient::new(min_x, min_y, max_x, max_y);
+            pat.add_color_stop_rgba(0.0, 0.49, 0.27, 0.90, 0.9);
+            pat.add_color_stop_rgba(1.0, 0.98, 0.72, 0.80, 0.9);
+            cr.set_source(&pat).unwrap();
+        }
+    }
 
     // In curves, as it was drawn, with its sharp corners kept.
     cr.move_to(points[0].x, points[0].y);
@@ -243,10 +254,10 @@ pub fn draw_gesture_path(
             let angle = dy.atan2(dx);
 
             // Arrowhead size relative to scale
-            let arrow_length = 12.0 / scale;
+            let arrow_length = 12.0 * thin / scale;
 
             // Calculate base corners perpendicular to the end of the line
-            let half_width = 5.0 / scale;
+            let half_width = 5.0 * thin / scale;
             let perp_angle = angle + std::f64::consts::FRAC_PI_2;
             let x1 = end.x + half_width * perp_angle.cos();
             let y1 = end.y + half_width * perp_angle.sin();
@@ -257,7 +268,7 @@ pub fn draw_gesture_path(
             let tip_x = end.x + arrow_length * angle.cos();
             let tip_y = end.y + arrow_length * angle.sin();
 
-            cr.set_source_rgba(0.49, 0.27, 0.90, 1.0);
+            set_end_color(cr, ink);
             cr.move_to(tip_x, tip_y);
             cr.line_to(x1, y1);
             cr.line_to(x2, y2);
@@ -265,14 +276,23 @@ pub fn draw_gesture_path(
             cr.fill().unwrap();
         } else {
             // Fallback: draw a simple circle if the last segment has zero length
-            cr.set_source_rgba(0.49, 0.27, 0.90, 1.0);
-            cr.arc(end.x, end.y, 5.0 / scale, 0.0, 2.0 * std::f64::consts::PI);
+            set_end_color(cr, ink);
+            cr.arc(end.x, end.y, 5.0 * thin / scale, 0.0, 2.0 * std::f64::consts::PI);
             cr.fill().unwrap();
         }
     }
 
     cr.restore().unwrap();
 }
+
+/// The arrowhead's color: violet, or the path's own ink, as dimmed.
+fn set_end_color(cr: &cairo::Context, ink: Option<(f64, f64, f64)>) {
+    match ink {
+        Some((r, g, b)) => cr.set_source_rgba(r, g, b, 0.7),
+        None => cr.set_source_rgba(0.49, 0.27, 0.90, 1.0),
+    }
+}
+
 pub fn get_action_human_readable(action: &ActionType) -> String {
     match action {
         ActionType::Iconify => "Minimize Window".to_string(),
@@ -365,11 +385,11 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     let row = gtk::ListBoxRow::new();
     row.add_css_class("gesture-row");
 
+    // The room above and below is the text's, as in the rows that open pages, so the rows are as
+    // tall, and the drawing can take some of it.
     let main_hbox = gtk::Box::new(gtk::Orientation::Horizontal, 16);
     main_hbox.set_margin_start(16);
     main_hbox.set_margin_end(16);
-    main_hbox.set_margin_top(12);
-    main_hbox.set_margin_bottom(12);
 
     let drag_handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
     drag_handle.add_css_class("drag-handle");
@@ -435,28 +455,24 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
             ("system-run-symbolic".into(), "icon-bg-blue")
         };
 
-        let icon_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        icon_box.add_css_class("icon-holder");
-        icon_box.add_css_class(bg_class);
-        icon_box.set_valign(gtk::Align::Center);
-        // One that opens an app first shows that app's own icon.
+        // At the size the rows that open pages have theirs, so the rows are as tall. One that opens
+        // an app first shows that app's own icon.
         let app = gesture.actions.first().and_then(crate::ui::app_picker::first_app).or(only_app);
         let icon = match app {
-            Some(app) => crate::ui::app_picker::app_icon(app, 32),
-            None => {
-                let icon = gtk::Image::from_icon_name(&icon_name);
-                icon.set_icon_size(gtk::IconSize::Large);
-                icon
-            }
+            Some(app) => crate::ui::app_picker::app_icon(app, 16),
+            None => gtk::Image::from_icon_name(&icon_name),
         };
-        icon_box.append(&icon);
-        main_hbox.append(&icon_box);
+        icon.add_css_class(bg_class);
+        icon.set_valign(gtk::Align::Center);
+        main_hbox.append(&icon);
     }
 
     // 2. Info text label
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
     vbox.set_hexpand(true);
     vbox.set_valign(gtk::Align::Center);
+    vbox.set_margin_top(12);
+    vbox.set_margin_bottom(12);
 
     if let Some(keys) = has_keypress {
         let row_hbox = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -475,7 +491,7 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
                 // As shortcuts' names write it.
                 let part = if *part == "Control" { "Ctrl" } else { part };
                 let keycap_label = gtk::Label::new(Some(part));
-                keycap_label.add_css_class("keycap");
+                keycap_label.add_css_class("keycap-row");
                 keycap_label.set_valign(gtk::Align::Center);
                 row_hbox.append(&keycap_label);
             }
@@ -528,27 +544,10 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         main_hbox.append(&warning);
     }
 
-    // 3. Mini Cairo preview canvas
-    let preview_frame = gtk::Frame::new(None);
-    preview_frame.add_css_class("gesture-preview-frame");
-    preview_frame.set_size_request(120, 60);
-    preview_frame.set_valign(gtk::Align::Center);
-
-    let preview_canvas = gtk::DrawingArea::new();
-    preview_canvas.set_vexpand(true);
-    let pts_clone = gesture.points.clone();
-    preview_canvas.set_draw_func(move |_, cr, width, height| {
-        draw_gesture_path(cr, &pts_clone, width as f64, height as f64, true, true);
-    });
-    // The keys to hold and the apps it's for show on the drawing, small, in its corner, as they're
-    // part of what triggers the gesture.
-    let preview = gtk::Overlay::new();
-    preview.set_child(Some(&preview_canvas));
+    // 3. The drawing, as tall as the row, less a little, so it doesn't make the row taller, with the
+    // keys to hold and the apps it's for before it, small, as they're part of what triggers it.
     let keys = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-    keys.set_halign(gtk::Align::Start);
-    keys.set_valign(gtk::Align::Start);
-    keys.set_margin_start(4);
-    keys.set_margin_top(4);
+    keys.set_valign(gtk::Align::Center);
     for label in gesture.modifiers.shown_labels(&gestos::keyboards::modifier_names()) {
         let keycap = gtk::Label::new(Some(label));
         keycap.add_css_class("keycap-small");
@@ -557,15 +556,20 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     if !gesture.apps.is_empty() {
         keys.append(&crate::ui::app_picker::app_icons(&gesture.apps));
     }
-    preview.add_overlay(&keys);
-    // The path is drawn below them, so they don't hide it.
-    if !gesture.apps.is_empty() {
-        preview_canvas.set_margin_top(20);
-    } else if !gesture.modifiers.is_empty() {
-        preview_canvas.set_margin_top(16);
-    }
-    preview_frame.set_child(Some(&preview));
-    main_hbox.append(&preview_frame);
+    keys.set_visible(keys.first_child().is_some());
+    main_hbox.append(&keys);
+
+    let preview_canvas = gtk::DrawingArea::new();
+    preview_canvas.set_content_width(80);
+    preview_canvas.set_margin_top(4);
+    preview_canvas.set_margin_bottom(4);
+    let pts_clone = gesture.points.clone();
+    preview_canvas.set_draw_func(move |canvas, cr, width, height| {
+        let fg = canvas.style_context().color();
+        let ink = (f64::from(fg.red()), f64::from(fg.green()), f64::from(fg.blue()));
+        draw_gesture_path(cr, &pts_clone, width as f64, height as f64, Some(ink), true);
+    });
+    main_hbox.append(&preview_canvas);
     row.set_child(Some(&main_hbox));
 
     // 4. Drag and Drop Controllers for reordering

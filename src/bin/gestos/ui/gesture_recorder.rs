@@ -294,7 +294,7 @@ pub fn open_gesture_recorder(
             let points = points.borrow();
             if is_recording.get() {
                 if has_drawing(&points) {
-                    crate::ui::components::draw_gesture_path(cr, &points, width as f64, height as f64, true, true);
+                    crate::ui::components::draw_gesture_path(cr, &points, width as f64, height as f64, None, true);
                 }
                 return;
             }

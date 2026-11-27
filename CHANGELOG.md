@@ -14,6 +14,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Gesture rows are now as tall as the other rows. Their icons and keys are smaller, and the gesture is drawn in the text color, without a dark box behind it.
 - Rows that open the gesture editor now end in an ellipsis, like "Copy…", in place of an arrow. Only rows that open another page, like an app or a category, have an arrow.
 - The install script now also removes an older copy of Gestos installed from the source in `/usr/local`, which ran in place of the one it installed, and lists the files it removed.
 

@@ -451,7 +451,7 @@ fn open_editor(
     canvas.set_draw_func(move |_, cr, width, height| {
         let pts = pts_clone.borrow();
         if has_drawing(&pts) {
-            draw_gesture_path(cr, &pts, width as f64, height as f64, true, true);
+            draw_gesture_path(cr, &pts, width as f64, height as f64, None, true);
         }
     });
     let modifier_toggles = ModifierKeys::new(drawing.modifiers);
