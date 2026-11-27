@@ -38,11 +38,6 @@ pub fn is_action_of(action: &ActionType, option: &EditorActionOption) -> bool {
 }
 
 fn is_in_use(option: &EditorActionOption, gestures: &[Gesture]) -> bool {
-    // An app is offered as its own page, for more gestures in it, whether it's opened by one yet
-    // or not.
-    if crate::ui::app_picker::opened_app(&option.action_type).is_some() {
-        return false;
-    }
     let Some(identity) = action_identity(&option.action_type) else {
         return false;
     };
@@ -232,6 +227,10 @@ pub fn arrange_suggestions(
     }
     let mut categories: BTreeSet<Category> = ready.iter().map(category_of).collect();
     categories.extend(gestures_in.keys());
+    // What's done inside apps is on each app's page, which this leads to, as long as there are apps.
+    if categories.contains(&Category::Apps) {
+        categories.insert(Category::InsideApps);
+    }
     let categories = categories
         .into_iter()
         .map(|category| {
@@ -826,12 +825,9 @@ mod tests {
             names(&find_suggestions(&options, &[], "")),
             ["Close Window", "Volume up", "Open Text Editor", "Copy"]
         );
-        // Still offered once a gesture opens it, as its page is where more gestures for it go.
+        // Once a gesture opens it, it's that gesture's, as any other action is.
         let used = [gesture(open("org.gnome.TextEditor"))];
-        assert_eq!(
-            names(&find_suggestions(&options, &used, "")),
-            ["Close Window", "Volume up", "Open Text Editor", "Copy"]
-        );
+        assert_eq!(names(&find_suggestions(&options, &used, "")), ["Close Window", "Volume up", "Copy"]);
     }
 
     #[test]

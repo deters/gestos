@@ -10,13 +10,13 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New category "Actions inside Apps": lists the apps you made gestures inside, each opening its page. The "Apps" category now only counts the gestures that open an app.
+- New category "Actions inside Apps": lists every app, those with gestures first, each opening a page of what can be done inside it.
 - New row "Shortcuts in Apps" on the "Keyboard Shortcuts" page: opens the list of apps, where each app's page has its own shortcuts.
 
 ### Changed
 
 - A category's page and an app's page now list each action once, with its gesture's drawing at the end of its row. Before, the gestures were listed apart, above the actions without one.
-- An app's page now has two groups: "Open" with the action that opens the app, and "Inside" with what works in the app.
+- The "Apps" category now only has the actions that open each app, each with its gesture's drawing. What works inside an app moved to "Actions inside Apps".
 - Starting a gesture for an action that already has one, in the same apps, now opens that gesture.
 - Gesture rows no longer show the icons of the apps they work in.
 - The main page and its search now group gestures by category, like "Windows" or "Keyboard Shortcuts". Gestures that open an app are under "Apps". Those that work inside an app are under "Actions inside Apps", with the app's name after the action's, like "New Tab · Ptyxis".
