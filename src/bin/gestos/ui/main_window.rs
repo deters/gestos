@@ -11,7 +11,7 @@ use crate::actions::{
     get_static_action_options,
 };
 use crate::suggestions::{
-    arrange_suggestions, find_suggestions, gesture_category, gestures_by_category, search_matches,
+    action_category, arrange_suggestions, find_suggestions, gesture_category, gestures_by_category, search_matches,
     Category, Suggestion,
 };
 use crate::ui::components::get_action_category_icon;
@@ -968,35 +968,22 @@ pub fn refresh_gesture_list(state_rc: &Rc<RefCell<AppState>>, select_name: Optio
 
 /// Shows the gestures that match the search. The one named, such as the one just saved, gets the
 /// focus, so that the keyboard carries on from it.
-/// Gestures by the apps they're for, those for every app first, then the others by their apps'
-/// names, or None when they're all for every app, which needs no grouping. The rows don't show the
-/// apps, so the headings do.
-fn by_app(gestures: &[Gesture]) -> Option<Vec<(Vec<String>, Vec<Gesture>)>> {
-    let mut groups: Vec<(Vec<String>, Vec<Gesture>)> = Vec::new();
+/// Gestures by the category of what they do, wherever they work, in the categories' order, or None
+/// when they're all in the same one, which needs no grouping.
+fn by_category(state: &AppState, gestures: &[Gesture]) -> Option<Vec<(Category, Vec<Gesture>)>> {
+    let mut groups: Vec<(Category, Vec<Gesture>)> = Vec::new();
     for gesture in gestures {
-        let mut apps = gesture.apps.clone();
-        apps.sort();
-        match groups.iter_mut().find(|(other, _)| *other == apps) {
+        let category = action_category(gesture, &state.action_options).unwrap_or(Category::Other);
+        match groups.iter_mut().find(|(other, _)| *other == category) {
             Some((_, in_it)) => in_it.push(gesture.clone()),
-            None => groups.push((apps, vec![gesture.clone()])),
+            None => groups.push((category, vec![gesture.clone()])),
         }
     }
-    if groups.iter().all(|(apps, _)| apps.is_empty()) {
+    if groups.len() < 2 {
         return None;
     }
-    groups.sort_by_cached_key(|(apps, _)| (!apps.is_empty(), apps_named(apps).to_lowercase()));
+    groups.sort_by_key(|(category, _)| *category);
     Some(groups)
-}
-
-/// The apps' names, as a heading says them: "Files", "Files and Ptyxis", "Files, Ptyxis and Text
-/// Editor".
-fn apps_named(apps: &[String]) -> String {
-    let names: Vec<String> = apps.iter().map(|app| crate::ui::app_picker::app_name(app)).collect();
-    match names.split_last() {
-        Some((last, [])) => last.clone(),
-        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
-        None => String::new(),
-    }
 }
 
 fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) -> bool {
@@ -1025,16 +1012,11 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
         state.empty_state_box.set_description(searching.then_some("Try different words."));
         state.empty_state_box.set_visible(true);
         state.main_list.set_visible(false);
-    } else if let Some(groups) = by_app(&visible) {
-        // A gesture is for one app or for all of them, so they're shown by app.
+    } else if let Some(groups) = by_category(&state, &visible) {
         state.empty_state_box.set_visible(false);
         state.main_list.set_visible(false);
-        for (app, gestures) in groups {
-            let heading = gtk::Label::new(Some(&if app.is_empty() {
-                "Gestures".to_string()
-            } else {
-                format!("Gestures inside {}", apps_named(&app))
-            }));
+        for (category, gestures) in groups {
+            let heading = gtk::Label::new(Some(category.name()));
             heading.add_css_class("section-header");
             heading.set_xalign(0.0);
             state.gesture_groups.append(&heading);

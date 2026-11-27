@@ -243,11 +243,16 @@ pub fn arrange_suggestions(
 
 /// The category a gesture is in: the one its action is offered in.
 pub fn gesture_category(gesture: &Gesture, options: &[EditorActionOption]) -> Option<Category> {
-    let action = gesture.actions.first()?;
     // A gesture for an app is that app's, whatever it does, and is in its window among the apps.
-    if !gesture.apps.is_empty() {
+    if !gesture.apps.is_empty() && !gesture.actions.is_empty() {
         return Some(Category::Apps);
     }
+    action_category(gesture, options)
+}
+
+/// The category of what a gesture does, wherever it works.
+pub fn action_category(gesture: &Gesture, options: &[EditorActionOption]) -> Option<Category> {
+    let action = gesture.actions.first()?;
     let category = match options.iter().find(|option| crate::actions::action_matches(action, option)) {
         Some(option) => category_of(option),
         // A command of one's own, which isn't one of GNOME's custom shortcuts.
