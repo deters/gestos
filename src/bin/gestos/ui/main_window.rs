@@ -269,14 +269,9 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
     };
 
     // While gestures are paused in the app, an exception, a notice says so, with a way to resume
-    // them, and nothing else is shown. Where the desktop says when the app in use changes, the
-    // button is left to the app before it's pressed. Elsewhere, only the gesture drawn isn't run.
+    // them, and nothing else is shown.
+    let while_focused = format!("All gestures are disabled while {name} is in focus");
     if state.config.gestures_paused.iter().any(|other| other == app) {
-        let what_it_does = if gestos::active_app::is_x11_session() {
-            format!("{name} gets the mouse button you draw with, as it would without Gestos.")
-        } else {
-            "Gestures you draw in it don't run.".to_string()
-        };
         let resume = gtk::Button::with_mnemonic("_Resume");
         let state_resume = Rc::downgrade(state_rc);
         let app_resume = app.to_string();
@@ -285,7 +280,7 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
                 set_gestures_paused(&state_rc, &app_resume, false);
             }
         });
-        let notice = list_of(&titled_row(&format!("Gestures are automatically paused in {name}"), &what_it_does, &resume));
+        let notice = list_of(&titled_row("Gestures Paused", &while_focused, &resume));
         page.content.append(&notice);
         return;
     }
@@ -411,11 +406,7 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
         }
         glib::Propagation::Proceed
     });
-    let pause = list_of(&titled_row(
-        "Pause Gestures",
-        "For apps that use the mouse button you draw with themselves, such as games",
-        &switch,
-    ));
+    let pause = list_of(&titled_row("Pause Gestures", &while_focused, &switch));
     pause.set_margin_bottom(24);
     page.content.append(&pause);
 }
