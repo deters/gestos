@@ -122,7 +122,7 @@ pub fn append_steps_rows(
     let opening = Rc::clone(&editor);
     add_button("App", "Open an App…").connect_clicked(move |_| {
         let picked = Rc::clone(&opening);
-        crate::ui::app_picker::open_app_picker(&opening.parent, &[], move |app| {
+        crate::ui::app_picker::open_app_picker(&opening.parent, &[], false, move |app| {
             picked.add(KeyStep::Open(app));
         });
     });

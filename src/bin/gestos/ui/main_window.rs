@@ -260,31 +260,6 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
     title.set_justify(gtk::Justification::Center);
     heading.append(&title);
     page.content.append(&heading);
-    let list_of = |row: &gtk::ListBoxRow| {
-        let list = gtk::ListBox::new();
-        list.add_css_class("boxed-list");
-        list.set_selection_mode(gtk::SelectionMode::None);
-        list.append(row);
-        list
-    };
-
-    // While gestures are paused in the app, an exception, a notice says so, with a way to resume
-    // them, and nothing else is shown.
-    if state.config.gestures_paused.iter().any(|other| other == app) {
-        let resume = gtk::Button::with_mnemonic("_Resume");
-        let state_resume = Rc::downgrade(state_rc);
-        let app_resume = app.to_string();
-        resume.connect_clicked(move |_| {
-            if let Some(state_rc) = state_resume.upgrade() {
-                set_gestures_paused(&state_rc, &app_resume, false);
-            }
-        });
-        let while_focused = format!("All gestures are disabled while {name} is in focus");
-        let notice = list_of(&titled_row("Gestures Paused", &while_focused, &resume));
-        page.content.append(&notice);
-        return;
-    }
-
     // A list's rows and what each opens, made together.
     struct Rows(Vec<Entry>, Vec<gtk::ListBoxRow>);
     let gesture_rows = |rows: &mut Rows, gestures: &[Gesture]| {
@@ -393,24 +368,6 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
     if !rows.0.is_empty() {
         page.content.append(&entry_list(state_rc, rows.0, rows.1));
     }
-
-    // Last, as pausing gestures in an app is an exception, for apps that use the button
-    // themselves, like games.
-    let switch = gtk::Switch::new();
-    switch.update_property(&[gtk::accessible::Property::Label(&format!("Pause Gestures in {name}"))]);
-    let state_switch = Rc::downgrade(state_rc);
-    let app_switch = app.to_string();
-    switch.connect_state_set(move |_, on| {
-        if let Some(state_rc) = state_switch.upgrade() {
-            set_gestures_paused(&state_rc, &app_switch, on);
-        }
-        glib::Propagation::Proceed
-    });
-    // Said as what turning it on does, as it's off here.
-    let when_on = format!("All gestures will be disabled while {name} is in focus");
-    let pause = list_of(&titled_row("Pause Gestures", &when_on, &switch));
-    pause.set_margin_bottom(24);
-    page.content.append(&pause);
 }
 
 /// An app, which opens its own page, with how many gestures are made for it, if any.
@@ -471,7 +428,7 @@ fn apps_to_be_inside(state: &AppState) -> Vec<(String, String)> {
 
 /// Pauses or resumes gestures in an app, and has the daemon and the pages follow. If it can't be
 /// saved, it's said why, and nothing changes.
-fn set_gestures_paused(state_rc: &Rc<RefCell<AppState>>, app: &str, paused: bool) {
+pub fn set_gestures_paused(state_rc: &Rc<RefCell<AppState>>, app: &str, paused: bool) {
     // Busy only while a page is refreshed to show what's saved, which already is this.
     let Ok(mut state) = state_rc.try_borrow_mut() else { return };
     if state.config.gestures_paused.iter().any(|other| other == app) == paused {
@@ -494,35 +451,6 @@ fn set_gestures_paused(state_rc: &Rc<RefCell<AppState>>, app: &str, paused: bool
     drop(state);
     crate::daemon::reload_daemon(conn.as_ref(), Some(&parent));
     refresh_gesture_list(state_rc, None);
-}
-
-/// A row with a title and a smaller, dimmer line under it, and a widget at its end.
-fn titled_row(title: &str, subtitle: &str, suffix: &impl IsA<gtk::Widget>) -> gtk::ListBoxRow {
-    let row = gtk::ListBoxRow::new();
-    row.set_activatable(false);
-    let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    row_box.set_margin_start(16);
-    row_box.set_margin_end(16);
-    row_box.set_margin_top(12);
-    row_box.set_margin_bottom(12);
-    let texts = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    texts.set_hexpand(true);
-    texts.set_valign(gtk::Align::Center);
-    let title = gtk::Label::new(Some(title));
-    title.set_xalign(0.0);
-    title.set_wrap(true);
-    texts.append(&title);
-    let subtitle = gtk::Label::new(Some(subtitle));
-    subtitle.set_xalign(0.0);
-    subtitle.set_wrap(true);
-    subtitle.add_css_class("dim-label");
-    subtitle.add_css_class("caption");
-    texts.append(&subtitle);
-    row_box.append(&texts);
-    suffix.set_valign(gtk::Align::Center);
-    row_box.append(suffix);
-    row.set_child(Some(&row_box));
-    row
 }
 
 /// One of an app's shortcuts: its name, and its keys as shortcuts' names write them. Without an

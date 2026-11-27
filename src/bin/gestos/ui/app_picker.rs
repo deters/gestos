@@ -85,10 +85,12 @@ pub fn apps_note(status: &ExtensionStatus, elsewhere: bool) -> Option<&'static s
     }
 }
 
-/// A dialog to pick one of the installed apps, with a search. Picking one closes it.
+/// A dialog to pick one of the installed apps, with a search, and with `custom_apps`, those turned
+/// on in Custom Apps too, which can't be opened. Picking one closes it.
 pub fn open_app_picker(
     parent: &gtk::Window,
     taken: &[String],
+    custom_apps: bool,
     picked: impl Fn(String) + 'static,
 ) {
     let dialog = gtk::Window::new();
@@ -123,8 +125,12 @@ pub fn open_app_picker(
     list.add_css_class("boxed-list");
     list.set_selection_mode(gtk::SelectionMode::None);
     list.set_valign(gtk::Align::Start);
-    let ids: Vec<String> =
-        installed_apps().into_iter().filter(|id| !taken.contains(id)).collect();
+    let mut ids = installed_apps();
+    if custom_apps {
+        ids.extend(gestos::programs::list().into_iter().filter(|listed| listed.on).map(|listed| listed.program.app_id()));
+        ids.sort_by_cached_key(|id| app_name(id).to_lowercase());
+    }
+    let ids: Vec<String> = ids.into_iter().filter(|id| !taken.contains(id)).collect();
     for id in &ids {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         row.add_css_class("settings-row");

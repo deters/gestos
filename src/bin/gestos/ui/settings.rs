@@ -365,6 +365,71 @@ fn actions_page(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window) -> adw::
     page
 }
 
+/// The apps where gestures are disabled while they're in focus, each with a button that removes it,
+/// and one in the header that adds one.
+fn paused_apps_group(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder().title("Disable Gestures In").build();
+    let add = gtk::Button::with_mnemonic("_Add App…");
+    add.set_valign(gtk::Align::Center);
+    group.set_header_suffix(Some(&add));
+    let rows: Rc<RefCell<Vec<adw::ActionRow>>> = Rc::default();
+    // Filled again after each change. Weak, as the rows it makes hold it, and the button keeps it.
+    let fill_cell: Rc<RefCell<std::rc::Weak<dyn Fn()>>> = Rc::new(RefCell::new(std::rc::Weak::<Box<dyn Fn()>>::new()));
+    let fill: Rc<dyn Fn()> = {
+        let state_rc = Rc::downgrade(state_rc);
+        let group = group.downgrade();
+        let rows = Rc::clone(&rows);
+        let fill_again = Rc::clone(&fill_cell);
+        Rc::new(move || {
+            let (Some(state_rc), Some(group)) = (state_rc.upgrade(), group.upgrade()) else { return };
+            for row in rows.borrow_mut().drain(..) {
+                group.remove(&row);
+            }
+            let paused = state_rc.borrow().config.gestures_paused.clone();
+            for app in paused {
+                let row = adw::ActionRow::builder()
+                    .title(glib::markup_escape_text(&crate::ui::app_picker::app_name(&app)).as_str())
+                    .build();
+                row.add_prefix(&crate::ui::app_picker::app_icon(&app, 32));
+                let remove = gtk::Button::from_icon_name("list-remove-symbolic");
+                remove.set_tooltip_text(Some("Remove"));
+                remove.update_property(&[gtk::accessible::Property::Label("Remove")]);
+                remove.add_css_class("flat");
+                remove.set_valign(gtk::Align::Center);
+                let state_remove = Rc::downgrade(&state_rc);
+                let refill = fill_again.borrow().upgrade();
+                remove.connect_clicked(move |_| {
+                    if let Some(state_rc) = state_remove.upgrade() {
+                        crate::ui::main_window::set_gestures_paused(&state_rc, &app, false);
+                    }
+                    if let Some(refill) = &refill {
+                        refill();
+                    }
+                });
+                row.add_suffix(&remove);
+                group.add(&row);
+                rows.borrow_mut().push(row);
+            }
+        })
+    };
+    *fill_cell.borrow_mut() = Rc::downgrade(&fill);
+    fill();
+    let state_add = Rc::downgrade(state_rc);
+    let dialog_add = dialog.clone();
+    add.connect_clicked(move |_| {
+        let Some(state_rc) = state_add.upgrade() else { return };
+        let taken = state_rc.borrow().config.gestures_paused.clone();
+        let (state_pick, fill) = (Rc::downgrade(&state_rc), Rc::clone(&fill));
+        crate::ui::app_picker::open_app_picker(&dialog_add, &taken, true, move |app| {
+            if let Some(state_rc) = state_pick.upgrade() {
+                crate::ui::main_window::set_gestures_paused(&state_rc, &app, true);
+            }
+            fill();
+        });
+    });
+    group
+}
+
 /// An action's row: its name and description, a button to export it, one to remove it if it's
 /// the user's own, and a switch to offer it or not.
 fn action_template_row(
@@ -905,6 +970,9 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
         gestures_list.add(&daemon_path_row(state_rc));
     }
     gestures_list.add(&hide_gestures_row(state_rc));
+
+    // --- Disable Gestures In ---
+    page.add(&paused_apps_group(state_rc, &dialog));
 
     if on_gnome {
         // --- Window Tiling ---
