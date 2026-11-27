@@ -36,6 +36,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The ready-made actions for selected files, like "Compress to ZIP", were offered for Files (Nautilus) but not for Nemo. They are now offered for any file manager.
 - Every error message in Gestos was titled "Failed to start Gestos daemon", whatever had gone wrong. Each now shows only its own message, and a button "Copy Message" copies it, to paste in a bug report.
 - Exporting an action or the configuration in Preferences showed an error on a system with no app to open text files, although the file was saved. It now says where the file was saved, with a button to copy its path.
 - On desktops that don't provide their own window for choosing files, the window that "Export…" and "Import…" in Settings open could close as soon as it opened.

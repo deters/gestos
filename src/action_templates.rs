@@ -385,13 +385,26 @@ impl ActionTemplate {
             .map(|need| need.package.as_str())
     }
 
-    /// Whether it's offered for an app, by the app's desktop file ID and categories.
+    /// Whether it's offered for an app, by the app's desktop file ID and categories, as
+    /// [`app_categories`] tells them.
     pub fn is_for(&self, app_id: &str, categories: &str) -> bool {
         let id = app_id.trim_end_matches(".desktop");
         self.apps.iter().any(|app| {
             app.trim_end_matches(".desktop").eq_ignore_ascii_case(id)
                 || categories.split(';').any(|category| !category.is_empty() && category == app)
         })
+    }
+}
+
+/// An app's categories as templates are offered by: those its desktop file lists, and FileManager
+/// for one that opens folders, as Nemo does without listing it.
+pub fn app_categories(categories: &str, mime_types: &[impl AsRef<str>]) -> String {
+    let opens_folders = mime_types.iter().any(|mime_type| mime_type.as_ref() == "inode/directory");
+    let listed = categories.split(';').any(|category| category == "FileManager");
+    if opens_folders && !listed {
+        format!("{};FileManager;", categories.trim_end_matches(';'))
+    } else {
+        categories.to_string()
     }
 }
 
@@ -494,6 +507,15 @@ steps:
         let mut for_one = template.clone();
         for_one.apps = vec!["org.gnome.Nautilus.desktop".into()];
         assert!(for_one.is_for("org.gnome.Nautilus", ""));
+    }
+
+    #[test]
+    fn an_app_that_opens_folders_is_a_file_manager() {
+        let template = parse(PDF).unwrap();
+        let nemo = app_categories("GNOME;GTK;Utility;Core;", &["inode/directory", "application/x-gnome-saved-search"]);
+        assert!(template.is_for("nemo", &nemo));
+        assert_eq!(app_categories("Utility;FileManager;", &["inode/directory"]), "Utility;FileManager;");
+        assert!(!template.is_for("org.gnome.TextEditor", &app_categories("Utility;TextEditor;", &["text/plain"])));
     }
 
     /// A folder of its own for a test, removed when it ends.

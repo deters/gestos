@@ -313,7 +313,10 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
     // First, the action templates for this app, by its ID or its kind, like a file manager's, as
     // they do more than one of its shortcuts.
     let categories = gtk::gio::DesktopAppInfo::new(&format!("{}.desktop", app.trim_end_matches(".desktop")))
-        .and_then(|info| info.categories().map(|categories| categories.to_string()))
+        .map(|info| {
+            let categories = info.categories().map(|categories| categories.to_string()).unwrap_or_default();
+            gestos::action_templates::app_categories(&categories, &info.supported_types())
+        })
         .unwrap_or_default();
     let templates: Vec<_> = state
         .app_templates
