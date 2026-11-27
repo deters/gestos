@@ -6,9 +6,8 @@ use gtk::gio;
 use gtk4 as gtk;
 use crate::extension::ExtensionStatus;
 
-// The size of app icons in the dialog that picks one, and in the list of gestures.
+// The size of app icons in the dialog that picks one.
 const ICON_SIZE: i32 = 32;
-const LIST_ICON_SIZE: i32 = 16;
 
 /// An installed app, by the desktop file ID gestures use for it, like `org.mozilla.firefox`.
 fn app_info(id: &str) -> Option<gio::DesktopAppInfo> {
@@ -165,20 +164,6 @@ pub fn open_app_picker(
     crate::ui::components::close_with_keys(&dialog);
     dialog.present();
     search.grab_focus();
-}
-
-/// Small icons for the apps a gesture works in, for the gesture list.
-pub fn app_icons(apps: &[String]) -> gtk::Box {
-    let icons = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    icons.set_valign(gtk::Align::Center);
-    for id in apps {
-        let icon = app_icon(id, LIST_ICON_SIZE);
-        let name = app_name(id);
-        icon.set_tooltip_text(Some(&name));
-        icon.update_property(&[gtk::accessible::Property::Label(&name)]);
-        icons.append(&icon);
-    }
-    icons
 }
 
 #[cfg(test)]

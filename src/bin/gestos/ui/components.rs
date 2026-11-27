@@ -544,8 +544,9 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     row
 }
 /// Ends an action's row with the gesture that triggers it, where a shortcut's keys would be: the
-/// keys to hold and the apps it's for, small, as they're part of what triggers it, then its
-/// drawing, as tall as the row, less a little, so it doesn't make the row taller.
+/// keys to hold, small, as they're part of what triggers it, then its drawing, as tall as the row,
+/// less a little, so it doesn't make the row taller. The apps it's for are the page's or the
+/// group's it's in.
 pub fn append_trigger(row_box: &gtk::Box, gesture: &Gesture) {
     let keys = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     keys.set_valign(gtk::Align::Center);
@@ -553,9 +554,6 @@ pub fn append_trigger(row_box: &gtk::Box, gesture: &Gesture) {
         let keycap = gtk::Label::new(Some(label));
         keycap.add_css_class("keycap-small");
         keys.append(&keycap);
-    }
-    if !gesture.apps.is_empty() {
-        keys.append(&crate::ui::app_picker::app_icons(&gesture.apps));
     }
     keys.set_visible(keys.first_child().is_some());
     row_box.append(&keys);
