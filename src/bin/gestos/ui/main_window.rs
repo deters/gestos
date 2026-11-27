@@ -501,7 +501,8 @@ fn app_row(app: &str, count: usize) -> gtk::ListBoxRow {
     row
 }
 
-/// One of an app's shortcuts: its name, and its keys as shortcuts' names write them.
+/// One of an app's shortcuts: its name, and its keys as shortcuts' names write them. Without an
+/// arrow, as it opens the editor, not another page.
 fn app_shortcut_row(shortcut: &gestos::app_shortcuts::AppShortcut) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -517,7 +518,6 @@ fn app_shortcut_row(shortcut: &gestos::app_shortcuts::AppShortcut) -> gtk::ListB
     let keys = gtk::Label::new(Some(&shortcut.keys.replace("Control", "Ctrl")));
     keys.add_css_class("dim-label");
     row_box.append(&keys);
-    row_box.append(&gtk::Image::from_icon_name("go-next-symbolic"));
     row.set_child(Some(&row_box));
     row
 }
@@ -868,8 +868,8 @@ fn suggestion_row(
         subtitle.set_wrap(true);
         text.append(&subtitle);
     }
+    // No arrow, as it opens the editor over the page, not another page.
     row_box.append(&text);
-    row_box.append(&gtk::Image::from_icon_name("go-next-symbolic"));
 
     row.set_child(Some(&row_box));
     row
