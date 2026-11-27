@@ -7,7 +7,6 @@ use std::cell::RefCell;
 use gestos::config::{ActionType, Gesture};
 use gestos::protractor::Point2D;
 use crate::state::AppState;
-use crate::ui::main_window::refresh_gesture_list;
 
 /// Escape and Ctrl+W close a dialog, as in GNOME's own apps.
 pub fn close_with_keys(window: &impl IsA<gtk::Window>) {
@@ -391,12 +390,6 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     main_hbox.set_margin_start(16);
     main_hbox.set_margin_end(16);
 
-    let drag_handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
-    drag_handle.add_css_class("drag-handle");
-    // Set here, as GTK's CSS has no cursor property. While dragging, the drag's own one shows.
-    drag_handle.set_cursor_from_name(Some("grab"));
-    drag_handle.set_valign(gtk::Align::Center);
-    main_hbox.append(&drag_handle);
 
     // A custom action or shortcut named by the user shows that name, even one with a standard
     // shortcut's keys. Others are named after their action, as "Advanced Action", followed by its
@@ -515,9 +508,9 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         } else {
             "No Action Configured".to_string()
         };
+        // As an action's row names it.
         let title_label = gtk::Label::new(Some(&action_desc));
         title_label.set_halign(gtk::Align::Start);
-        title_label.set_markup(&format!("<b>{}</b>", gtk::glib::markup_escape_text(&action_desc)));
         vbox.append(&title_label);
     }
 
@@ -544,8 +537,16 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         main_hbox.append(&warning);
     }
 
-    // 3. The drawing, as tall as the row, less a little, so it doesn't make the row taller, with the
-    // keys to hold and the apps it's for before it, small, as they're part of what triggers it.
+    // 3. What triggers it, as an action's shortcut would show.
+    append_trigger(&main_hbox, gesture);
+    row.set_child(Some(&main_hbox));
+
+    row
+}
+/// Ends an action's row with the gesture that triggers it, where a shortcut's keys would be: the
+/// keys to hold and the apps it's for, small, as they're part of what triggers it, then its
+/// drawing, as tall as the row, less a little, so it doesn't make the row taller.
+pub fn append_trigger(row_box: &gtk::Box, gesture: &Gesture) {
     let keys = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     keys.set_valign(gtk::Align::Center);
     for label in gesture.modifiers.shown_labels(&gestos::keyboards::modifier_names()) {
@@ -557,66 +558,21 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         keys.append(&crate::ui::app_picker::app_icons(&gesture.apps));
     }
     keys.set_visible(keys.first_child().is_some());
-    main_hbox.append(&keys);
+    row_box.append(&keys);
 
-    let preview_canvas = gtk::DrawingArea::new();
-    preview_canvas.set_content_width(80);
-    preview_canvas.set_margin_top(4);
-    preview_canvas.set_margin_bottom(4);
-    let pts_clone = gesture.points.clone();
-    preview_canvas.set_draw_func(move |canvas, cr, width, height| {
-        let fg = canvas.style_context().color();
+    let drawing = gtk::DrawingArea::new();
+    drawing.set_content_width(80);
+    drawing.set_margin_top(4);
+    drawing.set_margin_bottom(4);
+    let points = gesture.points.clone();
+    drawing.set_draw_func(move |drawing, cr, width, height| {
+        let fg = drawing.style_context().color();
         let ink = (f64::from(fg.red()), f64::from(fg.green()), f64::from(fg.blue()));
-        draw_gesture_path(cr, &pts_clone, width as f64, height as f64, Some(ink), true);
+        draw_gesture_path(cr, &points, width as f64, height as f64, Some(ink), true);
     });
-    main_hbox.append(&preview_canvas);
-    row.set_child(Some(&main_hbox));
-
-    // 4. Drag and Drop Controllers for reordering
-    let drag_source = gtk::DragSource::new();
-    drag_source.set_actions(gdk::DragAction::MOVE);
-    let id_str = gesture.id.clone();
-    drag_source.connect_prepare(move |_, _, _| {
-        let value = id_str.to_value();
-        let provider = gdk::ContentProvider::for_value(&value);
-        Some(provider)
-    });
-    let row_clone = row.clone();
-    drag_source.connect_drag_begin(move |source, _| {
-        let paintable = gtk::WidgetPaintable::new(Some(&row_clone));
-        source.set_icon(Some(&paintable), 0, 0);
-    });
-    drag_handle.add_controller(drag_source);
-
-    let drop_target = gtk::DropTarget::new(glib::Type::STRING, gdk::DragAction::MOVE);
-    let state_clone = Rc::clone(state_rc);
-    let target_id = gesture.id.clone();
-    drop_target.connect_drop(move |_, value, _, _| {
-        if let Ok(dragged_id) = value.get::<String>() {
-            if dragged_id != target_id {
-                let mut state = state_clone.borrow_mut();
-                let source_idx = state.config.gestures.iter().position(|g| g.id == dragged_id);
-                let dest_idx = state.config.gestures.iter().position(|g| g.id == target_id);
-                if let (Some(s_idx), Some(d_idx)) = (source_idx, dest_idx) {
-                    let item = state.config.gestures.remove(s_idx);
-                    let name_clone = item.name.clone();
-                    state.config.gestures.insert(d_idx, item);
-                    if let Err(e) = state.config.save_to_file() {
-                        println!("Failed to save config on reorder: {}", e);
-                    }
-                    let state_clone_inner = Rc::clone(&state_clone);
-                    glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
-                        refresh_gesture_list(&state_clone_inner, Some(&name_clone));
-                    });
-                }
-            }
-        }
-        true
-    });
-    row.add_controller(drop_target);
-
-    row
+    row_box.append(&drawing);
 }
+
 pub fn show_confirm_dialog<W: IsA<gtk::Window>, F: FnOnce() + 'static>(
     parent: &W,
     title: &str,

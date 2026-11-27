@@ -325,6 +325,24 @@ fn draw_new_gesture(
     keys: Option<String>,
     apps: Vec<String>,
 ) {
+    // An action has one gesture, in the same apps: one it has already opens instead.
+    let new_action = match (&action.action_type, keys.as_deref()) {
+        (ActionType::Keypress(_), Some(keys)) => ActionType::Keypress(keys.to_string()),
+        (action, _) => action.clone(),
+    };
+    let mut new_apps = apps.clone();
+    new_apps.sort();
+    let existing = state_rc.borrow().config.gestures.iter().find(|g| {
+        let mut its_apps = g.apps.clone();
+        its_apps.sort();
+        !g.is_deleted
+            && its_apps == new_apps
+            && g.actions.first().is_some_and(|its| crate::suggestions::same_action(its, &new_action))
+    }).cloned();
+    if let Some(gesture) = existing {
+        open_gesture_editor(state_rc, gesture);
+        return;
+    }
     let window = crate::ui::main_window::dialog_parent(&state_rc.borrow());
     // Named as the editor will name it: as the app names its shortcut, or after the action.
     let detail = keys.as_deref().unwrap_or_default();

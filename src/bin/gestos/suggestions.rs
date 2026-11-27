@@ -25,6 +25,18 @@ fn action_identity(action: &ActionType) -> Option<String> {
     }
 }
 
+/// Whether two actions are the same one, as an action has one gesture. A generic one, with nothing
+/// set yet, is none.
+pub fn same_action(a: &ActionType, b: &ActionType) -> bool {
+    action_identity(a).is_some_and(|identity| action_identity(b) == Some(identity))
+}
+
+/// Whether an action is an option's own: the same one, and not one only made with it, as a
+/// command is with Run Command in Shell.
+pub fn is_action_of(action: &ActionType, option: &EditorActionOption) -> bool {
+    same_action(action, &option.action_type)
+}
+
 fn is_in_use(option: &EditorActionOption, gestures: &[Gesture]) -> bool {
     // An app is offered as its own page, for more gestures in it, whether it's opened by one yet
     // or not.
@@ -420,6 +432,16 @@ fn kde_category(component: &str, shortcut: &str) -> Category {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_action_is_the_same_by_what_it_does_and_a_generic_one_is_none() {
+        let keys = |keys: &str| ActionType::Keypress(keys.to_string());
+        assert!(same_action(&keys("Control+C"), &keys("Control+C")));
+        assert!(!same_action(&keys("Control+C"), &keys("Control+V")));
+        assert!(!same_action(&keys(""), &keys("")));
+        assert!(!same_action(&ActionType::Keyboard(Vec::new()), &ActionType::Keyboard(Vec::new())));
+        assert!(same_action(&ActionType::Maximize, &ActionType::Maximize));
+    }
 
     #[test]
     fn actions_go_where_gnome_puts_its_own() {
