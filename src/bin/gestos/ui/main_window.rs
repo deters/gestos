@@ -546,8 +546,8 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
     let (apart, found) = arrange_suggestions(found, false, Some(category), &gestures_in);
 
     if category == Category::InsideApps {
-        // Every app, as each opens its own page, by name. Those with gestures made inside them
-        // come first, apart from the rest, with how many.
+        // Every app, as each opens its own page, by name, in one list, with how many gestures are
+        // made inside it.
         let mut apps: Vec<_> = state
             .action_options
             .iter()
@@ -555,13 +555,8 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
             .collect();
         apps.sort_by_cached_key(|(_, option)| option.name.to_lowercase());
         for (app, _) in apps {
-            let count = gestures_inside(&state, app).count();
-            let (list, shown) = match count {
-                0 => (&page.actions, &mut actions_shown),
-                _ => (&page.apart, &mut apart_shown),
-            };
-            list.append(&app_row(app, count));
-            shown.push(Entry::AppPage(app.to_string()));
+            page.actions.append(&app_row(app, gestures_inside(&state, app).count()));
+            actions_shown.push(Entry::AppPage(app.to_string()));
         }
     } else {
         let mut left = get_visible_gestures(&state, Some(category));

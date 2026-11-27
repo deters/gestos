@@ -10,7 +10,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New category "Actions inside Apps": lists every app, those with gestures first, each opening a page of what can be done inside it.
+- New category "Actions inside Apps": lists every app by name, each opening a page of what can be done inside it.
 - New row "Shortcuts in Apps" on the "Keyboard Shortcuts" page: opens the list of apps, where each app's page has its own shortcuts.
 
 ### Changed
