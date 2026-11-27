@@ -405,14 +405,14 @@ fn action_template_row(
             if response == gtk::ResponseType::Accept {
                 if let Some(to) = chooser.file().and_then(|file| file.path()) {
                     match std::fs::write(&to, &text) {
-                        Ok(()) => open_in_text_editor(&parent, &to),
+                        Ok(()) => open_in_text_editor(&parent, &to, "Action Exported"),
                         Err(e) => show_error_dialog(&parent, &format!("Couldn't export the action: {e}")),
                     }
                 }
             }
             chooser.destroy();
         });
-        chooser.show();
+        show_until_answered(chooser);
     });
     row.add_suffix(&export);
 
@@ -473,9 +473,11 @@ fn action_template_row(
     row
 }
 
-/// Opens a file in the default text editor: the app set to open plain text, whatever the file's
-/// own type, as a .yaml file often has no app of its own. Without one, it's said where the file is.
-fn open_in_text_editor(parent: &gtk::Window, path: &std::path::Path) {
+/// Opens a file just exported in the default text editor: the app set to open plain text,
+/// whatever the file's own type, as a .yaml file often has no app of its own. Without one, as on a
+/// system with no text editor, it's said where the file was saved, which is no error, as the
+/// export worked: `saved` is the dialog's heading, like "Action Exported".
+fn open_in_text_editor(parent: &gtk::Window, path: &std::path::Path, saved: &str) {
     // Started with this, so that it comes to the front, on Wayland too.
     let context = WidgetExt::display(parent).app_launch_context();
     let opened = match gio::AppInfo::default_for_type("text/plain", false) {
@@ -483,8 +485,27 @@ fn open_in_text_editor(parent: &gtk::Window, path: &std::path::Path) {
         None => Err("No app is set to open text files".to_string()),
     };
     if let Err(why) = opened {
-        show_error_dialog(parent, &format!("Couldn't open {} in a text editor: {why}", path.display()));
+        eprintln!("gestos: Couldn't open {} in a text editor: {why}", path.display());
+        let dialog = adw::MessageDialog::new(Some(parent), Some(saved), Some(&path.display().to_string()));
+        dialog.add_response("close", "Close");
+        dialog.add_response("copy", "Copy Path");
+        dialog.set_default_response(Some("close"));
+        dialog.set_close_response("close");
+        let copied = path.display().to_string();
+        dialog.connect_response(Some("copy"), move |dialog, _| dialog.clipboard().set_text(&copied));
+        dialog.present();
     }
+}
+
+/// Shows a file chooser and holds it until it's answered. GTK doesn't hold it: through the portal,
+/// the portal's request does, but GTK's own window, used without a portal, closes as soon as
+/// nothing holds the chooser.
+fn show_until_answered(chooser: gtk::FileChooserNative) {
+    let held = RefCell::new(Some(chooser.clone()));
+    chooser.connect_response(move |_, _| {
+        held.borrow_mut().take();
+    });
+    chooser.show();
 }
 
 /// Changes the user's own action templates in their configuration, and has the daemon and the
@@ -583,7 +604,245 @@ fn import_action_template(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window
             );
         }
     });
-    chooser.show();
+    show_until_answered(chooser);
+}
+
+/// The apps Gestos tells by their windows, which users see as apps like any other, each with a
+/// switch to list it with the apps or not, and a way to save it to a file. Imported ones are the
+/// user's own, and can be removed; one with the ID of one that came with Gestos takes its place.
+fn programs_page(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window) -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::builder()
+        .title("Apps")
+        .icon_name("view-app-grid-symbolic")
+        .build();
+    let group = adw::PreferencesGroup::builder()
+        .title("Apps")
+        .description("Apps that Gestos recognizes by their windows, such as games, so you can pause gestures in them or make gestures for them. Those you turn on are listed with your other apps.")
+        .build();
+    let import = gtk::Button::with_mnemonic("_Import…");
+    import.set_valign(gtk::Align::Center);
+    group.set_header_suffix(Some(&import));
+    page.add(&group);
+    let rows: Rc<RefCell<Vec<adw::ActionRow>>> = Rc::default();
+    let fill: Rc<dyn Fn()> = {
+        let state_rc = Rc::downgrade(state_rc);
+        let group = group.clone();
+        let dialog = dialog.clone();
+        let rows = Rc::clone(&rows);
+        // Filled again after each import or removal, as the list changes. Weak, as the rows it
+        // makes hold it, and the import button keeps it.
+        let fill_cell: Rc<RefCell<std::rc::Weak<dyn Fn()>>> = Rc::new(RefCell::new(std::rc::Weak::<Box<dyn Fn()>>::new()));
+        let fill_again = Rc::clone(&fill_cell);
+        let fill: Rc<dyn Fn()> = Rc::new(move || {
+            let Some(state_rc) = state_rc.upgrade() else { return };
+            for row in rows.borrow_mut().drain(..) {
+                group.remove(&row);
+            }
+            let refill = fill_again.borrow().upgrade();
+            for listed in gestos::programs::list() {
+                let row = program_row(&state_rc, &dialog, &listed, refill.clone());
+                group.add(&row);
+                rows.borrow_mut().push(row);
+            }
+        });
+        *fill_cell.borrow_mut() = Rc::downgrade(&fill);
+        fill
+    };
+    fill();
+    let state_import = Rc::downgrade(state_rc);
+    let dialog_import = dialog.clone();
+    import.connect_clicked(move |_| {
+        if let Some(state_rc) = state_import.upgrade() {
+            import_program(&state_rc, &dialog_import, Rc::clone(&fill));
+        }
+    });
+    page
+}
+
+/// Its row: its name and description, a button to export it, one to remove it if it's the user's
+/// own, and a switch to list it with the apps or not.
+fn program_row(
+    state_rc: &Rc<RefCell<AppState>>,
+    dialog: &gtk::Window,
+    listed: &gestos::programs::Listed,
+    refill: Option<Rc<dyn Fn()>>,
+) -> adw::ActionRow {
+    let program = &listed.program;
+    let row = adw::ActionRow::builder()
+        .title(glib::markup_escape_text(&program.name).as_str())
+        .subtitle(glib::markup_escape_text(&program.description).as_str())
+        .build();
+    row.add_prefix(&gtk::Image::from_icon_name(
+        program.icon.as_deref().unwrap_or("application-x-executable-symbolic"),
+    ));
+
+    let export = gtk::Button::from_icon_name("document-save-symbolic");
+    export.set_tooltip_text(Some("Export…"));
+    export.update_property(&[gtk::accessible::Property::Label("Export…")]);
+    export.add_css_class("flat");
+    export.set_valign(gtk::Align::Center);
+    let (text, id) = (listed.text.clone(), program.id.clone());
+    let dialog_export = dialog.clone();
+    export.connect_clicked(move |_| {
+        let chooser = gtk::FileChooserNative::new(
+            Some("Export App"),
+            Some(&dialog_export),
+            gtk::FileChooserAction::Save,
+            Some("_Export"),
+            Some("_Cancel"),
+        );
+        chooser.set_current_name(&format!("{id}.yaml"));
+        let text = text.clone();
+        let parent = dialog_export.clone();
+        chooser.connect_response(move |chooser, response| {
+            if response == gtk::ResponseType::Accept {
+                if let Some(to) = chooser.file().and_then(|file| file.path()) {
+                    match std::fs::write(&to, &text) {
+                        Ok(()) => open_in_text_editor(&parent, &to, "App Exported"),
+                        Err(e) => show_error_dialog(&parent, &format!("Couldn't export the app: {e}")),
+                    }
+                }
+            }
+            chooser.destroy();
+        });
+        show_until_answered(chooser);
+    });
+    row.add_suffix(&export);
+
+    if listed.own {
+        let remove = gtk::Button::from_icon_name("user-trash-symbolic");
+        remove.set_tooltip_text(Some("Remove"));
+        remove.update_property(&[gtk::accessible::Property::Label("Remove")]);
+        remove.add_css_class("flat");
+        remove.set_valign(gtk::Align::Center);
+        let (id, name, replaces) = (program.id.clone(), program.name.clone(), listed.replaces);
+        let state_remove = Rc::downgrade(state_rc);
+        let dialog_remove = dialog.clone();
+        remove.connect_clicked(move |_| {
+            let message = if replaces {
+                "The app that came with Gestos is offered again in its place, turned off."
+            } else {
+                "Gestures made for it stop working."
+            };
+            let (id, state_remove, parent, refill) =
+                (id.clone(), state_remove.clone(), dialog_remove.clone(), refill.clone());
+            show_confirm_dialog(&dialog_remove, &format!("Remove \u{201c}{name}\u{201d}?"), message, "Remove", true, move || {
+                let Some(state_rc) = state_remove.upgrade() else { return };
+                if change_programs(&state_rc, &parent, |own, on| {
+                    own.remove(&id);
+                    on.retain(|on| *on != id);
+                }) {
+                    if let Some(refill) = &refill {
+                        refill();
+                    }
+                }
+            });
+        });
+        row.add_suffix(&remove);
+    }
+
+    let switch = settings_switch(&program.name);
+    switch.set_active(listed.on);
+    let id = program.id.clone();
+    let state_switch = Rc::downgrade(state_rc);
+    let parent = dialog.clone();
+    switch.connect_state_set(move |_, on| {
+        let Some(state_rc) = state_switch.upgrade() else { return glib::Propagation::Proceed };
+        let changed = change_programs(&state_rc, &parent, |_, turned_on| {
+            turned_on.retain(|turned| *turned != id);
+            if on {
+                turned_on.push(id.clone());
+            }
+        });
+        if changed {
+            glib::Propagation::Proceed
+        } else {
+            glib::Propagation::Stop
+        }
+    });
+    row.add_suffix(&switch);
+    row.set_activatable_widget(Some(&switch));
+    row
+}
+
+/// Changes the user's own apps told by their windows, or which are on, in their configuration,
+/// and has the daemon and the list of apps follow. Whether it was saved; if not, it's said why, and nothing changed.
+fn change_programs(
+    state_rc: &Rc<RefCell<AppState>>,
+    parent: &gtk::Window,
+    change: impl FnOnce(&mut std::collections::BTreeMap<String, String>, &mut Vec<String>),
+) -> bool {
+    let mut state = state_rc.borrow_mut();
+    let before = (state.config.own_programs.clone(), state.config.programs_on.clone());
+    let config = &mut state.config;
+    change(&mut config.own_programs, &mut config.programs_on);
+    if let Err(e) = state.config.save_to_file() {
+        (state.config.own_programs, state.config.programs_on) = before;
+        drop(state);
+        show_error_dialog(parent, &format!("Couldn't save your apps: {e}"));
+        return false;
+    }
+    let conn = state.dbus_conn.clone();
+    drop(state);
+    reload_daemon(conn.as_ref(), Some(parent));
+    refresh_gesture_list(state_rc, None);
+    true
+}
+
+/// Asks for an app's file, and makes it the user's own, in their configuration, turned on. One of
+/// their own with the same ID is only replaced once they say so.
+fn import_program(state_rc: &Rc<RefCell<AppState>>, dialog: &gtk::Window, refill: Rc<dyn Fn()>) {
+    let chooser = gtk::FileChooserNative::new(
+        Some("Import App"),
+        Some(dialog),
+        gtk::FileChooserAction::Open,
+        Some("_Import"),
+        Some("_Cancel"),
+    );
+    let filter = gtk::FileFilter::new();
+    filter.set_name(Some("Apps"));
+    filter.add_pattern("*.yaml");
+    chooser.add_filter(&filter);
+    let state_import = Rc::downgrade(state_rc);
+    let parent = dialog.clone();
+    chooser.connect_response(move |chooser, response| {
+        let path = (response == gtk::ResponseType::Accept).then(|| chooser.file().and_then(|file| file.path())).flatten();
+        chooser.destroy();
+        let Some(path) = path else { return };
+        let (program, text) = match gestos::programs::read_to_import(&path) {
+            Ok(read) => read,
+            Err(why) => {
+                show_error_dialog(&parent, &format!("Couldn't import the app. {why}."));
+                return;
+            }
+        };
+        let Some(state_rc) = state_import.upgrade() else { return };
+        let replaces = state_rc.borrow().config.own_programs.contains_key(&program.id);
+        let (parent_import, refill, id) = (parent.clone(), Rc::clone(&refill), program.id.clone());
+        let import = move || {
+            if change_programs(&state_rc, &parent_import, |own, on| {
+                own.insert(id.clone(), text);
+                if !on.contains(&id) {
+                    on.push(id);
+                }
+            }) {
+                refill();
+            }
+        };
+        if replaces {
+            show_confirm_dialog(
+                &parent,
+                &format!("Import \u{201c}{}\u{201d}?", program.name),
+                "An app you imported before has the same ID. It's replaced by this one.",
+                "Replace",
+                true,
+                import,
+            );
+        } else {
+            import();
+        }
+    });
+    show_until_answered(chooser);
 }
 
 pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
@@ -603,6 +862,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
         .build();
     preferences.add(&page);
     preferences.add(&actions_page(state_rc, &dialog));
+    preferences.add(&programs_page(state_rc, &dialog));
 
     let on_gnome = state_rc.borrow().extension_status != ExtensionStatus::Unavailable;
     // The extension keeps its settings with it, so they can only be bound while it's installed.
@@ -726,7 +986,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
                             temp_cfg.save_to_file().map_err(|e| e.to_string())
                         };
                         match saved {
-                            Ok(()) => open_in_text_editor(&parent_err_clone, &path),
+                            Ok(()) => open_in_text_editor(&parent_err_clone, &path, "Configuration Exported"),
                             Err(e) => show_error_dialog(&parent_err_clone, &format!("Failed to export config: {}", e)),
                         }
                     }
@@ -734,7 +994,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
             }
             c.destroy();
         });
-        chooser.show();
+        show_until_answered(chooser);
     });
     export_box.append(&export_btn);
     config_list.add(&export_row);
@@ -828,7 +1088,7 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
             }
             c.destroy();
         });
-        chooser.show();
+        show_until_answered(chooser);
     });
     import_box.append(&import_btn);
     config_list.add(&import_row);
@@ -876,12 +1136,38 @@ pub fn open_settings_window(state_rc: &Rc<RefCell<AppState>>) {
     let troubleshooting_list = append_section(&page, "Troubleshooting");
     let (debug_row, debug_box, _) =
         settings_row("Debugging Information", "Details about your setup for a bug report");
-    let debug_btn = gtk::Button::with_mnemonic("_Create Report");
-    debug_btn.set_valign(gtk::Align::Center);
-    let debug_parent = dialog.clone();
-    debug_btn.connect_clicked(move |_| crate::debug_info::open(&debug_parent));
-    debug_box.append(&debug_btn);
+    let copy_btn = gtk::Button::with_mnemonic("_Copy");
+    copy_btn.set_valign(gtk::Align::Center);
+    copy_btn.connect_clicked(|button| {
+        crate::debug_info::copy(button);
+        // Said on the button for a moment, as copying shows nothing else.
+        button.set_label("Copied");
+        let button = button.downgrade();
+        glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
+            if let Some(button) = button.upgrade() {
+                button.set_label("_Copy");
+            }
+        });
+    });
+    debug_box.append(&copy_btn);
     troubleshooting_list.add(&debug_row);
+    let (report_row, report_box, _) =
+        settings_row("Report a Problem", "Open a new issue on GitHub, and paste the debugging information in it");
+    let report_btn = gtk::Button::with_mnemonic("_Open GitHub");
+    report_btn.set_valign(gtk::Align::Center);
+    let report_parent = dialog.clone();
+    report_btn.connect_clicked(move |_| {
+        let context = WidgetExt::display(&report_parent).app_launch_context();
+        let link = crate::debug_info::new_issue_link();
+        if let Err(e) = gio::AppInfo::launch_default_for_uri(&link, Some(&context)) {
+            show_error_dialog(
+                &report_parent,
+                &format!("Couldn't open your browser: {e}. To report a problem, open {} in a browser.", crate::debug_info::NEW_ISSUE),
+            );
+        }
+    });
+    report_box.append(&report_btn);
+    troubleshooting_list.add(&report_row);
 
     let about_btn = gtk::Button::with_label("About Gestos");
     about_btn.add_css_class("flat");

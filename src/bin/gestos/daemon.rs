@@ -3,7 +3,7 @@ use crate::system::{set_stopped_by_user, start_overlay_if_enabled, stop_overlay}
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
-use crate::ui::components::show_error_dialog;
+use crate::ui::components::show_error_dialog_titled;
 use gtk4 as gtk;
 
 pub fn is_daemon_running(conn: Option<&zbus::blocking::Connection>) -> bool {
@@ -299,7 +299,8 @@ pub fn reload_daemon<W: IsA<gtk::Window>>(
 
     if let Err(zbus::Error::FDO(ref fdo_err)) = reload_via_dbus() {
         if let Some(p) = parent {
-            show_error_dialog(p, &fdo_err.to_string());
+            // The message alone, like "Invalid configuration file format", doesn't say what failed.
+            show_error_dialog_titled(p, Some("Couldn't Reload Your Gestures"), &fdo_err.to_string());
         } else {
             eprintln!("gestos reload error: {}", fdo_err);
         }

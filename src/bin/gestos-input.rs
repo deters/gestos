@@ -123,6 +123,13 @@ mod service {
         }
     }
 
+    /// Whether a mouse button is held down on the device, as the kernel knows it.
+    fn mouse_button_held(dev: &Device) -> bool {
+        dev.get_key_state().is_ok_and(|keys| {
+            keys.iter().any(|key| (KeyCode::BTN_LEFT.0..=KeyCode::BTN_TASK.0).contains(&key.0))
+        })
+    }
+
     /// Grabs the device, waiting briefly for an instance that is exiting to release it.
     fn grab_device(dev: &mut Device) -> std::io::Result<()> {
         let mut attempt = 1;
@@ -312,6 +319,14 @@ mod service {
             }
         }
 
+        // Whether it was grabbed, so that it's grabbed again once Gestos stops standing aside.
+        let may_grab = grabbed;
+        // While the app in use is one where gestures are off, the button that draws doesn't, and
+        // the mouse isn't grabbed. Asked for changes wait until no mouse button is held, so that
+        // none is pressed through one device and released through the other.
+        let mut paused = false;
+        let mut pause_asked: Option<bool> = None;
+
         let mut modifiers = ModifierReader::default();
         modifiers.set_enabled(keyboards);
 
@@ -343,6 +358,26 @@ mod service {
         let mut wheel_frame = WheelDragStep::Nothing;
 
         loop {
+            match pause_asked {
+                Some(on) if on == paused => pause_asked = None,
+                Some(on) if !trigger_held && !wheel.is_held() && !holding_back_left && !mouse_button_held(&dev) => {
+                    pause_asked = None;
+                    paused = on;
+                    if on && grabbed {
+                        if let Err(e) = dev.ungrab() {
+                            eprintln!("gestos-input: Couldn't let go of the device: {e}");
+                        }
+                        grabbed = false;
+                        pending_frame.clear();
+                    } else if !on && may_grab && !grabbed {
+                        match grab_device(&mut dev) {
+                            Ok(()) => grabbed = true,
+                            Err(e) => eprintln!("gestos-input: Couldn't grab the device again: {e}"),
+                        }
+                    }
+                }
+                _ => {}
+            }
             if !outbox.flush() {
                 return Ok(());
             }
@@ -414,6 +449,7 @@ mod service {
                     Some(Request::SetKeyboards(enabled)) => modifiers.set_enabled(enabled),
                     Some(Request::SetChord(enabled)) => chord_enabled = enabled,
                     Some(Request::SetWheelDrag(enabled)) => wheel_drag_enabled = enabled,
+                    Some(Request::SetPaused(on)) => pause_asked = Some(on),
                     Some(Request::QueryHeld) => {
                         let held = if may_report_held(last_gesture, Instant::now()) {
                             modifiers.held()
@@ -441,6 +477,10 @@ mod service {
             };
 
             for ev in events {
+                // Apps get the mouse as they would without Gestos, which only reads it.
+                if paused {
+                    continue;
+                }
                 let ev_type = ev.event_type();
                 let ev_code = ev.code();
                 let ev_value = ev.value();

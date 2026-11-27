@@ -29,34 +29,56 @@ pub fn can_tell_without_extension() -> bool {
 /// The app of KWin's active window, by its desktop file ID. `None` means KWin couldn't be asked;
 /// `Some(None)` that no window is active, or its app isn't installed.
 pub fn kde_active_app() -> Option<Option<String>> {
-    let app = kwin::active_app().ok()?;
+    let (app, pid) = kwin::active_app().ok()?;
     if app.is_empty() {
         return Some(None);
     }
-    let apps = installed_apps();
     // KWin names a window by its desktop file, if it knows it, or else by its class.
-    let window = WindowIds { gtk_app_id: Some(app.clone()), classes: vec![app] };
-    Some(desktop_id_for(&window, &apps))
+    let window = WindowIds { gtk_app_id: Some(app.clone()), classes: vec![app], pid };
+    Some(app_for(&window))
+}
+
+/// The app GNOME's extension says is in use: its desktop file ID, or for a window no installed app
+/// has, its class, which may be a program's.
+pub fn gnome_app(reported: String) -> String {
+    let window = WindowIds { gtk_app_id: None, classes: vec![reported.clone()], pid: None };
+    crate::programs::matching(&window).unwrap_or(reported)
+}
+
+/// The app a window is, as gestures name it: a program turned on that it is, first, as the user
+/// chose that, or else the installed app it belongs to.
+fn app_for(window: &WindowIds) -> Option<String> {
+    crate::programs::matching(window).or_else(|| desktop_id_for(window, &installed_apps()))
 }
 
 /// The app of the active window on X11, by its desktop file ID. `None` means the X server
 /// couldn't be asked; `Some(None)` that no window is active, or its app isn't installed.
 pub fn x11_active_app() -> Option<Option<String>> {
     let window = x11::active_window().ok()?;
-    Some(window.and_then(|window| desktop_id_for(&window, &installed_apps())))
+    Some(window.and_then(|window| app_for(&window)))
+}
+
+/// Calls `changed` with the app of the active window on X11 when watching starts, and then each
+/// time another becomes active, in a thread of its own, for as long as the X server runs.
+pub fn watch_x11_active_app(changed: impl Fn(Option<String>) + Send + 'static) {
+    std::thread::spawn(move || {
+        if let Err(e) = x11::watch_active_window(&|| changed(x11_active_app().flatten())) {
+            eprintln!("gestos: Stopped watching the active window: {e}");
+        }
+    });
 }
 
 /// The app of Sway's focused window, from its tree as `swaymsg -t get_tree` prints it. `None` means
 /// the tree couldn't be read; `Some(None)` that no window has focus, or its app isn't installed.
 pub fn sway_active_app(tree: &str) -> Option<Option<String>> {
-    Some(sway_window(tree)?.and_then(|window| desktop_id_for(&window, &installed_apps())))
+    Some(sway_window(tree)?.and_then(|window| app_for(&window)))
 }
 
 fn sway_window(tree: &str) -> Option<Option<WindowIds>> {
     let tree: serde_json::Value = serde_json::from_str(tree).ok()?;
     Some(focused_sway_node(&tree).map(|node| {
         let properties = &node["window_properties"];
-        window_ids(node["app_id"].as_str(), &[&properties["instance"], &properties["class"]])
+        window_ids(node["app_id"].as_str(), &[&properties["instance"], &properties["class"]], &node["pid"])
     }))
 }
 
@@ -76,7 +98,7 @@ fn focused_sway_node(node: &serde_json::Value) -> Option<&serde_json::Value> {
 /// The app of Hyprland's active window, from `hyprctl activewindow -j`. `None` means it couldn't
 /// be read; `Some(None)` that no window is active, or its app isn't installed.
 pub fn hyprland_active_app(window: &str) -> Option<Option<String>> {
-    Some(hyprland_window(window)?.and_then(|window| desktop_id_for(&window, &installed_apps())))
+    Some(hyprland_window(window)?.and_then(|window| app_for(&window)))
 }
 
 fn hyprland_window(window: &str) -> Option<Option<WindowIds>> {
@@ -85,18 +107,19 @@ fn hyprland_window(window: &str) -> Option<Option<WindowIds>> {
         return window.trim().eq_ignore_ascii_case("invalid").then_some(None);
     };
     let class = window["class"].as_str().filter(|class| !class.is_empty());
-    Some(class.map(|class| window_ids(Some(class), &[&window["initialClass"]])))
+    Some(class.map(|class| window_ids(Some(class), &[&window["initialClass"]], &window["pid"])))
 }
 
 /// A Wayland window's app ID is its desktop file ID, as a GTK app's is, and its class as well.
-fn window_ids(app_id: Option<&str>, classes: &[&serde_json::Value]) -> WindowIds {
+fn window_ids(app_id: Option<&str>, classes: &[&serde_json::Value], pid: &serde_json::Value) -> WindowIds {
     let app_id = app_id.filter(|id| !id.is_empty()).map(str::to_string);
     let classes = app_id
         .iter()
         .cloned()
         .chain(classes.iter().filter_map(|class| class.as_str()).map(str::to_string))
         .collect();
-    WindowIds { gtk_app_id: app_id, classes }
+    let pid = pid.as_i64().and_then(|pid| i32::try_from(pid).ok()).filter(|pid| *pid > 0);
+    WindowIds { gtk_app_id: app_id, classes, pid }
 }
 
 /// What an X11 window says about the app it belongs to.
@@ -106,6 +129,8 @@ pub struct WindowIds {
     pub gtk_app_id: Option<String>,
     /// Its WM_CLASS: the instance, then the class.
     pub classes: Vec<String>,
+    /// Its process, as seen from outside any sandbox, if that's known.
+    pub pid: Option<i32>,
 }
 
 /// An installed app, as far as telling its windows goes.
@@ -186,7 +211,20 @@ mod x11 {
         };
         let gtk_app_id = text(window, atom("_GTK_APPLICATION_ID")?, atom("UTF8_STRING")?)?;
         let classes = text(window, AtomEnum::WM_CLASS.into(), AtomEnum::STRING.into())?;
+        // The X server's own answer first, as one in a sandbox, like a Flatpak's, numbers its
+        // process as the sandbox does.
+        let pid = server_pid(&conn, window).or_else(|| {
+            conn.get_property(false, window, atom("_NET_WM_PID").ok()?, AtomEnum::CARDINAL, 0, 1)
+                .ok()?
+                .reply()
+                .ok()?
+                .value32()?
+                .next()
+                .and_then(|pid| i32::try_from(pid).ok())
+                .filter(|pid| *pid > 0)
+        });
         Ok(Some(WindowIds {
+            pid,
             gtk_app_id: (!gtk_app_id.is_empty())
                 .then(|| String::from_utf8_lossy(&gtk_app_id).into_owned()),
             classes: classes
@@ -195,6 +233,35 @@ mod x11 {
                 .map(|class| String::from_utf8_lossy(class).into_owned())
                 .collect(),
         }))
+    }
+
+    /// Calls `changed` once, and then each time the root window says another window is active.
+    pub fn watch_active_window(changed: &dyn Fn()) -> Result<(), Error> {
+        use x11rb::protocol::xproto::{ChangeWindowAttributesAux, EventMask};
+        use x11rb::protocol::Event;
+        let (conn, screen) = x11rb::connect(None)?;
+        let root = conn.setup().roots[screen].root;
+        let active = conn.intern_atom(false, b"_NET_ACTIVE_WINDOW")?.reply()?.atom;
+        conn.change_window_attributes(root, &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE))?
+            .check()?;
+        changed();
+        loop {
+            if let Event::PropertyNotify(event) = conn.wait_for_event()? {
+                if event.atom == active {
+                    changed();
+                }
+            }
+        }
+    }
+
+    /// The process of the client that made a window, as the X server knows it from its
+    /// connection, where it has the X-Resource extension.
+    fn server_pid(conn: &impl Connection, window: Window) -> Option<i32> {
+        use x11rb::protocol::res::{ClientIdMask, ClientIdSpec, ConnectionExt as _};
+        let spec = ClientIdSpec { client: window, mask: ClientIdMask::LOCAL_CLIENT_PID };
+        let reply = conn.res_query_client_ids(&[spec]).ok()?.reply().ok()?;
+        let id = reply.ids.into_iter().find(|id| id.spec.mask.contains(ClientIdMask::LOCAL_CLIENT_PID))?;
+        id.value.first().and_then(|pid| i32::try_from(*pid).ok()).filter(|pid| *pid > 0)
     }
 }
 
@@ -223,18 +290,19 @@ pub(crate) mod kwin {
         }
     }
 
-    /// The script, which says the active window's desktop file, or its class, to this
-    /// connection. Plasma 6 calls windows what Plasma 5 called clients.
+    /// The script, which says the active window's desktop file, or its class, and on the next line
+    /// its process, to this connection. Plasma 6 calls windows what Plasma 5 called clients.
     fn script(reply_to: &str) -> String {
         format!(
             "const window = workspace.activeWindow || workspace.activeClient;\n\
              const app = window ? (window.desktopFileName || window.resourceClass || \"\") : \"\";\n\
-             callDBus(\"{reply_to}\", \"{REPORT_PATH}\", \"{REPORT_INTERFACE}\", \"Report\", String(app));\n"
+             const pid = window && window.pid > 0 ? window.pid : \"\";\n\
+             callDBus(\"{reply_to}\", \"{REPORT_PATH}\", \"{REPORT_INTERFACE}\", \"Report\", String(app) + \"\\n\" + pid);\n"
         )
     }
 
-    /// What KWin says the active window's app is, or an empty name for none.
-    pub fn active_app() -> Result<String, Error> {
+    /// What KWin says the active window's app is, or an empty name for none, and its process.
+    pub fn active_app() -> Result<(String, Option<i32>), Error> {
         let conn = zbus::blocking::Connection::session()?;
         let reply_to = conn.unique_name().ok_or("no name on the bus")?.to_string();
         let (sender, answers) = mpsc::channel();
@@ -244,7 +312,13 @@ pub(crate) mod kwin {
         let answer = load_script(&conn, &name, &script(&reply_to))
             .and_then(|_| Ok(answers.recv_timeout(ANSWER_TIMEOUT)?));
         unload_script(&conn, &name);
-        answer
+        Ok(parse_answer(&answer?))
+    }
+
+    /// The app and process the script says, on a line each.
+    fn parse_answer(answer: &str) -> (String, Option<i32>) {
+        let (app, pid) = answer.split_once('\n').unwrap_or((answer, ""));
+        (app.to_string(), pid.trim().parse().ok().filter(|pid| *pid > 0))
     }
 
     /// Runs a script in KWin, by a name of its own, until it's unloaded.
@@ -299,6 +373,14 @@ pub(crate) mod kwin {
             assert!(script.contains("callDBus(\":1.42\", \"/io/github/deters/Gestos/ActiveApp\""));
             assert!(script.contains("workspace.activeWindow || workspace.activeClient"));
         }
+
+        #[test]
+        fn the_answer_is_the_app_then_its_process() {
+            assert_eq!(super::parse_answer("org.kde.dolphin\n4242"), ("org.kde.dolphin".to_string(), Some(4242)));
+            assert_eq!(super::parse_answer("steam_app_5\n"), ("steam_app_5".to_string(), None));
+            assert_eq!(super::parse_answer("\n"), (String::new(), None));
+            assert_eq!(super::parse_answer("old"), ("old".to_string(), None));
+        }
     }
 }
 
@@ -318,6 +400,7 @@ mod tests {
         WindowIds {
             gtk_app_id: gtk_app_id.map(str::to_string),
             classes: classes.iter().map(|class| class.to_string()).collect(),
+            pid: None,
         }
     }
 
@@ -372,5 +455,15 @@ mod tests {
         assert_eq!(hyprland_window("{}"), Some(None));
         assert_eq!(hyprland_window("Invalid\n"), Some(None));
         assert_eq!(hyprland_window("HYPRLAND_INSTANCE_SIGNATURE not set"), None);
+    }
+
+    #[test]
+    fn sway_and_hyprland_say_a_windows_process() {
+        let game = r#"{"class": "steam_app_5", "initialClass": "steam_app_5", "pid": 4242}"#;
+        assert_eq!(hyprland_window(game).flatten().and_then(|window| window.pid), Some(4242));
+        let unknown = r#"{"class": "foot", "pid": -1}"#;
+        assert_eq!(hyprland_window(unknown).flatten().and_then(|window| window.pid), None);
+        let tree = r#"{"type": "con", "focused": true, "app_id": "foot", "pid": 77}"#;
+        assert_eq!(sway_window(tree).flatten().and_then(|window| window.pid), Some(77));
     }
 }

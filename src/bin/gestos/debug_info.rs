@@ -6,7 +6,6 @@ use crate::extension;
 use adw::prelude::*;
 use gestos::config::{ActionType, Configuration};
 use gestos::key_steps::KeyStep;
-use gtk4::gio;
 use gtk4::glib;
 use std::fmt::Write;
 use std::path::Path;
@@ -39,6 +38,17 @@ pub fn report() -> String {
         "Start when logging in",
         yes_no(crate::system::get_autostart_file_path().is_some_and(|path| path.exists())),
     );
+
+    // gestosd runs a listener for each mouse when there are several, started by the one that
+    // manages them, so which is which is seen by their parents and devices.
+    section(&mut out, "Processes");
+    let processes = gestos_processes();
+    if processes.is_empty() {
+        line(&mut out, "Running", "none");
+    }
+    for process in &processes {
+        line(&mut out, &process.name, &describe_process(process));
+    }
 
     section(&mut out, "System");
     line(&mut out, "Distribution", &os_name());
@@ -251,6 +261,31 @@ fn device_access(path: &str) -> String {
     }
 }
 
+/// Gestos's own processes, for every user, as the input service has a user of its own: the app,
+/// the daemon and its listeners, and the input service. Oldest first.
+fn gestos_processes() -> Vec<gestos::processes::Process> {
+    let mut found: Vec<_> = gestos::processes::running()
+        .into_iter()
+        .filter(|process| matches!(process.name.as_str(), "gestos" | "gestosd" | "gestos-input"))
+        .collect();
+    found.sort_by_key(|process| process.pid);
+    found
+}
+
+/// Its ID, its parent's, the user it runs as unless it's this one, and its command line.
+fn describe_process(process: &gestos::processes::Process) -> String {
+    let user = if process.is_own() {
+        String::new()
+    } else {
+        let name = nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(process.uid))
+            .ok()
+            .flatten()
+            .map_or_else(|| process.uid.to_string(), |user| user.name);
+        format!(", user {name}")
+    };
+    format!("pid {}, parent {}{user}: {}", process.pid, process.ppid, process.args.join(" "))
+}
+
 /// The input devices the kernel lists as mice.
 fn mice() -> Vec<String> {
     read_trimmed("/proc/bus/input/devices")
@@ -341,44 +376,19 @@ fn log(out: &mut String, matches: &[&str], lines: usize, filter: Option<&str>) {
     }
 }
 
-/// Writes the report to a file and opens it in the user's text editor, to read or attach.
-pub fn open(parent: &impl IsA<gtk4::Window>) {
-    let path = glib::user_cache_dir().join("gestos").join("gestos-debug.txt");
-    let text = report();
-    let written = path
-        .parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|_| std::fs::write(&path, &text));
-    if let Err(e) = written {
-        crate::ui::components::show_error_dialog(
-            parent,
-            &format!("Could not save the debugging information: {e}"),
-        );
-        return;
-    }
-    let opened = gio::AppInfo::launch_default_for_uri(
-        &gio::File::for_path(&path).uri(),
-        gio::AppLaunchContext::NONE,
-    );
-    // With no app for text files, as on a bare system, say where it is and let it be copied.
-    if opened.is_err() {
-        show_saved(parent, &path, text);
-    }
+/// Where problems are reported: a new issue in Gestos's repository.
+pub const NEW_ISSUE: &str = "https://github.com/deters/gestos/issues/new";
+
+/// What a new issue starts with, which says where the report copied in Settings goes, as it's too
+/// long for the link.
+const ISSUE_TEMPLATE: &str = "**What happened**\n\n\n**What you expected**\n\n\n**Debugging information**\n\n<details>\n\n```\nPaste the debugging information here: \"Copy\" in Gestos's Settings copies it.\n```\n\n</details>\n";
+
+/// The link that opens a new issue with the template filled in.
+pub fn new_issue_link() -> String {
+    format!("{NEW_ISSUE}?body={}", glib::Uri::escape_string(ISSUE_TEMPLATE, None, false))
 }
 
-fn show_saved(parent: &impl IsA<gtk4::Window>, path: &Path, text: String) {
-    let dialog = adw::MessageDialog::new(
-        Some(parent),
-        Some("Report Saved"),
-        Some(&path.display().to_string()),
-    );
-    dialog.add_response("close", "Close");
-    dialog.add_response("copy", "Copy Report");
-    dialog.set_response_appearance("copy", adw::ResponseAppearance::Suggested);
-    dialog.set_default_response(Some("copy"));
-    dialog.set_close_response("close");
-    dialog.connect_response(Some("copy"), move |dialog, _| {
-        dialog.clipboard().set_text(&text);
-    });
-    dialog.present();
+/// Copies the report, to paste in a new issue.
+pub fn copy(widget: &impl IsA<gtk4::Widget>) {
+    widget.clipboard().set_text(&report());
 }

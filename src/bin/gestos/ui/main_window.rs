@@ -77,7 +77,7 @@ impl PageHeading {
         area.set_margin_top(12);
         area.set_margin_bottom(18);
         area.set_halign(gtk::Align::Center);
-        let icon = gtk::Image::from_icon_name(category.icon_name());
+        let icon = category.icon();
         icon.set_pixel_size(64);
         icon.add_css_class("dim-label");
         area.append(&icon);
@@ -260,6 +260,36 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
     title.set_justify(gtk::Justification::Center);
     heading.append(&title);
     page.content.append(&heading);
+    let list_of = |row: &gtk::ListBoxRow| {
+        let list = gtk::ListBox::new();
+        list.add_css_class("boxed-list");
+        list.set_selection_mode(gtk::SelectionMode::None);
+        list.append(row);
+        list
+    };
+
+    // While gestures are paused in the app, an exception, a notice says so, with a way to resume
+    // them, and nothing else is shown. Where the desktop says when the app in use changes, the
+    // button is left to the app before it's pressed. Elsewhere, only the gesture drawn isn't run.
+    if state.config.gestures_paused.iter().any(|other| other == app) {
+        let what_it_does = if gestos::active_app::is_x11_session() {
+            format!("{name} gets the mouse button you draw with, as it would without Gestos.")
+        } else {
+            "Gestures you draw in it don't run.".to_string()
+        };
+        let resume = gtk::Button::with_mnemonic("_Resume");
+        let state_resume = Rc::downgrade(state_rc);
+        let app_resume = app.to_string();
+        resume.connect_clicked(move |_| {
+            if let Some(state_rc) = state_resume.upgrade() {
+                set_gestures_paused(&state_rc, &app_resume, false);
+            }
+        });
+        let notice = list_of(&titled_row(&format!("Gestures are automatically paused in {name}"), &what_it_does, &resume));
+        page.content.append(&notice);
+        return;
+    }
+
     // A list's rows and what each opens, made together.
     struct Rows(Vec<Entry>, Vec<gtk::ListBoxRow>);
     let gesture_rows = |rows: &mut Rows, gestures: &[Gesture]| {
@@ -365,15 +395,38 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
     if !rows.0.is_empty() {
         page.content.append(&entry_list(state_rc, rows.0, rows.1));
     }
+
+    // Last, as pausing gestures in an app is an exception, for apps that use the button
+    // themselves, like games.
+    let switch = gtk::Switch::new();
+    switch.update_property(&[gtk::accessible::Property::Label(&format!("Pause Gestures in {name}"))]);
+    let state_switch = Rc::downgrade(state_rc);
+    let app_switch = app.to_string();
+    switch.connect_state_set(move |_, on| {
+        if let Some(state_rc) = state_switch.upgrade() {
+            set_gestures_paused(&state_rc, &app_switch, on);
+        }
+        glib::Propagation::Proceed
+    });
+    let pause = list_of(&titled_row(
+        "Pause Gestures",
+        "For apps that use the mouse button you draw with themselves, such as games",
+        &switch,
+    ));
+    pause.set_margin_bottom(24);
+    page.content.append(&pause);
 }
 
 /// An app, which opens its own page, with how many gestures are made for it, if any.
-fn app_row(app: &str, count: usize) -> gtk::ListBoxRow {
-    app_row_named(app, &crate::ui::app_picker::app_name(app), count)
+fn app_row(state: &AppState, app: &str) -> gtk::ListBoxRow {
+    app_row_named(state, app, &crate::ui::app_picker::app_name(app))
 }
 
-/// An app's row under a name of its own, where the page it's on doesn't say what it leads to.
-fn app_row_named(app: &str, title: &str, count: usize) -> gtk::ListBoxRow {
+/// An app's row under a name of its own, where the page it's on doesn't say what it leads to, with
+/// how many gestures are made inside it, or that they're paused there.
+fn app_row_named(state: &AppState, app: &str, title: &str) -> gtk::ListBoxRow {
+    let count = gestures_inside(state, app).count();
+    let paused = state.config.gestures_paused.iter().any(|other| other == app);
     let row = gtk::ListBoxRow::new();
     let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row_box.set_margin_start(16);
@@ -386,11 +439,92 @@ fn app_row_named(app: &str, title: &str, count: usize) -> gtk::ListBoxRow {
     name.set_hexpand(true);
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
     row_box.append(&name);
-    let count_label = gtk::Label::new(Some(&count.to_string()));
+    // Where gestures are paused, that's what matters about it, rather than how many it has.
+    let count_label = gtk::Label::new(Some(&if paused { "Paused".to_string() } else { count.to_string() }));
     count_label.add_css_class("dim-label");
-    count_label.set_visible(count > 0);
+    count_label.set_visible(paused || count > 0);
     row_box.append(&count_label);
     row_box.append(&gtk::Image::from_icon_name("go-next-symbolic"));
+    row.set_child(Some(&row_box));
+    row
+}
+
+/// The apps Gestos tells by their windows that are listed among the apps: those turned on, and
+/// those with gestures made inside them, so that turning one off doesn't hide its gestures.
+fn apps_told_by_windows(state: &AppState) -> Vec<gestos::programs::Program> {
+    gestos::programs::list()
+        .into_iter()
+        .filter(|listed| listed.on || gestures_inside(state, &listed.program.app_id()).count() > 0)
+        .map(|listed| listed.program)
+        .collect()
+}
+
+/// Every app that gestures can be made inside, as gestures name it, with its name: the installed
+/// ones and those Gestos tells by their windows, by name.
+fn apps_to_be_inside(state: &AppState) -> Vec<(String, String)> {
+    let mut apps: Vec<(String, String)> = state
+        .action_options
+        .iter()
+        .filter_map(|option| crate::ui::app_picker::opened_app(&option.action_type))
+        .map(|app| (app.to_string(), crate::ui::app_picker::app_name(app)))
+        .chain(apps_told_by_windows(state).into_iter().map(|program| (program.app_id(), program.name)))
+        .collect();
+    apps.sort_by_cached_key(|(_, name)| name.to_lowercase());
+    apps
+}
+
+/// Pauses or resumes gestures in an app, and has the daemon and the pages follow. If it can't be
+/// saved, it's said why, and nothing changes.
+fn set_gestures_paused(state_rc: &Rc<RefCell<AppState>>, app: &str, paused: bool) {
+    // Busy only while a page is refreshed to show what's saved, which already is this.
+    let Ok(mut state) = state_rc.try_borrow_mut() else { return };
+    if state.config.gestures_paused.iter().any(|other| other == app) == paused {
+        return;
+    }
+    let before = state.config.gestures_paused.clone();
+    state.config.gestures_paused.retain(|other| other != app);
+    if paused {
+        state.config.gestures_paused.push(app.to_string());
+    }
+    let parent = dialog_parent(&state);
+    if let Err(e) = state.config.save_to_file() {
+        state.config.gestures_paused = before;
+        drop(state);
+        crate::ui::components::show_error_dialog(&parent, &format!("Couldn't save the change: {e}"));
+        refresh_gesture_list(state_rc, None);
+        return;
+    }
+    let conn = state.dbus_conn.clone();
+    drop(state);
+    crate::daemon::reload_daemon(conn.as_ref(), Some(&parent));
+    refresh_gesture_list(state_rc, None);
+}
+
+/// A row with a title and a smaller, dimmer line under it, and a widget at its end.
+fn titled_row(title: &str, subtitle: &str, suffix: &impl IsA<gtk::Widget>) -> gtk::ListBoxRow {
+    let row = gtk::ListBoxRow::new();
+    row.set_activatable(false);
+    let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row_box.set_margin_start(16);
+    row_box.set_margin_end(16);
+    row_box.set_margin_top(12);
+    row_box.set_margin_bottom(12);
+    let texts = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    texts.set_hexpand(true);
+    texts.set_valign(gtk::Align::Center);
+    let title = gtk::Label::new(Some(title));
+    title.set_xalign(0.0);
+    title.set_wrap(true);
+    texts.append(&title);
+    let subtitle = gtk::Label::new(Some(subtitle));
+    subtitle.set_xalign(0.0);
+    subtitle.set_wrap(true);
+    subtitle.add_css_class("dim-label");
+    subtitle.add_css_class("caption");
+    texts.append(&subtitle);
+    row_box.append(&texts);
+    suffix.set_valign(gtk::Align::Center);
+    row_box.append(suffix);
     row.set_child(Some(&row_box));
     row
 }
@@ -551,17 +685,11 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
     let (apart, found) = arrange_suggestions(found, false, Some(category), &gestures_in);
 
     if category == Category::InsideApps {
-        // Every app, as each opens its own page, by name, in one list, with how many gestures are
-        // made inside it.
-        let mut apps: Vec<_> = state
-            .action_options
-            .iter()
-            .filter_map(|option| crate::ui::app_picker::opened_app(&option.action_type).map(|app| (app, option)))
-            .collect();
-        apps.sort_by_cached_key(|(_, option)| option.name.to_lowercase());
-        for (app, _) in apps {
-            page.actions.append(&app_row(app, gestures_inside(&state, app).count()));
-            actions_shown.push(Entry::AppPage(app.to_string()));
+        // Every app, those Gestos tells by their windows among them, as each opens its own page,
+        // by name, in one list, with how many gestures are made inside it.
+        for (app, _) in apps_to_be_inside(&state) {
+            page.actions.append(&app_row(&state, &app));
+            actions_shown.push(Entry::AppPage(app));
         }
     } else {
         let mut left = get_visible_gestures(&state, Some(category));
@@ -604,7 +732,7 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
                     actions_shown.push(Entry::Category(*category));
                 }
                 Suggestion::App(app) => {
-                    page.actions.append(&app_row(app, gestures_inside(&state, app).count()));
+                    page.actions.append(&app_row(&state, app));
                     actions_shown.push(Entry::AppPage(app.clone()));
                 }
             }
@@ -632,7 +760,7 @@ fn category_row_named(category: Category, title: &str, count: usize) -> gtk::Lis
     row_box.set_margin_end(16);
     row_box.set_margin_top(12);
     row_box.set_margin_bottom(12);
-    row_box.append(&gtk::Image::from_icon_name(category.icon_name()));
+    row_box.append(&category.icon());
     let name = gtk::Label::new(Some(title));
     name.set_xalign(0.0);
     name.set_hexpand(true);
@@ -846,20 +974,18 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
     // An app searched for by its name leads to what's done inside it, after opening it, if that's
     // still offered, or first.
     if searching {
-        let apps = state
-            .action_options
-            .iter()
-            .filter_map(|option| crate::ui::app_picker::opened_app(&option.action_type))
+        let apps = apps_to_be_inside(&state)
+            .into_iter()
             // By a word of its name starting with what's searched, so that a letter or two don't
             // bring every app.
-            .filter(|app| {
-                let name = crate::ui::app_picker::app_name(app).to_lowercase();
+            .filter(|(_, name)| {
+                let name = name.to_lowercase();
                 let first = query.trim().to_lowercase();
                 let first = first.split_whitespace().next().unwrap_or_default().to_string();
                 search_matches(&name, &query)
                     && name.split(|c: char| !c.is_alphanumeric()).any(|word| word.starts_with(&first))
             })
-            .map(str::to_string)
+            .map(|(app, _)| app)
             .collect::<Vec<_>>();
         for (index, app) in apps.into_iter().enumerate() {
             let opens = found.iter().position(|suggestion| {
@@ -881,7 +1007,7 @@ fn refresh_suggestions(state_rc: &Rc<RefCell<AppState>>, no_gestures_shown: bool
             Suggestion::Category(category, count) => category_row(*category, *count),
             Suggestion::App(app) => {
                 let title = format!("Actions inside {}", crate::ui::app_picker::app_name(app));
-                app_row_named(app, &title, gestures_inside(&state, app).count())
+                app_row_named(&state, app, &title)
             }
         };
         state.suggestion_list.append(&row);

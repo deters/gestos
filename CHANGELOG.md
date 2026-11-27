@@ -13,6 +13,10 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - New category "Actions inside Apps": lists every app by name, each opening a page of what can be done inside it.
 - Searching for an app on the main page now also offers "Actions inside" and its name, like "Actions inside Files", which opens that app's page.
 - New row "Shortcuts in Apps" on the "Keyboard Shortcuts" page: opens the list of apps, where each app's page has its own shortcuts.
+- New option "Report a Problem" in Settings, under "Troubleshooting". Its button "Open GitHub" opens a new issue for Gestos in your browser, where you can paste the debugging information.
+- "Debugging Information" in Settings now lists the Gestos processes that are running, each with the process that started it and its command line. When Gestos runs one process per mouse, this shows which mouse each one reads.
+- New page "Apps" in Preferences, for apps that Gestos recognizes by their windows, such as games, which aren't in the list of installed apps. Gestos comes with "Steam Games" and "Windows Programs", turned off. One you turn on is listed in "Actions inside Apps" with your other apps, where you can pause gestures in it or make gestures that only work in it. These apps can be exported to a file and imported, like actions. On GNOME, "Steam Games" only recognizes the Windows games that Steam runs with Proton. (GNOME, KDE, Sway, Hyprland, X11)
+- New option "Pause Gestures" at the end of each app's page in "Actions inside Apps". Gestures are then paused automatically whenever that app is in use. On X11, the app gets the mouse button you draw with, as it would without Gestos. On other desktops, gestures drawn in the app don't run, but drawing still takes the button. Apps where gestures are paused are marked "Paused", and their page shows only "Resume". (GNOME, KDE, Sway, Hyprland, X11)
 
 ### Changed
 
@@ -23,11 +27,19 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The main page and its search now group gestures by category, like "Windows" or "Keyboard Shortcuts". Gestures that open an app are under "Apps". Those that work inside an app are under "Actions inside Apps", with the app's name after the action's, like "New Tab · Ptyxis".
 - Gesture rows are now as tall as the other rows. Their icons and keys are smaller, and the gesture is drawn in the text color, without a dark box behind it.
 - Actions without a gesture now end in an ellipsis, like "Copy…", in place of an arrow. Only rows that open another page, like an app or a category, have an arrow.
+- "Debugging Information" in Settings now copies the report with the button "Copy", to paste in an issue. Before, "Create Report" saved it to a file and opened it in a text editor.
 - The install script now also removes an older copy of Gestos installed from the source in `/usr/local`, which ran in place of the one it installed, and lists the files it removed.
 
 ### Removed
 
 - Gestures can no longer be reordered by dragging them. The order never changed which gesture is recognized.
+
+### Fixed
+
+- Every error message in Gestos was titled "Failed to start Gestos daemon", whatever had gone wrong. Each now shows only its own message, and a button "Copy Message" copies it, to paste in a bug report.
+- Exporting an action or the configuration in Preferences showed an error on a system with no app to open text files, although the file was saved. It now says where the file was saved, with a button to copy its path.
+- On desktops that don't provide their own window for choosing files, the window that "Export…" and "Import…" in Settings open could close as soon as it opened.
+- The category "Navigation" showed a broken icon when the icon theme didn't have its icon. Other categories whose icon could be missing in the same way now also show another one instead.
 
 ## [9.1.3] - 2026-11-21
 

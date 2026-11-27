@@ -19,11 +19,16 @@ pub fn app_name(id: &str) -> String {
     gestos::key_steps::app_name(id)
 }
 
-/// The app's icon at a size, or a generic one for an app that isn't installed.
+/// The app's icon at a size, or a generic one for an app that isn't installed. A program's is
+/// its own, or a generic one, from the icon theme.
 pub fn app_icon(id: &str, size: i32) -> gtk::Image {
-    let image = match app_info(id).and_then(|info| info.icon()) {
-        Some(icon) => gtk::Image::from_gicon(&icon),
-        None => gtk::Image::from_icon_name("application-x-executable"),
+    let image = if let Some(program) = gestos::programs::find(id) {
+        gtk::Image::from_icon_name(program.icon.as_deref().unwrap_or("application-x-executable-symbolic"))
+    } else {
+        match app_info(id).and_then(|info| info.icon()) {
+            Some(icon) => gtk::Image::from_gicon(&icon),
+            None => gtk::Image::from_icon_name("application-x-executable"),
+        }
     };
     image.set_pixel_size(size);
     image
@@ -51,9 +56,16 @@ pub fn opened_app(action: &gestos::config::ActionType) -> Option<&str> {
     }
 }
 
-/// The installed apps that show in the app grid, by name, as their IDs.
+/// The programs turned on, then the installed apps that show in the app grid, each by name, as
+/// gestures name them.
 fn installed_apps() -> Vec<String> {
-    gestos::key_steps::installed_apps().into_iter().map(|(_, id)| id).collect()
+    let mut programs = gestos::programs::turned_on();
+    programs.sort_by_key(|program| program.name.to_lowercase());
+    programs
+        .iter()
+        .map(gestos::programs::Program::app_id)
+        .chain(gestos::key_steps::installed_apps().into_iter().map(|(_, id)| id))
+        .collect()
 }
 
 /// What keeps a gesture limited to some apps from running, if anything. The daemon knows the app

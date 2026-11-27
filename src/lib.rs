@@ -22,6 +22,7 @@ pub mod lookup;
 pub mod modifiers;
 pub mod panel;
 pub mod processes;
+pub mod programs;
 pub mod protractor;
 #[cfg(target_os = "linux")]
 pub mod shell_syntax;
