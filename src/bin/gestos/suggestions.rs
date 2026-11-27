@@ -243,9 +243,9 @@ pub fn arrange_suggestions(
 
 /// The category a gesture is in: the one its action is offered in.
 pub fn gesture_category(gesture: &Gesture, options: &[EditorActionOption]) -> Option<Category> {
-    // A gesture for an app is that app's, whatever it does, and is in its window among the apps.
+    // A gesture for an app is that app's, whatever it does, and is on its page.
     if !gesture.apps.is_empty() && !gesture.actions.is_empty() {
-        return Some(Category::Apps);
+        return Some(Category::InsideApps);
     }
     action_category(gesture, options)
 }
@@ -289,8 +289,10 @@ pub const FEWEST_TO_CATEGORIZE: usize = 20;
 /// list its shortcuts, and Gestos's for the apps and the shortcuts apps share.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Category {
-    // First, with the shortcuts apps share, as using apps is what gestures are most for.
+    // First, with the shortcuts apps share, as using apps is what gestures are most for: opening
+    // them, then what's done inside them.
     Apps,
+    InsideApps,
     KeyboardShortcuts,
     Windows,
     Navigation,
@@ -315,6 +317,7 @@ impl Category {
             Category::SoundAndMedia => "Sound and Media",
             Category::Launchers => "Launchers",
             Category::Apps => "Apps",
+            Category::InsideApps => "Actions inside Apps",
             Category::KeyboardShortcuts => "Keyboard Shortcuts",
             Category::System => "System",
             Category::Accessibility => "Accessibility",
@@ -333,6 +336,7 @@ impl Category {
             Category::SoundAndMedia => "audio-volume-high-symbolic",
             Category::Launchers => "system-run-symbolic",
             Category::Apps => "view-app-grid-symbolic",
+            Category::InsideApps => "window-symbolic",
             Category::KeyboardShortcuts => "input-keyboard-symbolic",
             Category::System => "emblem-system-symbolic",
             Category::Accessibility => "preferences-desktop-accessibility-symbolic",
@@ -588,10 +592,10 @@ mod tests {
         let mut copy = gesture(ActionType::Keypress("Control+C".into()));
         assert_eq!(gesture_category(&copy, &options), Some(Category::KeyboardShortcuts));
         copy.apps = vec!["org.gnome.Calculator".into()];
-        assert_eq!(gesture_category(&copy, &options), Some(Category::Apps));
+        assert_eq!(gesture_category(&copy, &options), Some(Category::InsideApps));
         let mut close = gesture(ActionType::Kill);
         close.apps = vec!["org.mozilla.firefox".into()];
-        assert_eq!(gesture_category(&close, &options), Some(Category::Apps));
+        assert_eq!(gesture_category(&close, &options), Some(Category::InsideApps));
     }
 
     #[test]

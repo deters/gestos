@@ -380,7 +380,9 @@ pub fn get_action_human_readable(action: &ActionType) -> String {
         ActionType::ToggleMiddleClickPaste => "Toggle Middle Click Paste".to_string(),
     }
 }
-pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -> gtk::ListBoxRow {
+/// A gesture's row: its action, as an action's row shows it, with the gesture's drawing at its end.
+/// With `show_apps`, where it isn't on its app's page, the apps it works in follow its name.
+pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>, show_apps: bool) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     row.add_css_class("gesture-row");
 
@@ -467,7 +469,7 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
     vbox.set_margin_top(12);
     vbox.set_margin_bottom(12);
 
-    if let Some(keys) = has_keypress {
+    let line = if let Some(keys) = has_keypress {
         let row_hbox = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         row_hbox.set_halign(gtk::Align::Start);
         row_hbox.set_valign(gtk::Align::Center);
@@ -494,7 +496,7 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
             none_label.set_valign(gtk::Align::Center);
             row_hbox.append(&none_label);
         }
-        vbox.append(&row_hbox);
+        row_hbox
     } else {
         let action_desc = if named {
             gesture.name.clone()
@@ -511,8 +513,17 @@ pub fn create_gesture_row(gesture: &Gesture, state_rc: &Rc<RefCell<AppState>>) -
         // As an action's row names it.
         let title_label = gtk::Label::new(Some(&action_desc));
         title_label.set_halign(gtk::Align::Start);
-        vbox.append(&title_label);
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        line.append(&title_label);
+        line
+    };
+    if show_apps && !gesture.apps.is_empty() {
+        let apps = gtk::Label::new(Some(&format!("\u{b7} {}", crate::ui::app_picker::apps_named(&gesture.apps))));
+        apps.add_css_class("dim-label");
+        apps.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        line.append(&apps);
     }
+    vbox.append(&line);
 
     main_hbox.append(&vbox);
 

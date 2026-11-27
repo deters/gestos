@@ -10,6 +10,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- New category "Actions inside Apps": lists the apps you made gestures inside, each opening its page. The "Apps" category now only counts the gestures that open an app.
 - New row "Shortcuts in Apps" on the "Keyboard Shortcuts" page: opens the list of apps, where each app's page has its own shortcuts.
 
 ### Changed
@@ -18,7 +19,7 @@ and Gestos follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An app's page now has two groups: "Open" with the action that opens the app, and "Inside" with what works in the app.
 - Starting a gesture for an action that already has one, in the same apps, now opens that gesture.
 - Gesture rows no longer show the icons of the apps they work in.
-- The main page and its search now group gestures by category, like "Windows" or "Keyboard Shortcuts". Gestures that open an app are under "Apps", and those that work inside an app are under its name, like "Apps > Files".
+- The main page and its search now group gestures by category, like "Windows" or "Keyboard Shortcuts". Gestures that open an app are under "Apps". Those that work inside an app are under "Actions inside Apps", with the app's name after the action's, like "New Tab · Ptyxis".
 - Gesture rows are now as tall as the other rows. Their icons and keys are smaller, and the gesture is drawn in the text color, without a dark box behind it.
 - Actions without a gesture now end in an ellipsis, like "Copy…", in place of an arrow. Only rows that open another page, like an app or a category, have an arrow.
 - The install script now also removes an older copy of Gestos installed from the source in `/usr/local`, which ran in place of the one it installed, and lists the files it removed.

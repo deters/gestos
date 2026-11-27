@@ -279,7 +279,7 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
     struct Rows(Vec<Entry>, Vec<gtk::ListBoxRow>);
     let gesture_rows = |rows: &mut Rows, gestures: &[Gesture]| {
         for gesture in gestures {
-            let row = create_gesture_row(gesture, state_rc);
+            let row = create_gesture_row(gesture, state_rc, false);
             if select_name == Some(gesture.name.as_str()) {
                 let row = row.clone();
                 glib::idle_add_local_once(move || {
@@ -542,7 +542,7 @@ fn add_gesture_row(
     gesture: &Gesture,
     select_name: Option<&str>,
 ) {
-    let row = create_gesture_row(gesture, state_rc);
+    let row = create_gesture_row(gesture, state_rc, false);
     list.append(&row);
     entries.push(Entry::Gesture(gesture.id.clone()));
     if select_name == Some(gesture.name.as_str()) {
@@ -578,7 +578,28 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
     let gestures_in = gestures_by_category(&state.config.gestures, &state.action_options);
     let (apart, found) = arrange_suggestions(found, false, Some(category), &gestures_in);
 
-    if category == Category::Apps {
+    if category == Category::InsideApps {
+        // The apps with gestures made inside them, by name, each opening its page, with how many.
+        let mut apps: Vec<_> = state
+            .action_options
+            .iter()
+            .filter_map(|option| crate::ui::app_picker::opened_app(&option.action_type).map(|app| (app, option)))
+            .filter(|(app, _)| {
+                state.config.gestures.iter().any(|g| !g.is_deleted && g.apps.iter().any(|its| its == app))
+            })
+            .collect();
+        apps.sort_by_cached_key(|(_, option)| option.name.to_lowercase());
+        for (app, option) in apps {
+            let count = state
+                .config
+                .gestures
+                .iter()
+                .filter(|g| !g.is_deleted && g.apps.iter().any(|its| its == app))
+                .count();
+            page.actions.append(&app_row(app, count));
+            actions_shown.push(Entry::Action(option.clone()));
+        }
+    } else if category == Category::Apps {
         // Every app, as each opens its own page, by name. Those with gestures come first, apart
         // from the rest.
         let mut apps: Vec<_> = state
@@ -937,7 +958,7 @@ pub fn show_new_gesture(state_rc: &Rc<RefCell<AppState>>, name: &str) {
         let category = gesture.and_then(|g| gesture_category(g, &state.action_options));
         // An app's gesture is on that app's page, with how to open it.
         let app = gesture
-            .filter(|_| category == Some(Category::Apps))
+            .filter(|_| matches!(category, Some(Category::Apps | Category::InsideApps)))
             .and_then(|g| match g.apps.as_slice() {
                 [app] => Some(app.clone()),
                 _ => g.actions.first().and_then(crate::ui::app_picker::first_app).map(str::to_string),
@@ -968,47 +989,26 @@ pub fn refresh_gesture_list(state_rc: &Rc<RefCell<AppState>>, select_name: Optio
 
 /// Shows the gestures that match the search. The one named, such as the one just saved, gets the
 /// focus, so that the keyboard carries on from it.
-/// Gestures by the category of what they do, in the categories' order, and those that work only
-/// inside some apps by those apps, after the ones that open apps, or None when they're all in the
-/// same group, which needs no grouping.
-fn by_category(state: &AppState, gestures: &[Gesture]) -> Option<Vec<(String, Vec<Gesture>)>> {
-    let mut groups: Vec<((Category, String), Vec<Gesture>)> = Vec::new();
+/// Gestures by the category of what they do, in the categories' order, those that work only inside
+/// some apps in theirs, or None when they're all in the same one, which needs no grouping.
+fn by_category(state: &AppState, gestures: &[Gesture]) -> Option<Vec<(Category, Vec<Gesture>)>> {
+    let mut groups: Vec<(Category, Vec<Gesture>)> = Vec::new();
     for gesture in gestures {
-        let key = if gesture.apps.is_empty() {
-            (action_category(gesture, &state.action_options).unwrap_or(Category::Other), String::new())
+        let category = if gesture.apps.is_empty() {
+            action_category(gesture, &state.action_options).unwrap_or(Category::Other)
         } else {
-            let mut apps = gesture.apps.clone();
-            apps.sort();
-            (Category::Apps, apps_named(&apps))
+            Category::InsideApps
         };
-        match groups.iter_mut().find(|(other, _)| *other == key) {
+        match groups.iter_mut().find(|(other, _)| *other == category) {
             Some((_, in_it)) => in_it.push(gesture.clone()),
-            None => groups.push((key, vec![gesture.clone()])),
+            None => groups.push((category, vec![gesture.clone()])),
         }
     }
     if groups.len() < 2 {
         return None;
     }
-    groups.sort_by_cached_key(|((category, apps), _)| (*category, apps.to_lowercase()));
-    let heading = |(category, apps): (Category, String)| {
-        if apps.is_empty() {
-            category.name().to_string()
-        } else {
-            format!("{} > {apps}", category.name())
-        }
-    };
-    Some(groups.into_iter().map(|(key, gestures)| (heading(key), gestures)).collect())
-}
-
-/// The apps' names, as a heading says them: "Files", "Files and Ptyxis", "Files, Ptyxis and Text
-/// Editor".
-fn apps_named(apps: &[String]) -> String {
-    let names: Vec<String> = apps.iter().map(|app| crate::ui::app_picker::app_name(app)).collect();
-    match names.split_last() {
-        Some((last, [])) => last.clone(),
-        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
-        None => String::new(),
-    }
+    groups.sort_by_key(|(category, _)| *category);
+    Some(groups)
 }
 
 fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) -> bool {
@@ -1040,8 +1040,8 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
     } else if let Some(groups) = by_category(&state, &visible) {
         state.empty_state_box.set_visible(false);
         state.main_list.set_visible(false);
-        for (heading, gestures) in groups {
-            let heading = gtk::Label::new(Some(&heading));
+        for (category, gestures) in groups {
+            let heading = gtk::Label::new(Some(category.name()));
             heading.add_css_class("section-header");
             heading.set_xalign(0.0);
             state.gesture_groups.append(&heading);
@@ -1050,7 +1050,7 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
             list.set_selection_mode(gtk::SelectionMode::None);
             list.set_margin_bottom(24);
             for gesture in &gestures {
-                let row = create_gesture_row(gesture, state_rc);
+                let row = create_gesture_row(gesture, state_rc, true);
                 list.append(&row);
                 if select_name == Some(gesture.name.as_str()) {
                     focused = row.grab_focus();
@@ -1075,7 +1075,7 @@ fn show_gestures(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>) ->
         state.main_list.set_visible(true);
 
         for gesture in &visible {
-            let row = create_gesture_row(gesture, state_rc);
+            let row = create_gesture_row(gesture, state_rc, true);
             state.main_list.append(&row);
 
             if select_name == Some(gesture.name.as_str()) {

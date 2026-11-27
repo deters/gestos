@@ -166,6 +166,17 @@ pub fn open_app_picker(
     search.grab_focus();
 }
 
+/// The apps' names, as text says them: "Files", "Files and Ptyxis", "Files, Ptyxis and Text
+/// Editor".
+pub fn apps_named(apps: &[String]) -> String {
+    let names: Vec<String> = apps.iter().map(|app| app_name(app)).collect();
+    match names.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        None => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
