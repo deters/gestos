@@ -672,6 +672,10 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
         apart = with_gestures;
         found = without.into_iter().map(Suggestion::Action).collect();
     }
+    // The apps' own shortcuts are on their pages, which the Apps page leads to.
+    if category == Category::KeyboardShortcuts {
+        found.push(Suggestion::Category(Category::Apps, 0));
+    }
     for option in &apart {
         let row = match crate::ui::app_picker::opened_app(&option.action_type) {
             Some(app) => app_row(app, gestures_for_app(&state, app)),
@@ -690,6 +694,7 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
                 Some(app) => app_row(app, gestures_for_app(&state, app)),
                 None => suggestion_row(option, &state.extension_status, ""),
             },
+            Suggestion::Category(Category::Apps, _) => category_row_named(Category::Apps, "Shortcuts in Apps", 0),
             Suggestion::Category(category, count) => category_row(*category, *count),
         };
         page.actions.append(&row);
@@ -704,6 +709,11 @@ fn refresh_category_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&
 
 /// A category, with how many gestures there are in it, if any, which opens its page.
 fn category_row(category: Category, count: usize) -> gtk::ListBoxRow {
+    category_row_named(category, category.name(), count)
+}
+
+/// A category's row under a name of its own, where the page it's on says what it leads to.
+fn category_row_named(category: Category, title: &str, count: usize) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row_box.set_margin_start(16);
@@ -711,7 +721,7 @@ fn category_row(category: Category, count: usize) -> gtk::ListBoxRow {
     row_box.set_margin_top(12);
     row_box.set_margin_bottom(12);
     row_box.append(&gtk::Image::from_icon_name(category.icon_name()));
-    let name = gtk::Label::new(Some(category.name()));
+    let name = gtk::Label::new(Some(title));
     name.set_xalign(0.0);
     name.set_hexpand(true);
     row_box.append(&name);
