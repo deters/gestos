@@ -510,7 +510,7 @@ fn app_shortcut_row(shortcut: &gestos::app_shortcuts::AppShortcut) -> gtk::ListB
     row_box.set_margin_end(16);
     row_box.set_margin_top(12);
     row_box.set_margin_bottom(12);
-    let title = gtk::Label::new(Some(&shortcut.title));
+    let title = gtk::Label::new(Some(&opens_editor(&shortcut.title)));
     title.set_xalign(0.0);
     title.set_hexpand(true);
     title.set_wrap(true);
@@ -818,6 +818,16 @@ fn update_extension(state_rc: &Rc<RefCell<AppState>>) {
     }
 }
 
+/// A row's label for opening the editor, which asks for the gesture before anything is made: with an
+/// ellipsis, as GNOME's labels have for asking more first.
+fn opens_editor(label: &str) -> String {
+    if label.ends_with('…') {
+        label.to_string()
+    } else {
+        format!("{label}…")
+    }
+}
+
 fn suggestion_row(
     option: &crate::state::EditorActionOption,
     status: &crate::extension::ExtensionStatus,
@@ -856,7 +866,7 @@ fn suggestion_row(
         }
         _ => None,
     };
-    let name = gtk::Label::new(Some(title.as_deref().unwrap_or(&option.name)));
+    let name = gtk::Label::new(Some(&opens_editor(title.as_deref().unwrap_or(&option.name))));
     name.set_xalign(0.0);
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
     text.append(&name);
