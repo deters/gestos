@@ -270,7 +270,6 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
 
     // While gestures are paused in the app, an exception, a notice says so, with a way to resume
     // them, and nothing else is shown.
-    let while_focused = format!("All gestures are disabled while {name} is in focus");
     if state.config.gestures_paused.iter().any(|other| other == app) {
         let resume = gtk::Button::with_mnemonic("_Resume");
         let state_resume = Rc::downgrade(state_rc);
@@ -280,6 +279,7 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
                 set_gestures_paused(&state_rc, &app_resume, false);
             }
         });
+        let while_focused = format!("All gestures are disabled while {name} is in focus");
         let notice = list_of(&titled_row("Gestures Paused", &while_focused, &resume));
         page.content.append(&notice);
         return;
@@ -406,7 +406,9 @@ fn refresh_app_page(state_rc: &Rc<RefCell<AppState>>, select_name: Option<&str>)
         }
         glib::Propagation::Proceed
     });
-    let pause = list_of(&titled_row("Pause Gestures", &while_focused, &switch));
+    // Said as what turning it on does, as it's off here.
+    let when_on = format!("All gestures will be disabled while {name} is in focus");
+    let pause = list_of(&titled_row("Pause Gestures", &when_on, &switch));
     pause.set_margin_bottom(24);
     page.content.append(&pause);
 }
